@@ -39,8 +39,12 @@ function createWindow(): void {
 
 // ── IPC Handlers ──────────────────────────────────────────
 
-ipcMain.handle('terminal:create', (_event, { id, cwd }) => {
-  terminalManager.create(id, cwd)
+ipcMain.handle('terminal:create', (_event, { id, label, cwd }) => {
+  terminalManager.create(id, label, cwd)
+})
+
+ipcMain.handle('terminal:status', (_event, { id }) => {
+  return terminalManager.getStatus(id)
 })
 
 ipcMain.handle('terminal:write', (_event, { id, data }) => {
@@ -66,6 +70,10 @@ terminalManager.on('data', (id: string, data: string) => {
 
 terminalManager.on('exit', (id: string, exitCode: number) => {
   mainWindow?.webContents.send('terminal:exit', { id, exitCode })
+})
+
+terminalManager.on('status', (id: string, info: { status: string; cwd: string; foregroundProcess: string }) => {
+  mainWindow?.webContents.send('terminal:status', { id, ...info })
 })
 
 // ── App Lifecycle ─────────────────────────────────────────

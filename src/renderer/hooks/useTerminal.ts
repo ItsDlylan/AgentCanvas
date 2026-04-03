@@ -6,7 +6,9 @@ import { WebglAddon } from '@xterm/addon-webgl'
 
 interface UseTerminalOptions {
   sessionId: string
+  label: string
   onReady?: () => void
+  onExit?: (sessionId: string) => void
 }
 
 /**
@@ -15,7 +17,7 @@ interface UseTerminalOptions {
  * Mounts xterm into the provided ref, subscribes to PTY output,
  * and forwards user input back to the main process.
  */
-export function useTerminal({ sessionId, onReady }: UseTerminalOptions) {
+export function useTerminal({ sessionId, label, onReady, onExit }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -92,8 +94,17 @@ export function useTerminal({ sessionId, onReady }: UseTerminalOptions) {
     terminalRef.current = term
     fitAddonRef.current = fitAddon
 
+    // macOS-native key bindings: Cmd+Backspace → kill line (Ctrl+U)
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.metaKey && event.key === 'Backspace' && event.type === 'keydown') {
+        window.terminal.write(sessionId, '\x15') // Ctrl+U: kill from cursor to start of line
+        return false
+      }
+      return true
+    })
+
     // Create PTY session in main process
-    window.terminal.create(sessionId)
+    window.terminal.create(sessionId, label)
 
     // Forward user input to PTY
     term.onData((data) => {
@@ -105,9 +116,9 @@ export function useTerminal({ sessionId, onReady }: UseTerminalOptions) {
       if (id === sessionId) term.write(data)
     })
 
-    const unsubExit = window.terminal.onExit((id, exitCode) => {
+    const unsubExit = window.terminal.onExit((id) => {
       if (id === sessionId) {
-        term.writeln(`\r\n\x1b[90m[Process exited with code ${exitCode}]\x1b[0m`)
+        onExit?.(sessionId)
       }
     })
 

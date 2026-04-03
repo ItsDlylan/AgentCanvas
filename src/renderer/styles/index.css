@@ -58,6 +58,11 @@
   height: 100%;
 }
 
+/* Keep default cursor on the canvas pane — no pointer */
+.react-flow__pane {
+  cursor: default !important;
+}
+
 /* Selection box */
 .react-flow__selection {
   background: rgba(59, 130, 246, 0.08) !important;
