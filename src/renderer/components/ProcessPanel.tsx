@@ -58,7 +58,7 @@ function ProcessPanelComponent({
 
       {/* Panel */}
       <div
-        className="absolute right-0 top-0 z-10 flex h-full flex-col border-l border-zinc-800 bg-zinc-900/95 backdrop-blur-sm transition-transform"
+        className="absolute right-0 top-0 z-10 flex h-full flex-col border-l border-zinc-800 bg-zinc-900"
         style={{
           width: 256,
           transform: open ? 'translateX(0)' : 'translateX(100%)'

@@ -22,7 +22,10 @@ function createWindow(): void {
     }
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('ready-to-show', () => {
+    mainWindow?.show()
+    if (is.dev) mainWindow?.webContents.openDevTools({ mode: 'detach' })
+  })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     shell.openExternal(details.url)
@@ -61,6 +64,52 @@ ipcMain.handle('terminal:kill', (_event, { id }) => {
 
 ipcMain.handle('terminal:list', () => {
   return terminalManager.listSessions()
+})
+
+// Debug: execute JS in the renderer and return result
+ipcMain.handle('debug:eval', async (_event, code: string) => {
+  return mainWindow?.webContents.executeJavaScript(code)
+})
+
+// Debug: capture performance profile
+ipcMain.handle('debug:profile', async (_event, durationMs: number) => {
+  const wc = mainWindow?.webContents
+  if (!wc) return null
+
+  // Start frame monitoring
+  const result = await wc.executeJavaScript(`
+    new Promise(resolve => {
+      const frames = [];
+      let lastTime = performance.now();
+      let renderCount = 0;
+
+      // Monitor frames
+      function onFrame(ts) {
+        const delta = ts - lastTime;
+        frames.push(delta);
+        lastTime = ts;
+        if (frames.length < ${Math.ceil(durationMs / 16)}) {
+          requestAnimationFrame(onFrame);
+        } else {
+          const avg = frames.reduce((a, b) => a + b, 0) / frames.length;
+          const max = Math.max(...frames);
+          const jank = frames.filter(f => f > 33).length;
+          resolve({
+            frameCount: frames.length,
+            avgFrameMs: Math.round(avg * 100) / 100,
+            maxFrameMs: Math.round(max * 100) / 100,
+            jankFrames: jank,
+            fps: Math.round(1000 / avg),
+            nodeCount: document.querySelectorAll('.react-flow__node').length,
+            webglContexts: document.querySelectorAll('canvas').length,
+            domNodeCount: document.querySelectorAll('*').length
+          });
+        }
+      }
+      requestAnimationFrame(onFrame);
+    })
+  `)
+  return result
 })
 
 // Forward PTY output to renderer

@@ -1,10 +1,9 @@
-import { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
-  MiniMap,
   useNodesState,
   useEdgesState,
   useReactFlow,
@@ -18,6 +17,7 @@ import { v4 as uuid } from 'uuid'
 import { TerminalTile } from './TerminalTile'
 import { ProcessPanel } from './ProcessPanel'
 import { OffscreenIndicators } from './OffscreenIndicators'
+import { FocusedTerminalContext } from '@/hooks/useFocusedTerminal'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal']
@@ -65,7 +65,6 @@ export default function Canvas() {
     [nodes, setCenter]
   )
 
-  // Clear focus when clicking on empty canvas
   const onPaneClick = useCallback(() => {
     setFocusedId(null)
   }, [])
@@ -84,24 +83,20 @@ export default function Canvas() {
         position: pos,
         data: {
           sessionId,
-          label: `Terminal ${tileCount}`,
-          onKill: killTerminal,
-          onFocus: setFocusedId,
-          focusedId
+          label: `Terminal ${tileCount}`
         },
         dragHandle: '.terminal-tile-header'
       }
       setNodes((nds) => [...nds, newNode])
       setFocusedId(sessionId)
     },
-    [setNodes, killTerminal, focusedId]
+    [setNodes]
   )
 
   const addTerminal = useCallback(() => addTerminalAt(), [addTerminalAt])
 
   const onDoubleClick = useCallback(
     (event: React.MouseEvent) => {
-      // Only spawn on empty canvas — ignore double-clicks inside nodes
       const target = event.target as HTMLElement
       if (target.closest('.react-flow__node')) return
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
@@ -110,93 +105,81 @@ export default function Canvas() {
     [screenToFlowPosition, addTerminalAt]
   )
 
-  // Keep focusedId in sync on all nodes
-  const nodesWithFocus = useMemo(
-    () =>
-      nodes.map((n) => ({
-        ...n,
-        data: {
-          ...n.data,
-          onKill: killTerminal,
-          onFocus: setFocusedId,
-          focusedId
-        }
-      })),
-    [nodes, focusedId, killTerminal]
+  const focusCtx = useMemo(
+    () => ({ focusedId, setFocusedId, killTerminal }),
+    [focusedId, killTerminal]
   )
 
   const proOptions = useMemo(() => ({ hideAttribution: true }), [])
+  const togglePanel = useCallback(() => setPanelOpen((o) => !o), [])
 
   return (
-    <div className="flex h-screen w-screen flex-col">
-      {/* Toolbar */}
-      <div className="titlebar-drag flex h-12 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4">
-        <div className="flex items-center gap-3 pl-20">
-          <span className="text-sm font-semibold text-zinc-300">Agent Canvas</span>
+    <FocusedTerminalContext.Provider value={focusCtx}>
+      <div className="flex h-screen w-screen flex-col">
+        {/* Toolbar */}
+        <div className="titlebar-drag flex h-12 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4">
+          <div className="flex items-center gap-3 pl-20">
+            <span className="text-sm font-semibold text-zinc-300">Agent Canvas</span>
+          </div>
+          <div className="titlebar-no-drag flex items-center gap-2">
+            <button
+              onClick={addTerminal}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
+            >
+              + Terminal
+            </button>
+          </div>
         </div>
-        <div className="titlebar-no-drag flex items-center gap-2">
-          <button
-            onClick={addTerminal}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
+
+        {/* Canvas + Panel */}
+        <div className="relative flex-1 overflow-hidden">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onPaneClick={onPaneClick}
+            onDoubleClick={onDoubleClick}
+            nodeTypes={nodeTypes}
+            defaultViewport={defaultViewport}
+            proOptions={proOptions}
+            minZoom={0.2}
+            maxZoom={1.5}
+            fitView={false}
+            selectNodesOnDrag={false}
+            panOnScroll
+            panOnDrag={[1, 2]}
+            zoomOnPinch
+            zoomOnDoubleClick={false}
+            selectionOnDrag
+            deleteKeyCode="Delete"
+            className="bg-zinc-950"
           >
-            + Terminal
-          </button>
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#27272a" />
+            <Controls
+              showInteractive={false}
+              className="!rounded-lg !border-zinc-700 !bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!bg-zinc-800 [&>button]:!fill-zinc-400 [&>button:hover]:!bg-zinc-700"
+            />
+          </ReactFlow>
+
+          <OffscreenIndicators
+            nodes={nodes}
+            focusedId={focusedId}
+            onFocus={focusTerminal}
+          />
+
+          <ProcessPanel
+            nodes={nodes}
+            focusedId={focusedId}
+            onFocus={focusTerminal}
+            onKill={killTerminal}
+            onAdd={addTerminal}
+            open={panelOpen}
+            onToggle={togglePanel}
+          />
         </div>
       </div>
-
-      {/* Canvas + Panel */}
-      <div className="relative flex-1 overflow-hidden">
-        <ReactFlow
-          nodes={nodesWithFocus}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onPaneClick={onPaneClick}
-          onDoubleClick={onDoubleClick}
-          nodeTypes={nodeTypes}
-          defaultViewport={defaultViewport}
-          proOptions={proOptions}
-          minZoom={0.2}
-          maxZoom={1.5}
-          fitView={false}
-          selectNodesOnDrag={false}
-          panOnScroll
-          panOnDrag={[1, 2]}
-          zoomOnPinch
-          zoomOnDoubleClick={false}
-          selectionOnDrag
-          deleteKeyCode="Delete"
-          className="bg-zinc-950"
-        >
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#27272a" />
-          <Controls
-            showInteractive={false}
-            className="!rounded-lg !border-zinc-700 !bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!bg-zinc-800 [&>button]:!fill-zinc-400 [&>button:hover]:!bg-zinc-700"
-          />
-          <MiniMap
-            nodeColor="#3b82f6"
-            maskColor="rgba(0,0,0,0.7)"
-            className="!rounded-lg !border-zinc-700 !bg-zinc-900"
-          />
-        </ReactFlow>
-
-        <OffscreenIndicators
-          nodes={nodes}
-          focusedId={focusedId}
-          onFocus={focusTerminal}
-        />
-
-        <ProcessPanel
-          nodes={nodes}
-          focusedId={focusedId}
-          onFocus={focusTerminal}
-          onKill={killTerminal}
-          onAdd={addTerminal}
-          open={panelOpen}
-          onToggle={() => setPanelOpen((o) => !o)}
-        />
-      </div>
-    </div>
+    </FocusedTerminalContext.Provider>
   )
 }

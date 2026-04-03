@@ -57,3 +57,9 @@ const terminalAPI: TerminalAPI = {
 }
 
 contextBridge.exposeInMainWorld('terminal', terminalAPI)
+
+// Debug APIs
+contextBridge.exposeInMainWorld('debug', {
+  profile: (durationMs = 3000) => ipcRenderer.invoke('debug:profile', durationMs),
+  eval: (code: string) => ipcRenderer.invoke('debug:eval', code)
+})

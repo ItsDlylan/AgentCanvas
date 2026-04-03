@@ -1,6 +1,18 @@
 @import 'tailwindcss';
 @import '@xterm/xterm/css/xterm.css';
 
+/*
+ * CRITICAL: Tailwind v4 applies transition: all to everything by default.
+ * This causes the compositor to recalculate transitions on every element
+ * inside React Flow nodes during pan/zoom transforms → massive lag.
+ * Kill it inside the canvas viewport.
+ */
+.react-flow__viewport *,
+.react-flow__viewport *::before,
+.react-flow__viewport *::after {
+  transition: none !important;
+}
+
 /* Draggable title bar region */
 .titlebar-drag {
   -webkit-app-region: drag;
@@ -15,10 +27,14 @@
   background-color: #09090b !important;
 }
 
-.react-flow__minimap {
-  background-color: #18181b !important;
-  border: 1px solid #27272a !important;
-  border-radius: 8px !important;
+/* Promote viewport and nodes to GPU compositor layers */
+.react-flow__viewport {
+  will-change: transform;
+}
+
+.react-flow__node {
+  will-change: transform;
+  contain: layout style paint;
 }
 
 /* Terminal tile styling */
@@ -58,7 +74,7 @@
   height: 100%;
 }
 
-/* Keep default cursor on the canvas pane — no pointer */
+/* Keep default cursor on the canvas pane */
 .react-flow__pane {
   cursor: default !important;
 }

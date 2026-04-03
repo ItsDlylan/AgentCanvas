@@ -2,15 +2,13 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { NodeProps, Handle, Position } from '@xyflow/react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalStatus } from '@/hooks/useTerminalStatus'
+import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import type { TerminalStatus } from '@/hooks/useTerminalStatus'
 
 export interface TerminalNodeData {
   sessionId: string
   label: string
   cwd?: string
-  focusedId?: string | null
-  onKill?: (sessionId: string) => void
-  onFocus?: (sessionId: string) => void
 }
 
 const STATUS_CONFIG: Record<TerminalStatus, { dot: string; text: string; label: string }> = {
@@ -27,7 +25,8 @@ function shortenPath(path: string): string {
 }
 
 function TerminalTileComponent({ data }: NodeProps) {
-  const { sessionId, label, onKill, onFocus, focusedId } = data as unknown as TerminalNodeData
+  const { sessionId, label } = data as unknown as TerminalNodeData
+  const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const [hovered, setHovered] = useState(false)
   const isFocused = focusedId === sessionId
@@ -36,11 +35,11 @@ function TerminalTileComponent({ data }: NodeProps) {
   const cwd = statusInfo?.cwd
   const cfg = STATUS_CONFIG[status]
 
-  const { containerRef, fit } = useTerminal({ sessionId, label, onExit: onKill })
+  const { containerRef, fit } = useTerminal({ sessionId, label, onExit: killTerminal })
 
   const handleFocus = useCallback(() => {
-    onFocus?.(sessionId)
-  }, [onFocus, sessionId])
+    setFocusedId(sessionId)
+  }, [setFocusedId, sessionId])
 
   const bodyRef = useCallback(
     (node: HTMLDivElement | null) => {
@@ -62,10 +61,10 @@ function TerminalTileComponent({ data }: NodeProps) {
 
   return (
     <div
-      className={`terminal-tile transition-shadow duration-200 ${
+      className={`terminal-tile ${
         isFocused
           ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
-          : 'ring-1 ring-transparent'
+          : ''
       }`}
       style={{ width: 640, height: 400 }}
       onMouseDown={handleFocus}
@@ -88,7 +87,7 @@ function TerminalTileComponent({ data }: NodeProps) {
         </div>
         <button
           className="titlebar-no-drag rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
-          onClick={() => onKill?.(sessionId)}
+          onClick={() => killTerminal(sessionId)}
         >
           Kill
         </button>
@@ -101,9 +100,7 @@ function TerminalTileComponent({ data }: NodeProps) {
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onWheelCapture={(e) => {
-          // Only intercept when mouse is hovering the terminal body
-          // Let pinch-zoom through (ctrlKey), block regular scroll
-          if (hovered && !e.ctrlKey) e.stopPropagation()
+          if (isFocused && hovered && !e.ctrlKey) e.stopPropagation()
         }}
       >
         <div ref={containerRef} className="h-full w-full" />

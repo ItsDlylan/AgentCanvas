@@ -1,5 +1,5 @@
-import { memo, useMemo } from 'react'
-import { useReactFlow, useViewport, type Node } from '@xyflow/react'
+import { memo, useState, useEffect, useRef } from 'react'
+import { useOnViewportChange, type Node, type Viewport } from '@xyflow/react'
 import { useAllTerminalStatuses, type TerminalStatus } from '@/hooks/useTerminalStatus'
 
 interface OffscreenIndicatorsProps {
@@ -14,101 +14,119 @@ const INDICATOR_SIZE = 12
 const EDGE_PADDING = 24
 
 const STATUS_COLORS: Record<TerminalStatus, string> = {
-  idle: '#71717a',     // zinc-500
-  running: '#22c55e',  // green-500
-  waiting: '#fbbf24'   // amber-400
+  idle: '#71717a',
+  running: '#22c55e',
+  waiting: '#fbbf24'
+}
+
+interface Indicator {
+  sessionId: string
+  label: string
+  status: TerminalStatus
+  screenX: number
+  screenY: number
+  isFocused: boolean
+}
+
+function compute(
+  nodes: Node[],
+  vx: number,
+  vy: number,
+  zoom: number,
+  focusedId: string | null,
+  statuses: Map<string, { status: TerminalStatus }>
+): Indicator[] {
+  const container = document.querySelector('.react-flow') as HTMLElement | null
+  if (!container) return []
+
+  const cw = container.clientWidth
+  const ch = container.clientHeight
+  const vl = -vx / zoom
+  const vt = -vy / zoom
+  const vr = vl + cw / zoom
+  const vb = vt + ch / zoom
+  const results: Indicator[] = []
+
+  for (const node of nodes) {
+    if (node.type !== 'terminal') continue
+    const data = node.data as Record<string, unknown>
+    const sessionId = data.sessionId as string
+    const label = data.label as string
+    const cx = node.position.x + TILE_W / 2
+    const cy = node.position.y + TILE_H / 2
+    const m = 50 / zoom
+
+    if (cx >= vl - m && cx <= vr + m && cy >= vt - m && cy <= vb + m) continue
+
+    const vcx = (vl + vr) / 2
+    const vcy = (vt + vb) / 2
+    const dx = cx - vcx
+    const dy = cy - vcy
+    const hw = cw / 2 - EDGE_PADDING
+    const hh = ch / 2 - EDGE_PADDING
+    const sx = dx !== 0 ? Math.abs(hw / dx) : Infinity
+    const sy = dy !== 0 ? Math.abs(hh / dy) : Infinity
+    const s = Math.min(sx, sy)
+
+    results.push({
+      sessionId,
+      label,
+      status: statuses.get(sessionId)?.status ?? 'running',
+      screenX: Math.max(EDGE_PADDING, Math.min(cw - EDGE_PADDING, cw / 2 + dx * s)),
+      screenY: Math.max(EDGE_PADDING, Math.min(ch - EDGE_PADDING, ch / 2 + dy * s)),
+      isFocused: focusedId === sessionId
+    })
+  }
+
+  return results
 }
 
 /**
- * Renders small status dots on the viewport edge for terminals
- * that are currently off-screen. Clicking a dot pans to that terminal.
+ * Off-screen terminal indicators. Uses useOnViewportChange with
+ * RAF throttling to avoid triggering React re-renders every frame.
  */
 function OffscreenIndicatorsComponent({ nodes, focusedId, onFocus }: OffscreenIndicatorsProps) {
-  const { x: vx, y: vy, zoom } = useViewport()
-  const { getViewportForBounds } = useReactFlow()
   const statuses = useAllTerminalStatuses()
+  const [indicators, setIndicators] = useState<Indicator[]>([])
+  const pendingRef = useRef<number | null>(null)
+  const nodesRef = useRef(nodes)
+  const focusedRef = useRef(focusedId)
+  const statusesRef = useRef(statuses)
 
-  const indicators = useMemo(() => {
-    // Get the viewport dimensions from the React Flow container
-    const container = document.querySelector('.react-flow') as HTMLElement | null
-    if (!container) return []
+  nodesRef.current = nodes
+  focusedRef.current = focusedId
+  statusesRef.current = statuses
 
-    const containerW = container.clientWidth
-    const containerH = container.clientHeight
-
-    // Viewport bounds in flow coordinates
-    const viewLeft = -vx / zoom
-    const viewTop = -vy / zoom
-    const viewRight = viewLeft + containerW / zoom
-    const viewBottom = viewTop + containerH / zoom
-
-    const results: Array<{
-      sessionId: string
-      label: string
-      status: TerminalStatus
-      screenX: number
-      screenY: number
-      isFocused: boolean
-    }> = []
-
-    for (const node of nodes) {
-      if (node.type !== 'terminal') continue
-
-      const data = node.data as Record<string, unknown>
-      const sessionId = data.sessionId as string
-      const label = data.label as string
-
-      // Center of the tile in flow coordinates
-      const tileCx = node.position.x + TILE_W / 2
-      const tileCy = node.position.y + TILE_H / 2
-
-      // Check if the tile center is within the viewport (with some margin)
-      const margin = 50 / zoom
-      if (
-        tileCx >= viewLeft - margin &&
-        tileCx <= viewRight + margin &&
-        tileCy >= viewTop - margin &&
-        tileCy <= viewBottom + margin
-      ) {
-        continue // On-screen, skip
-      }
-
-      // Viewport center in flow coordinates
-      const vcx = (viewLeft + viewRight) / 2
-      const vcy = (viewTop + viewBottom) / 2
-
-      // Direction from viewport center to tile center
-      const dx = tileCx - vcx
-      const dy = tileCy - vcy
-
-      // Find intersection with viewport edge
-      // Scale factor to reach each edge
-      const halfW = (containerW / 2) - EDGE_PADDING
-      const halfH = (containerH / 2) - EDGE_PADDING
-
-      const scaleX = dx !== 0 ? Math.abs(halfW / dx) : Infinity
-      const scaleY = dy !== 0 ? Math.abs(halfH / dy) : Infinity
-      const scale = Math.min(scaleX, scaleY)
-
-      // Screen position (relative to container)
-      const screenX = Math.max(EDGE_PADDING, Math.min(containerW - EDGE_PADDING, containerW / 2 + dx * scale))
-      const screenY = Math.max(EDGE_PADDING, Math.min(containerH - EDGE_PADDING, containerH / 2 + dy * scale))
-
-      const info = statuses.get(sessionId)
-      const status: TerminalStatus = info?.status ?? 'running'
-
-      results.push({
-        sessionId,
-        label,
-        status,
-        screenX,
-        screenY,
-        isFocused: focusedId === sessionId
+  // Update on viewport change, throttled to one rAF
+  useOnViewportChange({
+    onChange: (vp: Viewport) => {
+      if (pendingRef.current) return
+      pendingRef.current = requestAnimationFrame(() => {
+        pendingRef.current = null
+        setIndicators(
+          compute(nodesRef.current, vp.x, vp.y, vp.zoom, focusedRef.current, statusesRef.current)
+        )
       })
     }
+  })
 
-    return results
-  }, [nodes, vx, vy, zoom, focusedId, statuses])
+  // Also recompute when nodes/focus/statuses change (not viewport-driven)
+  useEffect(() => {
+    // Read viewport from the DOM transform
+    const viewport = document.querySelector('.react-flow__viewport') as HTMLElement | null
+    if (!viewport) return
+    const style = getComputedStyle(viewport)
+    const matrix = new DOMMatrix(style.transform)
+    setIndicators(
+      compute(nodes, matrix.e, matrix.f, matrix.a, focusedId, statuses)
+    )
+  }, [nodes, focusedId, statuses])
+
+  useEffect(() => {
+    return () => {
+      if (pendingRef.current) cancelAnimationFrame(pendingRef.current)
+    }
+  }, [])
 
   if (indicators.length === 0) return null
 
@@ -116,38 +134,27 @@ function OffscreenIndicatorsComponent({ nodes, focusedId, onFocus }: OffscreenIn
     <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden">
       {indicators.map((ind) => {
         const color = ind.isFocused ? '#60a5fa' : STATUS_COLORS[ind.status]
-        const isWaiting = ind.status === 'waiting'
 
         return (
           <button
             key={ind.sessionId}
             onClick={() => onFocus(ind.sessionId)}
-            className="pointer-events-auto absolute flex items-center gap-1.5 transition-transform hover:scale-125"
+            className="pointer-events-auto absolute hover:scale-125"
             style={{
               left: ind.screenX,
               top: ind.screenY,
-              transform: 'translate(-50%, -50%)'
+              transform: 'translate(-50%, -50%)',
+              willChange: 'transform'
             }}
             title={`${ind.label} — ${ind.status}`}
           >
-            {/* Glow */}
             <span
-              className="absolute rounded-full blur-sm"
-              style={{
-                width: INDICATOR_SIZE + 6,
-                height: INDICATOR_SIZE + 6,
-                backgroundColor: color,
-                opacity: 0.3
-              }}
-            />
-            {/* Dot */}
-            <span
-              className={`relative rounded-full border border-zinc-900/50 ${isWaiting ? 'animate-pulse' : ''}`}
+              className="block rounded-full"
               style={{
                 width: INDICATOR_SIZE,
                 height: INDICATOR_SIZE,
                 backgroundColor: color,
-                boxShadow: `0 0 8px ${color}80`
+                boxShadow: `0 0 6px 2px ${color}60`
               }}
             />
           </button>
