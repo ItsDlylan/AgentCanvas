@@ -3,6 +3,14 @@ import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { TerminalManager } from './terminal-manager'
 
+// GPU compositing flags for smooth panning
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+// Treat all wheel listeners as passive so the compositor doesn't block
+// on d3-zoom's { passive: false } wheel handler during pan
+app.commandLine.appendSwitch('enable-features', 'PassiveEventListenerDefault')
+
 const terminalManager = new TerminalManager()
 let mainWindow: BrowserWindow | null = null
 
@@ -112,9 +120,29 @@ ipcMain.handle('debug:profile', async (_event, durationMs: number) => {
   return result
 })
 
-// Forward PTY output to renderer
+// ── Batched PTY Output ────────────────────────────────────
+// Buffer PTY data per session and flush every 4ms to avoid
+// flooding the IPC channel (Solo uses the same 4ms interval).
+const dataBuffers = new Map<string, string>()
+let flushScheduled = false
+const FLUSH_INTERVAL_MS = 4
+
+function scheduleFlush(): void {
+  if (flushScheduled) return
+  flushScheduled = true
+  setTimeout(() => {
+    flushScheduled = false
+    for (const [id, data] of dataBuffers) {
+      mainWindow?.webContents.send('terminal:data', { id, data })
+    }
+    dataBuffers.clear()
+  }, FLUSH_INTERVAL_MS)
+}
+
 terminalManager.on('data', (id: string, data: string) => {
-  mainWindow?.webContents.send('terminal:data', { id, data })
+  const existing = dataBuffers.get(id) || ''
+  dataBuffers.set(id, existing + data)
+  scheduleFlush()
 })
 
 terminalManager.on('exit', (id: string, exitCode: number) => {

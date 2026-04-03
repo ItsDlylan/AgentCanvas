@@ -18,6 +18,7 @@ import { TerminalTile } from './TerminalTile'
 import { ProcessPanel } from './ProcessPanel'
 import { OffscreenIndicators } from './OffscreenIndicators'
 import { FocusedTerminalContext } from '@/hooks/useFocusedTerminal'
+import { PanDetector } from './PanDetector'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal']
@@ -112,7 +113,6 @@ export default function Canvas() {
 
   const proOptions = useMemo(() => ({ hideAttribution: true }), [])
   const togglePanel = useCallback(() => setPanelOpen((o) => !o), [])
-
   return (
     <FocusedTerminalContext.Provider value={focusCtx}>
       <div className="flex h-screen w-screen flex-col">
@@ -161,6 +161,7 @@ export default function Canvas() {
               showInteractive={false}
               className="!rounded-lg !border-zinc-700 !bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!bg-zinc-800 [&>button]:!fill-zinc-400 [&>button:hover]:!bg-zinc-700"
             />
+            <PanDetector />
           </ReactFlow>
 
           <OffscreenIndicators

@@ -3,6 +3,7 @@ import { NodeProps, Handle, Position } from '@xyflow/react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalStatus } from '@/hooks/useTerminalStatus'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
+import { useIsPanning } from '@/hooks/usePanState'
 import type { TerminalStatus } from '@/hooks/useTerminalStatus'
 
 export interface TerminalNodeData {
@@ -14,7 +15,7 @@ export interface TerminalNodeData {
 const STATUS_CONFIG: Record<TerminalStatus, { dot: string; text: string; label: string }> = {
   idle: { dot: 'bg-zinc-500', text: 'text-zinc-500', label: 'Idle' },
   running: { dot: 'bg-green-500', text: 'text-green-400', label: 'Running' },
-  waiting: { dot: 'bg-amber-400 animate-pulse', text: 'text-amber-400', label: 'Waiting' }
+  waiting: { dot: 'bg-amber-400', text: 'text-amber-400', label: 'Waiting' }
 }
 
 function shortenPath(path: string): string {
@@ -27,8 +28,11 @@ function shortenPath(path: string): string {
 function TerminalTileComponent({ data }: NodeProps) {
   const { sessionId, label } = data as unknown as TerminalNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
+  const isPanning = useIsPanning()
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const [hovered, setHovered] = useState(false)
+  const snapshotRef = useRef<string | null>(null)
+  const snapshotImgRef = useRef<HTMLImageElement | null>(null)
   const isFocused = focusedId === sessionId
   const statusInfo = useTerminalStatus(sessionId)
   const status = statusInfo?.status ?? 'running'
@@ -36,6 +40,37 @@ function TerminalTileComponent({ data }: NodeProps) {
   const cfg = STATUS_CONFIG[status]
 
   const { containerRef, fit } = useTerminal({ sessionId, label, onExit: killTerminal })
+
+  // Snapshot the terminal canvas when pan starts, restore when pan ends
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    if (isPanning) {
+      // Capture the WebGL/canvas content as a bitmap
+      const canvas = container.querySelector('canvas:not(.xterm-link-layer)') as HTMLCanvasElement | null
+      if (canvas) {
+        try {
+          snapshotRef.current = canvas.toDataURL('image/png')
+        } catch {
+          snapshotRef.current = null
+        }
+      }
+      // Hide live xterm, show snapshot
+      container.style.visibility = 'hidden'
+      if (snapshotImgRef.current && snapshotRef.current) {
+        snapshotImgRef.current.src = snapshotRef.current
+        snapshotImgRef.current.style.display = 'block'
+      }
+    } else {
+      // Show live xterm, hide snapshot
+      container.style.visibility = 'visible'
+      if (snapshotImgRef.current) {
+        snapshotImgRef.current.style.display = 'none'
+      }
+      snapshotRef.current = null
+    }
+  }, [isPanning, containerRef])
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)
@@ -93,16 +128,32 @@ function TerminalTileComponent({ data }: NodeProps) {
         </button>
       </div>
 
-      {/* Terminal body — only capture scroll when mouse is inside */}
+      {/* Terminal body */}
       <div
         ref={bodyRef}
         className="terminal-tile-body titlebar-no-drag"
+        style={{ pointerEvents: isPanning ? 'none' : 'auto', position: 'relative' }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         onWheelCapture={(e) => {
           if (isFocused && hovered && !e.ctrlKey) e.stopPropagation()
         }}
       >
+        {/* Static snapshot shown during pan — lightweight bitmap, no WebGL */}
+        <img
+          ref={snapshotImgRef}
+          alt=""
+          style={{
+            display: 'none',
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'fill',
+            pointerEvents: 'none'
+          }}
+        />
+        {/* Live xterm instance — hidden during pan via visibility:hidden */}
         <div ref={containerRef} className="h-full w-full" />
       </div>
 
