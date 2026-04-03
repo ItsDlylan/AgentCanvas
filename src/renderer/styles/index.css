@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+@import '@xterm/xterm/css/xterm.css';
+
+/* Draggable title bar region */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.titlebar-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* React Flow overrides for dark canvas */
+.react-flow__background {
+  background-color: #09090b !important;
+}
+
+.react-flow__minimap {
+  background-color: #18181b !important;
+  border: 1px solid #27272a !important;
+  border-radius: 8px !important;
+}
+
+/* Terminal tile styling */
+.terminal-tile {
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #09090b;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-tile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #18181b;
+  border-bottom: 1px solid #27272a;
+  cursor: grab;
+  user-select: none;
+  font-size: 12px;
+  color: #a1a1aa;
+}
+
+.terminal-tile-header:active {
+  cursor: grabbing;
+}
+
+.terminal-tile-body {
+  flex: 1;
+  padding: 4px;
+  overflow: hidden;
+}
+
+.terminal-tile-body .xterm {
+  height: 100%;
+}
+
+/* Selection box */
+.react-flow__selection {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border: 1px solid rgba(59, 130, 246, 0.4) !important;
+}
