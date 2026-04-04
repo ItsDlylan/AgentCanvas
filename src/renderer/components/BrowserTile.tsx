@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { NodeProps, Handle, Position } from '@xyflow/react'
 import { useBrowser } from '@/hooks/useBrowser'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
@@ -17,7 +17,7 @@ function BrowserTileComponent({ data }: NodeProps) {
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
-  const [hovered, setHovered] = useState(false)
+  const bodyRef = useRef<HTMLDivElement>(null)
   const [urlInput, setUrlInput] = useState(initialUrl || 'https://www.google.com')
 
   const { webviewRef, state, navigate, goBack, goForward, reload } = useBrowser({
@@ -36,6 +36,17 @@ function BrowserTileComponent({ data }: NodeProps) {
     setFocusedId(sessionId)
   }, [setFocusedId, sessionId])
 
+  // Native bubble-phase wheel listener — same pattern as TerminalTile
+  useEffect(() => {
+    const el = bodyRef.current
+    if (!el || !isFocused) return
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey) e.stopPropagation()
+    }
+    el.addEventListener('wheel', handler)
+    return () => el.removeEventListener('wheel', handler)
+  }, [isFocused])
+
   const handleUrlSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault()
@@ -49,7 +60,7 @@ function BrowserTileComponent({ data }: NodeProps) {
       className={`browser-tile ${
         isFocused ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]' : ''
       }`}
-      style={{ width: 800, height: 600 }}
+      style={{ width: 800, height: 600, pointerEvents: isPanning ? 'none' : 'auto' }}
       onMouseDown={handleFocus}
     >
       {/* Header / drag handle */}
@@ -114,18 +125,13 @@ function BrowserTileComponent({ data }: NodeProps) {
 
       {/* Browser body — webview is GPU-composited by Electron, no snapshot needed */}
       <div
+        ref={bodyRef}
         className="browser-tile-body titlebar-no-drag"
-        style={{ pointerEvents: isPanning ? 'none' : 'auto' }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onWheelCapture={(e) => {
-          if (isFocused && hovered && !e.ctrlKey) e.stopPropagation()
-        }}
       >
         <webview
           ref={webviewRef}
           src={initialUrl || 'https://www.google.com'}
-          style={{ width: '100%', height: '100%' }}
+          style={{ width: '100%', height: '100%', pointerEvents: isFocused ? 'auto' : 'none' }}
         />
       </div>
 

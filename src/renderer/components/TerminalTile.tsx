@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef } from 'react'
 import { NodeProps, Handle, Position } from '@xyflow/react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalStatus } from '@/hooks/useTerminalStatus'
@@ -30,7 +30,7 @@ function TerminalTileComponent({ data }: NodeProps) {
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
-  const [hovered, setHovered] = useState(false)
+  const bodyElRef = useRef<HTMLDivElement | null>(null)
   const snapshotRef = useRef<string | null>(null)
   const snapshotImgRef = useRef<HTMLImageElement | null>(null)
   const isFocused = focusedId === sessionId
@@ -78,6 +78,7 @@ function TerminalTileComponent({ data }: NodeProps) {
 
   const bodyRef = useCallback(
     (node: HTMLDivElement | null) => {
+      bodyElRef.current = node
       if (resizeObserverRef.current) {
         resizeObserverRef.current.disconnect()
         resizeObserverRef.current = null
@@ -90,6 +91,20 @@ function TerminalTileComponent({ data }: NodeProps) {
     [fit]
   )
 
+  // Native bubble-phase wheel listener: xterm receives the event first (scrolls),
+  // then we stop it from reaching d3-zoom (prevents canvas pan).
+  // Can't use React's onWheelCapture because it kills the native event at the root
+  // before xterm ever sees it.
+  useEffect(() => {
+    const el = bodyElRef.current
+    if (!el || !isFocused) return
+    const handler = (e: WheelEvent) => {
+      if (!e.ctrlKey) e.stopPropagation()
+    }
+    el.addEventListener('wheel', handler)
+    return () => el.removeEventListener('wheel', handler)
+  }, [isFocused])
+
   useEffect(() => {
     return () => resizeObserverRef.current?.disconnect()
   }, [])
@@ -101,7 +116,7 @@ function TerminalTileComponent({ data }: NodeProps) {
           ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
           : ''
       }`}
-      style={{ width: 640, height: 400 }}
+      style={{ width: 640, height: 400, pointerEvents: isPanning ? 'none' : 'auto' }}
       onMouseDown={handleFocus}
     >
       {/* Header */}
@@ -132,12 +147,7 @@ function TerminalTileComponent({ data }: NodeProps) {
       <div
         ref={bodyRef}
         className="terminal-tile-body titlebar-no-drag"
-        style={{ pointerEvents: isPanning ? 'none' : 'auto', position: 'relative' }}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        onWheelCapture={(e) => {
-          if (isFocused && hovered && !e.ctrlKey) e.stopPropagation()
-        }}
+        style={{ position: 'relative' }}
       >
         {/* Static snapshot shown during pan — lightweight bitmap, no WebGL */}
         <img
@@ -154,7 +164,7 @@ function TerminalTileComponent({ data }: NodeProps) {
           }}
         />
         {/* Live xterm instance — hidden during pan via visibility:hidden */}
-        <div ref={containerRef} className="h-full w-full" />
+        <div ref={containerRef} className="h-full w-full" style={{ pointerEvents: isFocused ? 'auto' : 'none' }} />
       </div>
 
       <Handle type="target" position={Position.Left} className="!bg-zinc-600" />
