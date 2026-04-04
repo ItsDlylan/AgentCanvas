@@ -24,6 +24,7 @@ import { PanDetector } from './PanDetector'
 import { navigateBrowser } from '@/hooks/useBrowserNavigation'
 import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug'
 import { PerformanceOverlay } from './PerformanceOverlay'
+import { BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
@@ -33,6 +34,39 @@ const nodeTypes: NodeTypes = {
 const defaultViewport = { x: 100, y: 100, zoom: 0.85 }
 
 let tileCount = 0
+
+const GAP = 40 // px between tiles when auto-placing
+
+/** Find a position that doesn't overlap any existing node. */
+function findOpenPosition(
+  existingNodes: Node[],
+  width: number,
+  height: number,
+  colSpan: number
+): { x: number; y: number } {
+  const stepX = width + GAP
+  const stepY = height + GAP
+
+  for (let slot = 0; slot < 200; slot++) {
+    const candidate = {
+      x: 100 + (slot % colSpan) * stepX,
+      y: 100 + Math.floor(slot / colSpan) * stepY
+    }
+    const overlaps = existingNodes.some((n) => {
+      const nw = (n.style?.width as number) ?? (n.type === 'browser' ? 800 : 640)
+      const nh = (n.style?.height as number) ?? (n.type === 'browser' ? 600 : 400)
+      return (
+        candidate.x < n.position.x + nw &&
+        candidate.x + width > n.position.x &&
+        candidate.y < n.position.y + nh &&
+        candidate.y + height > n.position.y
+      )
+    })
+    if (!overlaps) return candidate
+  }
+  // Fallback: offset from last node
+  return { x: 100, y: 100 + existingNodes.length * stepY }
+}
 
 export default function Canvas() {
   registerRender('Canvas')
@@ -70,32 +104,33 @@ export default function Canvas() {
   )
 
   const addBrowserAt = useCallback(
-    (position?: { x: number; y: number }) => {
+    (position?: { x: number; y: number }, preset?: DevicePreset) => {
       tileCount++
       const sessionId = uuid()
-      const pos = position ?? {
-        x: 100 + (tileCount % 3) * 880,
-        y: 100 + Math.floor(tileCount / 3) * 680
-      }
+      const tileW = preset ? preset.width + BROWSER_CHROME_WIDTH : 800
+      const tileH = preset ? preset.height + BROWSER_CHROME_HEIGHT : 600
+      const pos = position ?? findOpenPosition(nodesRef.current, tileW, tileH, 3)
       const newNode: Node = {
         id: sessionId,
         type: 'browser',
         position: pos,
-        style: { width: 800, height: 600 },
+        style: { width: tileW, height: tileH },
         data: {
           sessionId,
           label: `Browser ${tileCount}`,
-          initialUrl: 'https://www.google.com'
+          initialUrl: 'https://www.google.com',
+          initialPreset: preset && (preset.mobile || preset.dpr > 1) ? preset : undefined
         },
         dragHandle: '.browser-tile-header'
       }
       setNodes((nds) => [...nds, newNode])
       setFocusedId(sessionId)
+      setCenter(pos.x + tileW / 2, pos.y + tileH / 2, { zoom: 1, duration: 400 })
     },
-    [setNodes]
+    [setNodes, setCenter]
   )
 
-  const addBrowser = useCallback(() => addBrowserAt(), [addBrowserAt])
+  const addBrowser = useCallback((preset?: DevicePreset) => addBrowserAt(undefined, preset), [addBrowserAt])
 
   // Auto-spawn a browser tile linked to a terminal when agent-browser is detected
   const addBrowserForTerminal = useCallback(
@@ -205,18 +240,15 @@ export default function Canvas() {
   }, [])
 
   const addTerminalAt = useCallback(
-    (position?: { x: number; y: number }) => {
+    (position?: { x: number; y: number }, width = 640, height = 400) => {
       tileCount++
       const sessionId = uuid()
-      const pos = position ?? {
-        x: 100 + (tileCount % 4) * 680,
-        y: 100 + Math.floor(tileCount / 4) * 440
-      }
+      const pos = position ?? findOpenPosition(nodesRef.current, width, height, 4)
       const newNode: Node = {
         id: sessionId,
         type: 'terminal',
         position: pos,
-        style: { width: 640, height: 400 },
+        style: { width, height },
         data: {
           sessionId,
           label: `Terminal ${tileCount}`
@@ -225,11 +257,12 @@ export default function Canvas() {
       }
       setNodes((nds) => [...nds, newNode])
       setFocusedId(sessionId)
+      setCenter(pos.x + width / 2, pos.y + height / 2, { zoom: 1, duration: 400 })
     },
-    [setNodes]
+    [setNodes, setCenter]
   )
 
-  const addTerminal = useCallback(() => addTerminalAt(), [addTerminalAt])
+  const addTerminal = useCallback((width?: number, height?: number) => addTerminalAt(undefined, width, height), [addTerminalAt])
 
   const onDoubleClick = useCallback(
     (event: React.MouseEvent) => {

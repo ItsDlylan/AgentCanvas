@@ -1,11 +1,13 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { registerNavigator } from './useBrowserNavigation'
+import type { DevicePreset } from '@/constants/devicePresets'
 
 interface UseBrowserOptions {
   sessionId: string
   initialUrl?: string
   linkedTerminalId?: string
   reservationId?: string
+  initialPreset?: DevicePreset
 }
 
 export interface BrowserState {
@@ -17,7 +19,7 @@ export interface BrowserState {
   cdpPort?: number
 }
 
-export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', linkedTerminalId, reservationId }: UseBrowserOptions) {
+export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', linkedTerminalId, reservationId, initialPreset }: UseBrowserOptions) {
   const webviewRef = useRef<Electron.WebviewTag | null>(null)
   const mountedRef = useRef(false)
   const [state, setState] = useState<BrowserState>({
@@ -112,11 +114,15 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
               console.log(`[CDP] Debugger wired for ${sessionId} on port ${result.port}`)
               setState((prev) => ({ ...prev, cdpPort: result.port }))
             }
+            // Apply initial device preset (mobile/dpr emulation) if specified at spawn time
+            if (initialPreset && initialPreset.width > 0) {
+              setViewportSize(initialPreset.width, initialPreset.height, initialPreset.mobile, initialPreset.dpr)
+            }
           })
         }
       })
     },
-    [sessionId, initialUrl, linkedTerminalId]
+    [sessionId, initialUrl, linkedTerminalId, initialPreset, setViewportSize]
   )
 
   // Cleanup on unmount

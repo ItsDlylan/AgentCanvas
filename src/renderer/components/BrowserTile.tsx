@@ -4,7 +4,7 @@ import { useBrowser } from '@/hooks/useBrowser'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import { useIsPanning } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
-import { DEVICE_PRESETS, type DevicePreset } from '@/constants/devicePresets'
+import { DEVICE_PRESETS, BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
 
 export interface BrowserNodeData {
   sessionId: string
@@ -12,15 +12,15 @@ export interface BrowserNodeData {
   initialUrl?: string
   linkedTerminalId?: string
   reservationId?: string
+  initialPreset?: DevicePreset
 }
 
-// Heights of browser chrome elements (header + address bar + borders)
-const CHROME_HEIGHT = 33 + 32 + 2 // header ~33px, addressbar ~32px, top+bottom border 2px
-const CHROME_WIDTH = 2 // left + right border
+const CHROME_HEIGHT = BROWSER_CHROME_HEIGHT
+const CHROME_WIDTH = BROWSER_CHROME_WIDTH
 
 function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
   registerRender('BrowserTile')
-  const { sessionId, label, initialUrl, linkedTerminalId, reservationId } = data as unknown as BrowserNodeData
+  const { sessionId, label, initialUrl, linkedTerminalId, reservationId, initialPreset } = data as unknown as BrowserNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
@@ -34,7 +34,8 @@ function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
     sessionId,
     initialUrl: initialUrl || 'https://www.google.com',
     linkedTerminalId,
-    reservationId
+    reservationId,
+    initialPreset
   })
 
   // Sync address bar with navigation

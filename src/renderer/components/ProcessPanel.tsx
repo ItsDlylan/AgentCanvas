@@ -1,16 +1,17 @@
-import { memo } from 'react'
+import { memo, useState, useEffect } from 'react'
 import type { Node } from '@xyflow/react'
 import { useAllTerminalStatuses, type TerminalStatus } from '@/hooks/useTerminalStatus'
 import { useAllBrowserStatuses } from '@/hooks/useBrowserStatus'
 import { registerRender } from '@/hooks/usePerformanceDebug'
+import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS, type DevicePreset } from '@/constants/devicePresets'
 
 interface ProcessPanelProps {
   nodes: Node[]
   focusedId: string | null
   onFocus: (sessionId: string) => void
   onKill: (sessionId: string) => void
-  onAddTerminal: () => void
-  onAddBrowser: () => void
+  onAddTerminal: (width?: number, height?: number) => void
+  onAddBrowser: (preset?: DevicePreset) => void
   open: boolean
   onToggle: () => void
 }
@@ -43,6 +44,18 @@ function ProcessPanelComponent({
   const browsers = nodes.filter((n) => n.type === 'browser')
   const statuses = useAllTerminalStatuses()
   const browserStatuses = useAllBrowserStatuses()
+  const [terminalPresetsOpen, setTerminalPresetsOpen] = useState(false)
+  const [browserPresetsOpen, setBrowserPresetsOpen] = useState(false)
+
+  useEffect(() => {
+    if (!terminalPresetsOpen && !browserPresetsOpen) return
+    const handler = () => {
+      setTerminalPresetsOpen(false)
+      setBrowserPresetsOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [terminalPresetsOpen, browserPresetsOpen])
 
   return (
     <>
@@ -230,24 +243,85 @@ function ProcessPanelComponent({
 
         {/* Footer */}
         <div className="flex gap-1.5 border-t border-zinc-800 p-2">
-          <button
-            onClick={onAddTerminal}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-zinc-800 py-2 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-700 hover:text-white"
-          >
-            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Terminal
-          </button>
-          <button
-            onClick={onAddBrowser}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-zinc-800 py-2 text-xs font-medium text-emerald-400 transition-colors hover:bg-zinc-700 hover:text-emerald-300"
-          >
-            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            Browser
-          </button>
+          {/* Terminal split button */}
+          <div className="relative flex-1" onMouseDown={(e) => e.stopPropagation()}>
+            {terminalPresetsOpen && (
+              <div className="absolute bottom-full left-0 right-0 z-50 mb-1 rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
+                {TERMINAL_PRESETS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    onClick={() => {
+                      onAddTerminal(preset.width, preset.height)
+                      setTerminalPresetsOpen(false)
+                    }}
+                    className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+                  >
+                    <span>{preset.name}</span>
+                    <span className="text-zinc-500">{preset.width}&times;{preset.height}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex overflow-hidden rounded-md bg-zinc-800">
+              <button
+                onClick={() => onAddTerminal()}
+                className="flex flex-1 items-center justify-center gap-1.5 py-2 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-700 hover:text-white"
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Terminal
+              </button>
+              <button
+                onClick={() => setTerminalPresetsOpen(!terminalPresetsOpen)}
+                className="border-l border-zinc-700 px-1.5 py-2 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-white"
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* Browser split button */}
+          <div className="relative flex-1" onMouseDown={(e) => e.stopPropagation()}>
+            {browserPresetsOpen && (
+              <div className="absolute bottom-full left-0 right-0 z-50 mb-1 rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
+                {BROWSER_SPAWN_PRESETS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    onClick={() => {
+                      onAddBrowser(preset)
+                      setBrowserPresetsOpen(false)
+                    }}
+                    className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+                  >
+                    <span>{preset.name}</span>
+                    <span className="text-zinc-500">{preset.width}&times;{preset.height}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex overflow-hidden rounded-md bg-zinc-800">
+              <button
+                onClick={() => onAddBrowser()}
+                className="flex flex-1 items-center justify-center gap-1.5 py-2 text-xs font-medium text-emerald-400 transition-colors hover:bg-zinc-700 hover:text-emerald-300"
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                Browser
+              </button>
+              <button
+                onClick={() => setBrowserPresetsOpen(!browserPresetsOpen)}
+                className="border-l border-zinc-700 px-1.5 py-2 text-emerald-400 transition-colors hover:bg-zinc-700 hover:text-emerald-300"
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </>

@@ -15,3 +15,28 @@ export const DEVICE_PRESETS: DevicePreset[] = [
   { name: 'Full HD', width: 1920, height: 1080, mobile: false, dpr: 1 },
   { name: 'Responsive', width: 0, height: 0, mobile: false, dpr: 0 }
 ]
+
+// Browser chrome dimensions shared between BrowserTile and Canvas
+export const BROWSER_CHROME_HEIGHT = 33 + 32 + 2 // header ~33px, addressbar ~32px, top+bottom border 2px
+export const BROWSER_CHROME_WIDTH = 2 // left + right border
+
+// Presets available when spawning a browser from the sidebar
+export const BROWSER_SPAWN_PRESETS: DevicePreset[] = [
+  { name: 'Default', width: 800, height: 600, mobile: false, dpr: 1 },
+  ...DEVICE_PRESETS.filter((p) => p.width > 0)
+]
+
+export interface TerminalPreset {
+  name: string
+  width: number
+  height: number
+}
+
+export const TERMINAL_PRESETS: TerminalPreset[] = [
+  { name: 'Default', width: 640, height: 400 },
+  { name: 'Small', width: 480, height: 300 },
+  { name: 'Medium', width: 800, height: 500 },
+  { name: 'Large', width: 1024, height: 640 },
+  { name: 'Wide', width: 1200, height: 400 },
+  { name: 'Tall', width: 640, height: 800 }
+]
