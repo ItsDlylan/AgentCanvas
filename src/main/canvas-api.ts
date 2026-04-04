@@ -63,13 +63,13 @@ export class CanvasApi extends EventEmitter {
 
     if (req.method === 'POST' && url === '/api/browser/open') {
       this.readBody(req).then((body) => {
-        const { url: targetUrl, terminalId } = body as { url?: string; terminalId?: string }
+        const { url: targetUrl, terminalId, width, height } = body as { url?: string; terminalId?: string; width?: number; height?: number }
         if (!targetUrl) {
           res.writeHead(400)
           res.end(JSON.stringify({ error: 'url is required' }))
           return
         }
-        this.emit('browser-open', { url: targetUrl, terminalId }, (result: unknown) => {
+        this.emit('browser-open', { url: targetUrl, terminalId, width, height }, (result: unknown) => {
           res.writeHead(200)
           res.end(JSON.stringify(result))
         })
@@ -89,6 +89,25 @@ export class CanvasApi extends EventEmitter {
           return
         }
         this.emit('browser-navigate', { sessionId, url: targetUrl }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/browser/resize') {
+      this.readBody(req).then((body) => {
+        const { sessionId, width, height } = body as { sessionId?: string; width?: number; height?: number }
+        if (!sessionId || !width || !height) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'sessionId, width, and height are required' }))
+          return
+        }
+        this.emit('browser-resize', { sessionId, width, height }, (result: unknown) => {
           res.writeHead(200)
           res.end(JSON.stringify(result))
         })

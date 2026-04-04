@@ -230,6 +230,20 @@ export class CdpProxy extends EventEmitter {
     this.emit('detached', { sessionId })
   }
 
+  /**
+   * Send a CDP command directly from the main process (bypasses WS proxy).
+   * Used by the renderer via IPC for operations like Emulation.setDeviceMetricsOverride.
+   */
+  async sendCommand(sessionId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
+    const session = this.sessions.get(sessionId)
+    if (!session?.webContentsId || !session.debuggerReady) {
+      throw new Error(`CDP session ${sessionId} not ready`)
+    }
+    const wc = webContentsModule.fromId(session.webContentsId)
+    if (!wc) throw new Error(`webContents not found for ${sessionId}`)
+    return wc.debugger.sendCommand(method, params)
+  }
+
   getPort(sessionId: string): number | undefined {
     return this.sessions.get(sessionId)?.port
   }

@@ -39,6 +39,19 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
   const goForward = useCallback(() => webviewRef.current?.goForward(), [])
   const reload = useCallback(() => webviewRef.current?.reload(), [])
 
+  const setViewportSize = useCallback(async (width: number, height: number, mobile = false, dpr = 1) => {
+    try {
+      await window.browser.sendCdpCommand(sessionId, 'Emulation.setDeviceMetricsOverride', {
+        width: Math.round(width),
+        height: Math.round(height),
+        deviceScaleFactor: dpr,
+        mobile
+      })
+    } catch (e) {
+      console.warn('[CDP] setDeviceMetricsOverride failed:', e)
+    }
+  }, [sessionId])
+
   // Register navigate callback so Canvas.tsx can navigate this tile externally
   useEffect(() => {
     return registerNavigator(sessionId, navigate)
@@ -117,5 +130,5 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
     }
   }, [sessionId])
 
-  return { webviewRef: setWebviewRef, containerRef: webviewRef, state, navigate, goBack, goForward, reload }
+  return { webviewRef: setWebviewRef, containerRef: webviewRef, state, navigate, goBack, goForward, reload, setViewportSize }
 }

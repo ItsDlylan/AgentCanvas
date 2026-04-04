@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useRef } from 'react'
-import { NodeProps, Handle, Position } from '@xyflow/react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { NodeProps, Handle, Position, NodeResizer } from '@xyflow/react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalStatus } from '@/hooks/useTerminalStatus'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
@@ -26,7 +26,7 @@ function shortenPath(path: string): string {
   return parts[0] + '/.../' + parts.slice(-2).join('/')
 }
 
-function TerminalTileComponent({ data }: NodeProps) {
+function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
   const { sessionId, label } = data as unknown as TerminalNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
@@ -34,6 +34,8 @@ function TerminalTileComponent({ data }: NodeProps) {
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const bodyElRef = useRef<HTMLDivElement | null>(null)
+  const resizingRef = useRef(false)
+  const [isResizing, setIsResizing] = useState(false)
   const isFocused = focusedId === sessionId
   const statusInfo = useTerminalStatus(sessionId)
   const status = statusInfo?.status ?? 'running'
@@ -46,6 +48,17 @@ function TerminalTileComponent({ data }: NodeProps) {
     setFocusedId(sessionId)
   }, [setFocusedId, sessionId])
 
+  const onResizeStart = useCallback(() => {
+    resizingRef.current = true
+    setIsResizing(true)
+  }, [])
+
+  const onResizeEnd = useCallback(() => {
+    resizingRef.current = false
+    setIsResizing(false)
+    fit()
+  }, [fit])
+
   const bodyRef = useCallback(
     (node: HTMLDivElement | null) => {
       bodyElRef.current = node
@@ -55,8 +68,8 @@ function TerminalTileComponent({ data }: NodeProps) {
       }
       if (node) {
         resizeObserverRef.current = new ResizeObserver(() => {
-          // Skip resizes during pan/zoom — caused by CSS transform scale, not real container resize
-          if (isPanningNow()) return
+          // Skip resizes during pan/zoom or active drag-resize
+          if (isPanningNow() || resizingRef.current) return
 
           if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
           resizeTimerRef.current = setTimeout(() => {
@@ -98,9 +111,27 @@ function TerminalTileComponent({ data }: NodeProps) {
           ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
           : ''
       }`}
-      style={{ width: 640, height: 400, pointerEvents: isPanning ? 'none' : 'auto' }}
+      style={{ width: '100%', height: '100%', pointerEvents: isPanning ? 'none' : 'auto' }}
       onMouseDown={handleFocus}
     >
+      <NodeResizer
+        minWidth={300}
+        minHeight={200}
+        isVisible={isFocused}
+        color="#3b82f6"
+        onResizeStart={onResizeStart}
+        onResizeEnd={onResizeEnd}
+      />
+
+      {/* Dimension overlay during resize */}
+      {isResizing && width != null && height != null && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
+          <span className="rounded bg-black/80 px-2 py-1 text-xs font-mono text-zinc-300">
+            {Math.round(width)} x {Math.round(height)}
+          </span>
+        </div>
+      )}
+
       {/* Header */}
       <div className={`terminal-tile-header ${isFocused ? 'border-b-blue-500/30' : ''}`}>
         <div className="flex flex-col gap-0.5">

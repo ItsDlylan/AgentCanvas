@@ -125,6 +125,10 @@ ipcMain.handle('browser:detachCdp', (_event, { sessionId }) => {
   cdpProxy.detach(sessionId)
 })
 
+ipcMain.handle('browser:cdpCommand', async (_event, { sessionId, method, params }) => {
+  return cdpProxy.sendCommand(sessionId, method, params)
+})
+
 // ── Performance Monitor IPC ──────────────────────────────
 ipcMain.handle('perf:toggle', () => {
   if (isPerfEnabled()) {
@@ -224,7 +228,7 @@ terminalManager.on('status', (id: string, info: { status: string; cwd: string; f
 // ── Canvas API Events ────────────────────────────────────
 // Forward HTTP API requests to the renderer as browser-request events
 
-canvasApi.on('browser-open', async (info: { url: string; terminalId?: string }, reply: (result: unknown) => void) => {
+canvasApi.on('browser-open', async (info: { url: string; terminalId?: string; width?: number; height?: number }, reply: (result: unknown) => void) => {
   const terminalId = info.terminalId || 'api'
 
   // Always reserve a CDP port IMMEDIATELY so agent-browser can connect
@@ -249,9 +253,20 @@ canvasApi.on('browser-open', async (info: { url: string; terminalId?: string }, 
   mainWindow?.webContents.send('terminal:browser-request', {
     terminalId,
     url: info.url,
-    reservationId
+    reservationId,
+    width: info.width,
+    height: info.height
   })
   reply({ ok: true, cdpPort, message: `Browser tile opening for ${info.url}` })
+})
+
+canvasApi.on('browser-resize', (info: { sessionId: string; width: number; height: number }, reply: (result: unknown) => void) => {
+  mainWindow?.webContents.send('canvas:browser-resize', {
+    sessionId: info.sessionId,
+    width: info.width,
+    height: info.height
+  })
+  reply({ ok: true })
 })
 
 canvasApi.on('browser-close', (info: { sessionId: string }, reply: (result: unknown) => void) => {

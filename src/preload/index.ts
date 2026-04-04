@@ -18,7 +18,8 @@ export interface TerminalAPI {
   onData: (callback: (id: string, data: string) => void) => () => void
   onExit: (callback: (id: string, exitCode: number) => void) => () => void
   onStatus: (callback: (id: string, info: TerminalStatusInfo) => void) => () => void
-  onBrowserRequest: (callback: (terminalId: string, url: string, reservationId?: string) => void) => () => void
+  onBrowserRequest: (callback: (terminalId: string, url: string, reservationId?: string, width?: number, height?: number) => void) => () => void
+  onBrowserResize: (callback: (sessionId: string, width: number, height: number) => void) => () => void
 }
 
 const terminalAPI: TerminalAPI = {
@@ -59,12 +60,23 @@ const terminalAPI: TerminalAPI = {
   onBrowserRequest: (callback) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      { terminalId, url, reservationId }: { terminalId: string; url: string; reservationId?: string }
+      { terminalId, url, reservationId, width, height }: { terminalId: string; url: string; reservationId?: string; width?: number; height?: number }
     ) => {
-      callback(terminalId, url, reservationId)
+      callback(terminalId, url, reservationId, width, height)
     }
     ipcRenderer.on('terminal:browser-request', handler)
     return () => ipcRenderer.removeListener('terminal:browser-request', handler)
+  },
+
+  onBrowserResize: (callback) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      { sessionId, width, height }: { sessionId: string; width: number; height: number }
+    ) => {
+      callback(sessionId, width, height)
+    }
+    ipcRenderer.on('canvas:browser-resize', handler)
+    return () => ipcRenderer.removeListener('canvas:browser-resize', handler)
   }
 }
 
@@ -88,6 +100,7 @@ export interface BrowserAPI {
   onStatus: (callback: (id: string, info: BrowserStatusInfo) => void) => () => void
   attachCdp: (sessionId: string, webContentsId: number, linkedTerminalId?: string) => Promise<{ port?: number; error?: string }>
   detachCdp: (sessionId: string) => Promise<void>
+  sendCdpCommand: (sessionId: string, method: string, params: Record<string, unknown>) => Promise<unknown>
 }
 
 const browserAPI: BrowserAPI = {
@@ -110,7 +123,9 @@ const browserAPI: BrowserAPI = {
   attachCdp: (sessionId, webContentsId, linkedTerminalId?) =>
     ipcRenderer.invoke('browser:attachCdp', { sessionId, webContentsId, linkedTerminalId }),
   detachCdp: (sessionId) =>
-    ipcRenderer.invoke('browser:detachCdp', { sessionId })
+    ipcRenderer.invoke('browser:detachCdp', { sessionId }),
+  sendCdpCommand: (sessionId, method, params) =>
+    ipcRenderer.invoke('browser:cdpCommand', { sessionId, method, params })
 }
 
 contextBridge.exposeInMainWorld('browser', browserAPI)

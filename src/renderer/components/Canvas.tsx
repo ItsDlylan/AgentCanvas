@@ -81,6 +81,7 @@ export default function Canvas() {
         id: sessionId,
         type: 'browser',
         position: pos,
+        style: { width: 800, height: 600 },
         data: {
           sessionId,
           label: `Browser ${tileCount}`,
@@ -98,7 +99,7 @@ export default function Canvas() {
 
   // Auto-spawn a browser tile linked to a terminal when agent-browser is detected
   const addBrowserForTerminal = useCallback(
-    (terminalId: string, url: string, reservationId?: string) => {
+    (terminalId: string, url: string, reservationId?: string, tileWidth?: number, tileHeight?: number) => {
       // Treat empty terminalId as unlinked
       const isLinked = terminalId && terminalId !== 'api'
 
@@ -129,6 +130,7 @@ export default function Canvas() {
         id: sessionId,
         type: 'browser',
         position: pos,
+        style: { width: tileWidth ?? 800, height: tileHeight ?? 600 },
         data: {
           sessionId,
           label: `Browser ${tileCount}`,
@@ -159,11 +161,25 @@ export default function Canvas() {
   )
 
   useEffect(() => {
-    const unsub = window.terminal.onBrowserRequest((terminalId, url, reservationId) => {
-      addBrowserForTerminal(terminalId, url, reservationId)
+    const unsub = window.terminal.onBrowserRequest((terminalId, url, reservationId, width, height) => {
+      addBrowserForTerminal(terminalId, url, reservationId, width, height)
     })
     return unsub
   }, [addBrowserForTerminal])
+
+  // Handle agentic browser resize via API
+  useEffect(() => {
+    const unsub = window.terminal.onBrowserResize((sessionId, width, height) => {
+      setNodes(nds => nds.map(n => {
+        const data = n.data as Record<string, unknown>
+        if (data.sessionId === sessionId) {
+          return { ...n, width, height, style: { ...n.style, width, height } }
+        }
+        return n
+      }))
+    })
+    return unsub
+  }, [setNodes])
 
   const focusTerminal = useCallback(
     (sessionId: string) => {
@@ -172,8 +188,10 @@ export default function Canvas() {
         (n) => (n.data as Record<string, unknown>).sessionId === sessionId
       )
       if (!node) return
-      const cx = node.type === 'browser' ? 400 : 320
-      const cy = node.type === 'browser' ? 300 : 200
+      const defaultW = node.type === 'browser' ? 800 : 640
+      const defaultH = node.type === 'browser' ? 600 : 400
+      const cx = (node.measured?.width ?? (node.style?.width as number) ?? defaultW) / 2
+      const cy = (node.measured?.height ?? (node.style?.height as number) ?? defaultH) / 2
       setCenter(node.position.x + cx, node.position.y + cy, {
         zoom: 1,
         duration: 400
@@ -198,6 +216,7 @@ export default function Canvas() {
         id: sessionId,
         type: 'terminal',
         position: pos,
+        style: { width: 640, height: 400 },
         data: {
           sessionId,
           label: `Terminal ${tileCount}`

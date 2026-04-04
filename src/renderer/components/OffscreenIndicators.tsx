@@ -9,10 +9,10 @@ interface OffscreenIndicatorsProps {
   onFocus: (sessionId: string) => void
 }
 
-const TERMINAL_W = 640
-const TERMINAL_H = 400
-const BROWSER_W = 800
-const BROWSER_H = 600
+const DEFAULT_TERMINAL_W = 640
+const DEFAULT_TERMINAL_H = 400
+const DEFAULT_BROWSER_W = 800
+const DEFAULT_BROWSER_H = 600
 const INDICATOR_SIZE = 12
 const EDGE_PADDING = 24
 
@@ -56,8 +56,10 @@ function compute(
     const data = node.data as Record<string, unknown>
     const sessionId = data.sessionId as string
     const label = data.label as string
-    const tileW = node.type === 'browser' ? BROWSER_W : TERMINAL_W
-    const tileH = node.type === 'browser' ? BROWSER_H : TERMINAL_H
+    const defaultW = node.type === 'browser' ? DEFAULT_BROWSER_W : DEFAULT_TERMINAL_W
+    const defaultH = node.type === 'browser' ? DEFAULT_BROWSER_H : DEFAULT_TERMINAL_H
+    const tileW = node.measured?.width ?? (node.style?.width as number) ?? defaultW
+    const tileH = node.measured?.height ?? (node.style?.height as number) ?? defaultH
     const cx = node.position.x + tileW / 2
     const cy = node.position.y + tileH / 2
     const m = 50 / zoom

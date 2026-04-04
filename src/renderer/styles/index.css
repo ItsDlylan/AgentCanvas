@@ -41,10 +41,10 @@
 .terminal-tile {
   border: 1px solid #27272a;
   border-radius: 8px;
-  overflow: hidden;
   background: #09090b;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .terminal-tile-header {
@@ -66,6 +66,7 @@
 
 .terminal-tile-body {
   flex: 1;
+  min-height: 0;
   padding: 4px;
   overflow: hidden;
 }
@@ -78,10 +79,10 @@
 .browser-tile {
   border: 1px solid #27272a;
   border-radius: 8px;
-  overflow: hidden;
   background: #09090b;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .browser-tile-header {
@@ -133,6 +134,7 @@
 
 .browser-tile-body {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -150,4 +152,17 @@
 .react-flow__selection {
   background: rgba(59, 130, 246, 0.08) !important;
   border: 1px solid rgba(59, 130, 246, 0.4) !important;
+}
+
+/* NodeResizer handle overrides */
+.react-flow__resize-control.handle {
+  width: 8px !important;
+  height: 8px !important;
+  border-radius: 2px !important;
+  background: #3b82f680 !important;
+  border: 1px solid #3b82f6 !important;
+}
+
+.react-flow__resize-control.line {
+  border-color: #3b82f640 !important;
 }
