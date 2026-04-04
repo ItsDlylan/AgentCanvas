@@ -1,6 +1,7 @@
 import { memo, useState, useEffect, useRef } from 'react'
 import { useOnViewportChange, type Node, type Viewport } from '@xyflow/react'
 import { useAllTerminalStatuses, type TerminalStatus } from '@/hooks/useTerminalStatus'
+import { registerRender } from '@/hooks/usePerformanceDebug'
 
 interface OffscreenIndicatorsProps {
   nodes: Node[]
@@ -91,6 +92,7 @@ function compute(
  * RAF throttling to avoid triggering React re-renders every frame.
  */
 function OffscreenIndicatorsComponent({ nodes, focusedId, onFocus }: OffscreenIndicatorsProps) {
+  registerRender('OffscreenIndicators')
   const statuses = useAllTerminalStatuses()
   const [indicators, setIndicators] = useState<Indicator[]>([])
   const pendingRef = useRef<number | null>(null)

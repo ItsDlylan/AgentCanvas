@@ -34,6 +34,11 @@ export function usePanDetector(): void {
   })
 }
 
+/** Synchronous read of pan state (for non-hook contexts like ResizeObserver callbacks) */
+export function isPanningNow(): boolean {
+  return currentlyPanning
+}
+
 /**
  * Returns true while canvas is being panned/zoomed.
  */

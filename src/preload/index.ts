@@ -118,5 +118,7 @@ contextBridge.exposeInMainWorld('browser', browserAPI)
 // Debug APIs
 contextBridge.exposeInMainWorld('debug', {
   profile: (durationMs = 3000) => ipcRenderer.invoke('debug:profile', durationMs),
-  eval: (code: string) => ipcRenderer.invoke('debug:eval', code)
+  eval: (code: string) => ipcRenderer.invoke('debug:eval', code),
+  togglePerf: () => ipcRenderer.invoke('perf:toggle'),
+  getPerfStats: () => ipcRenderer.invoke('perf:stats')
 })

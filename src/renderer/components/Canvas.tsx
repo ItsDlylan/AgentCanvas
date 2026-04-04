@@ -22,6 +22,8 @@ import { OffscreenIndicators } from './OffscreenIndicators'
 import { FocusedTerminalContext } from '@/hooks/useFocusedTerminal'
 import { PanDetector } from './PanDetector'
 import { navigateBrowser } from '@/hooks/useBrowserNavigation'
+import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug'
+import { PerformanceOverlay } from './PerformanceOverlay'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
@@ -33,11 +35,16 @@ const defaultViewport = { x: 100, y: 100, zoom: 0.85 }
 let tileCount = 0
 
 export default function Canvas() {
+  registerRender('Canvas')
+  const { enabled: perfEnabled, stats: perfStats } = usePerformanceDebug()
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [panelOpen, setPanelOpen] = useState(true)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const { setCenter, screenToFlowPosition } = useReactFlow()
+
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
 
   const onConnect: OnConnect = useCallback(
     (params) => setEdges((eds) => addEdge(params, eds)),
@@ -46,7 +53,7 @@ export default function Canvas() {
 
   const killTerminal = useCallback(
     (sessionId: string) => {
-      const node = nodes.find(
+      const node = nodesRef.current.find(
         (n) => (n.data as Record<string, unknown>).sessionId === sessionId
       )
       if (node?.type === 'browser') {
@@ -59,7 +66,7 @@ export default function Canvas() {
       )
       setFocusedId((prev) => (prev === sessionId ? null : prev))
     },
-    [setNodes, nodes]
+    [setNodes]
   )
 
   const addBrowserAt = useCallback(
@@ -90,9 +97,6 @@ export default function Canvas() {
   const addBrowser = useCallback(() => addBrowserAt(), [addBrowserAt])
 
   // Auto-spawn a browser tile linked to a terminal when agent-browser is detected
-  const nodesRef = useRef(nodes)
-  nodesRef.current = nodes
-
   const addBrowserForTerminal = useCallback(
     (terminalId: string, url: string, reservationId?: string) => {
       // Treat empty terminalId as unlinked
@@ -164,7 +168,7 @@ export default function Canvas() {
   const focusTerminal = useCallback(
     (sessionId: string) => {
       setFocusedId(sessionId)
-      const node = nodes.find(
+      const node = nodesRef.current.find(
         (n) => (n.data as Record<string, unknown>).sessionId === sessionId
       )
       if (!node) return
@@ -175,7 +179,7 @@ export default function Canvas() {
         duration: 400
       })
     },
-    [nodes, setCenter]
+    [setCenter]
   )
 
   const onPaneClick = useCallback(() => {
@@ -228,6 +232,7 @@ export default function Canvas() {
   return (
     <FocusedTerminalContext.Provider value={focusCtx}>
       <div className="flex h-screen w-screen flex-col">
+        {perfEnabled && perfStats && <PerformanceOverlay stats={perfStats} />}
         {/* Toolbar */}
         <div className="titlebar-drag flex h-12 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4">
           <div className="flex items-center gap-3 pl-20">

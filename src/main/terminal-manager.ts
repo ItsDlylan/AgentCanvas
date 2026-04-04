@@ -1,7 +1,10 @@
 import { EventEmitter } from 'events'
-import { execSync } from 'child_process'
+import { execSync, execFile } from 'child_process'
+import { promisify } from 'util'
 import { createServer } from 'net'
 import os from 'os'
+
+const execFileAsync = promisify(execFile)
 
 // node-pty is loaded at runtime (native module)
 let pty: typeof import('node-pty')
@@ -74,6 +77,9 @@ function getAvailablePort(): Promise<number> {
 export class TerminalManager extends EventEmitter {
   private sessions = new Map<string, TerminalSession>()
   private pollInterval: ReturnType<typeof setInterval> | null = null
+  private polling = false
+  private statusThrottleTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  private pendingStatusEmit = new Map<string, boolean>()
 
   async create(id: string, label: string, cwd?: string, cols = 80, rows = 24, extraEnv?: Record<string, string>): Promise<number> {
     if (this.sessions.has(id)) return this.sessions.get(id)!.cdpPort
@@ -141,7 +147,7 @@ export class TerminalManager extends EventEmitter {
         const decoded = decodeURIComponent(osc7Match[1])
         if (decoded !== session.cwd) {
           session.cwd = decoded
-          this.emitStatus(id)
+          this.throttledEmitStatus(id)
         }
       }
 
@@ -170,7 +176,7 @@ export class TerminalManager extends EventEmitter {
 
     // Start polling foreground process if not already running
     if (!this.pollInterval) {
-      this.pollInterval = setInterval(() => this.pollForegroundProcesses(), 2000)
+      this.pollInterval = setInterval(() => this.pollForegroundProcesses(), 5000)
     }
 
     this.emit('created', id)
@@ -181,7 +187,7 @@ export class TerminalManager extends EventEmitter {
     const session = this.sessions.get(id)
     if (!session || session.status === status) return
     session.status = status
-    this.emitStatus(id)
+    this.throttledEmitStatus(id)
   }
 
   private emitStatus(id: string): void {
@@ -194,46 +200,80 @@ export class TerminalManager extends EventEmitter {
     })
   }
 
-  private pollForegroundProcesses(): void {
-    if (os.platform() === 'win32') return
+  /** Throttled status emission — at most once per 200ms per terminal */
+  private throttledEmitStatus(id: string): void {
+    this.pendingStatusEmit.set(id, true)
+    if (this.statusThrottleTimers.has(id)) return
 
-    for (const [id, session] of this.sessions) {
-      try {
-        const pid = session.process.pid
+    // Emit immediately for the first update in the window
+    this.emitStatus(id)
+    this.pendingStatusEmit.delete(id)
 
-        // Get foreground process name
-        const result = execSync(
-          `ps -o comm= -t $(ps -o tty= -p ${pid} 2>/dev/null) 2>/dev/null | tail -1`,
-          { encoding: 'utf-8', timeout: 1000 }
-        ).trim()
-
-        const name = result.split('/').pop() || ''
-        let changed = false
-
-        if (name && name !== session.foregroundProcess) {
-          session.foregroundProcess = name
-          changed = true
+    this.statusThrottleTimers.set(
+      id,
+      setTimeout(() => {
+        this.statusThrottleTimers.delete(id)
+        if (this.pendingStatusEmit.has(id)) {
+          this.pendingStatusEmit.delete(id)
+          this.emitStatus(id)
         }
+      }, 200)
+    )
+  }
 
-        // Fallback CWD: read from /proc or lsof if OSC 7 hasn't fired
+  private async pollForegroundProcesses(): Promise<void> {
+    if (os.platform() === 'win32' || this.polling) return
+    this.polling = true
+
+    try {
+      const polls = Array.from(this.sessions.entries()).map(async ([id, session]) => {
         try {
-          const cwdResult = execSync(
-            `lsof -a -d cwd -p ${pid} -Fn 2>/dev/null | grep '^n' | head -1 | cut -c2-`,
-            { encoding: 'utf-8', timeout: 1000 }
-          ).trim()
+          const pid = session.process.pid
 
-          if (cwdResult && cwdResult !== session.cwd) {
-            session.cwd = cwdResult
+          // Get foreground process name (async — does not block event loop)
+          const { stdout: result } = await execFileAsync('/bin/sh', [
+            '-c',
+            `ps -o comm= -t $(ps -o tty= -p ${pid} 2>/dev/null) 2>/dev/null | tail -1`
+          ], { timeout: 2000 })
+
+          if (!this.sessions.has(id)) return // Session may have been killed during await
+
+          const name = result.trim().split('/').pop() || ''
+          let changed = false
+
+          if (name && name !== session.foregroundProcess) {
+            session.foregroundProcess = name
             changed = true
           }
-        } catch {
-          // lsof may fail
-        }
 
-        if (changed) this.emitStatus(id)
-      } catch {
-        // Process may have exited
-      }
+          // Fallback CWD: read from lsof if OSC 7 hasn't fired
+          try {
+            const { stdout: cwdResult } = await execFileAsync('lsof', [
+              '-a', '-d', 'cwd', '-p', String(pid), '-Fn'
+            ], { timeout: 2000 })
+
+            if (!this.sessions.has(id)) return
+
+            const nLine = cwdResult.split('\n').find((l) => l.startsWith('n'))
+            const cwd = nLine ? nLine.slice(1).trim() : ''
+
+            if (cwd && cwd !== session.cwd) {
+              session.cwd = cwd
+              changed = true
+            }
+          } catch {
+            // lsof may fail
+          }
+
+          if (changed) this.emitStatus(id)
+        } catch {
+          // Process may have exited
+        }
+      })
+
+      await Promise.allSettled(polls)
+    } finally {
+      this.polling = false
     }
   }
 

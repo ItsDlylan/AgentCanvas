@@ -3,7 +3,8 @@ import { NodeProps, Handle, Position } from '@xyflow/react'
 import { useTerminal } from '@/hooks/useTerminal'
 import { useTerminalStatus } from '@/hooks/useTerminalStatus'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
-import { useIsPanning } from '@/hooks/usePanState'
+import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
+import { registerRender } from '@/hooks/usePerformanceDebug'
 import type { TerminalStatus } from '@/hooks/useTerminalStatus'
 
 export interface TerminalNodeData {
@@ -26,13 +27,13 @@ function shortenPath(path: string): string {
 }
 
 function TerminalTileComponent({ data }: NodeProps) {
+  registerRender('TerminalTile')
   const { sessionId, label } = data as unknown as TerminalNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
+  const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const bodyElRef = useRef<HTMLDivElement | null>(null)
-  const snapshotRef = useRef<string | null>(null)
-  const snapshotImgRef = useRef<HTMLImageElement | null>(null)
   const isFocused = focusedId === sessionId
   const statusInfo = useTerminalStatus(sessionId)
   const status = statusInfo?.status ?? 'running'
@@ -40,37 +41,6 @@ function TerminalTileComponent({ data }: NodeProps) {
   const cfg = STATUS_CONFIG[status]
 
   const { containerRef, fit } = useTerminal({ sessionId, label, onExit: killTerminal })
-
-  // Snapshot the terminal canvas when pan starts, restore when pan ends
-  useEffect(() => {
-    const container = containerRef.current
-    if (!container) return
-
-    if (isPanning) {
-      // Capture the WebGL/canvas content as a bitmap
-      const canvas = container.querySelector('canvas:not(.xterm-link-layer)') as HTMLCanvasElement | null
-      if (canvas) {
-        try {
-          snapshotRef.current = canvas.toDataURL('image/png')
-        } catch {
-          snapshotRef.current = null
-        }
-      }
-      // Hide live xterm, show snapshot
-      container.style.visibility = 'hidden'
-      if (snapshotImgRef.current && snapshotRef.current) {
-        snapshotImgRef.current.src = snapshotRef.current
-        snapshotImgRef.current.style.display = 'block'
-      }
-    } else {
-      // Show live xterm, hide snapshot
-      container.style.visibility = 'visible'
-      if (snapshotImgRef.current) {
-        snapshotImgRef.current.style.display = 'none'
-      }
-      snapshotRef.current = null
-    }
-  }, [isPanning, containerRef])
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)
@@ -84,7 +54,16 @@ function TerminalTileComponent({ data }: NodeProps) {
         resizeObserverRef.current = null
       }
       if (node) {
-        resizeObserverRef.current = new ResizeObserver(() => fit())
+        resizeObserverRef.current = new ResizeObserver(() => {
+          // Skip resizes during pan/zoom — caused by CSS transform scale, not real container resize
+          if (isPanningNow()) return
+
+          if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
+          resizeTimerRef.current = setTimeout(() => {
+            resizeTimerRef.current = null
+            fit()
+          }, 150)
+        })
         resizeObserverRef.current.observe(node)
       }
     },
@@ -106,7 +85,10 @@ function TerminalTileComponent({ data }: NodeProps) {
   }, [isFocused])
 
   useEffect(() => {
-    return () => resizeObserverRef.current?.disconnect()
+    return () => {
+      resizeObserverRef.current?.disconnect()
+      if (resizeTimerRef.current) clearTimeout(resizeTimerRef.current)
+    }
   }, [])
 
   return (
@@ -149,21 +131,9 @@ function TerminalTileComponent({ data }: NodeProps) {
         className="terminal-tile-body titlebar-no-drag"
         style={{ position: 'relative' }}
       >
-        {/* Static snapshot shown during pan — lightweight bitmap, no WebGL */}
-        <img
-          ref={snapshotImgRef}
-          alt=""
-          style={{
-            display: 'none',
-            position: 'absolute',
-            inset: 0,
-            width: '100%',
-            height: '100%',
-            objectFit: 'fill',
-            pointerEvents: 'none'
-          }}
-        />
-        {/* Live xterm instance — hidden during pan via visibility:hidden */}
+        {/* Live xterm instance — GPU-composited via WebGL, no snapshot needed.
+            will-change:transform + contain on .react-flow__node ensures the compositor
+            handles pan transforms without re-rasterizing the WebGL canvas. */}
         <div ref={containerRef} className="h-full w-full" style={{ pointerEvents: isFocused ? 'auto' : 'none' }} />
       </div>
 

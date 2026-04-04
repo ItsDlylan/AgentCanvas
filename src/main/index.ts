@@ -5,6 +5,7 @@ import { TerminalManager } from './terminal-manager'
 import { BrowserManager } from './browser-manager'
 import { CdpProxy } from './cdp-proxy'
 import { CanvasApi } from './canvas-api'
+import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -124,6 +125,21 @@ ipcMain.handle('browser:detachCdp', (_event, { sessionId }) => {
   cdpProxy.detach(sessionId)
 })
 
+// ── Performance Monitor IPC ──────────────────────────────
+ipcMain.handle('perf:toggle', () => {
+  if (isPerfEnabled()) {
+    stopPerfMonitor()
+    return { enabled: false }
+  } else {
+    startPerfMonitor()
+    return { enabled: true }
+  }
+})
+
+ipcMain.handle('perf:stats', () => {
+  return getPerfStats()
+})
+
 // Debug: execute JS in the renderer and return result
 ipcMain.handle('debug:eval', async (_event, code: string) => {
   return mainWindow?.webContents.executeJavaScript(code)
@@ -184,6 +200,7 @@ function scheduleFlush(): void {
     flushScheduled = false
     for (const [id, data] of dataBuffers) {
       mainWindow?.webContents.send('terminal:data', { id, data })
+      recordIpc('terminal:data')
     }
     dataBuffers.clear()
   }, FLUSH_INTERVAL_MS)
@@ -201,6 +218,7 @@ terminalManager.on('exit', (id: string, exitCode: number) => {
 
 terminalManager.on('status', (id: string, info: { status: string; cwd: string; foregroundProcess: string }) => {
   mainWindow?.webContents.send('terminal:status', { id, ...info })
+  recordIpc('terminal:status')
 })
 
 // ── Canvas API Events ────────────────────────────────────

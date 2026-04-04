@@ -3,6 +3,7 @@ import { NodeProps, Handle, Position } from '@xyflow/react'
 import { useBrowser } from '@/hooks/useBrowser'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import { useIsPanning } from '@/hooks/usePanState'
+import { registerRender } from '@/hooks/usePerformanceDebug'
 
 export interface BrowserNodeData {
   sessionId: string
@@ -13,6 +14,7 @@ export interface BrowserNodeData {
 }
 
 function BrowserTileComponent({ data }: NodeProps) {
+  registerRender('BrowserTile')
   const { sessionId, label, initialUrl, linkedTerminalId, reservationId } = data as unknown as BrowserNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
   const isPanning = useIsPanning()

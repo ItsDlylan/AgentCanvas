@@ -2,6 +2,7 @@ import { memo } from 'react'
 import type { Node } from '@xyflow/react'
 import { useAllTerminalStatuses, type TerminalStatus } from '@/hooks/useTerminalStatus'
 import { useAllBrowserStatuses } from '@/hooks/useBrowserStatus'
+import { registerRender } from '@/hooks/usePerformanceDebug'
 
 interface ProcessPanelProps {
   nodes: Node[]
@@ -37,6 +38,7 @@ function ProcessPanelComponent({
   open,
   onToggle
 }: ProcessPanelProps) {
+  registerRender('ProcessPanel')
   const terminals = nodes.filter((n) => n.type === 'terminal')
   const browsers = nodes.filter((n) => n.type === 'browser')
   const statuses = useAllTerminalStatuses()

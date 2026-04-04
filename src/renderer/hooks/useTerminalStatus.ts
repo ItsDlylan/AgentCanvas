@@ -12,42 +12,74 @@ type Listener = () => void
 
 /**
  * Global store for terminal status updates.
- * Each IPC update creates a new Map reference so React detects the change.
+ *
+ * Per-session subscribers (useTerminalStatus) are notified immediately so
+ * individual TerminalTile components stay responsive.
+ *
+ * Bulk subscribers (useAllTerminalStatuses) are batched/throttled to at most
+ * once per 300ms to avoid expensive re-renders of ProcessPanel and
+ * OffscreenIndicators on every status IPC event.
  */
 let statusMap = new Map<string, TerminalStatusInfo>()
-const listeners = new Set<Listener>()
+const immediateListeners = new Set<Listener>()
+const batchListeners = new Set<Listener>()
 let subscribed = false
+let batchTimer: ReturnType<typeof setTimeout> | null = null
+let batchedSnapshot = statusMap
 
-function notify(): void {
-  listeners.forEach((l) => l())
+function notifyImmediate(): void {
+  immediateListeners.forEach((l) => l())
 }
 
-function subscribe(listener: Listener): () => void {
-  listeners.add(listener)
+function scheduleBatchNotify(): void {
+  if (batchTimer) return
+  batchTimer = setTimeout(() => {
+    batchTimer = null
+    batchedSnapshot = statusMap
+    batchListeners.forEach((l) => l())
+  }, 300)
+}
 
-  if (!subscribed) {
-    subscribed = true
-    window.terminal.onStatus((id, info) => {
-      // Create a new Map so the reference changes and React re-renders
-      const next = new Map(statusMap)
-      next.set(id, info)
-      statusMap = next
-      notify()
-    })
-  }
+function ensureSubscribed(): void {
+  if (subscribed) return
+  subscribed = true
+  window.terminal.onStatus((id, info) => {
+    // New Map reference so React detects the change for immediate subscribers
+    const next = new Map(statusMap)
+    next.set(id, info)
+    statusMap = next
+    notifyImmediate()
+    scheduleBatchNotify()
+  })
+}
 
-  return () => listeners.delete(listener)
+function subscribeImmediate(listener: Listener): () => void {
+  immediateListeners.add(listener)
+  ensureSubscribed()
+  return () => immediateListeners.delete(listener)
+}
+
+function subscribeBatch(listener: Listener): () => void {
+  batchListeners.add(listener)
+  ensureSubscribed()
+  return () => batchListeners.delete(listener)
 }
 
 function getSnapshot(): Map<string, TerminalStatusInfo> {
   return statusMap
 }
 
+function getBatchedSnapshot(): Map<string, TerminalStatusInfo> {
+  return batchedSnapshot
+}
+
+/** Per-session status — only the affected TerminalTile re-renders */
 export function useTerminalStatus(sessionId: string): TerminalStatusInfo | undefined {
-  const store = useSyncExternalStore(subscribe, getSnapshot)
+  const store = useSyncExternalStore(subscribeImmediate, getSnapshot)
   return store.get(sessionId)
 }
 
+/** All statuses — batched to avoid re-rendering ProcessPanel/OffscreenIndicators on every update */
 export function useAllTerminalStatuses(): Map<string, TerminalStatusInfo> {
-  return useSyncExternalStore(subscribe, getSnapshot)
+  return useSyncExternalStore(subscribeBatch, getBatchedSnapshot)
 }
