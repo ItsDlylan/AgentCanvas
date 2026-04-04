@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events'
 import { execSync } from 'child_process'
+import { createServer } from 'net'
 import os from 'os'
 
 // node-pty is loaded at runtime (native module)
@@ -19,6 +20,7 @@ export interface TerminalSessionInfo {
   foregroundProcess: string
   label: string
   createdAt: number
+  cdpPort: number
 }
 
 export interface TerminalSession {
@@ -33,6 +35,7 @@ export interface TerminalSession {
   createdAt: number
   lastDataAt: number
   idleTimer: ReturnType<typeof setTimeout> | null
+  cdpPort: number
 }
 
 // Patterns that indicate the terminal is waiting for user input
@@ -51,6 +54,17 @@ const WAITING_PATTERNS = [
 
 const IDLE_TIMEOUT_MS = 800
 
+function getAvailablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer()
+    srv.listen(0, '127.0.0.1', () => {
+      const port = (srv.address() as { port: number }).port
+      srv.close(() => resolve(port))
+    })
+    srv.on('error', reject)
+  })
+}
+
 /**
  * Manages PTY sessions for all terminal tiles.
  *
@@ -61,8 +75,10 @@ export class TerminalManager extends EventEmitter {
   private sessions = new Map<string, TerminalSession>()
   private pollInterval: ReturnType<typeof setInterval> | null = null
 
-  create(id: string, label: string, cwd?: string, cols = 80, rows = 24): void {
-    if (this.sessions.has(id)) return
+  async create(id: string, label: string, cwd?: string, cols = 80, rows = 24, extraEnv?: Record<string, string>): Promise<number> {
+    if (this.sessions.has(id)) return this.sessions.get(id)!.cdpPort
+
+    const cdpPort = await getAvailablePort()
 
     const shell =
       process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : '/bin/zsh')
@@ -92,7 +108,10 @@ export class TerminalManager extends EventEmitter {
         TERM_PROGRAM: 'AgentCanvas',
         COLORTERM: 'truecolor',
         LANG: 'en_US.UTF-8',
-        LC_ALL: 'en_US.UTF-8'
+        LC_ALL: 'en_US.UTF-8',
+        AGENT_BROWSER_CDP_PORT: String(cdpPort),
+        AGENT_CANVAS_TERMINAL_ID: id,
+        ...extraEnv
       } as Record<string, string>
     })
 
@@ -107,7 +126,8 @@ export class TerminalManager extends EventEmitter {
       foregroundProcess: shell.split('/').pop() || 'shell',
       createdAt: Date.now(),
       lastDataAt: Date.now(),
-      idleTimer: null
+      idleTimer: null,
+      cdpPort
     }
 
     this.sessions.set(id, session)
@@ -154,6 +174,7 @@ export class TerminalManager extends EventEmitter {
     }
 
     this.emit('created', id)
+    return cdpPort
   }
 
   private setStatus(id: string, status: TerminalStatus): void {
@@ -255,7 +276,8 @@ export class TerminalManager extends EventEmitter {
       status: s.status,
       foregroundProcess: s.foregroundProcess,
       label: s.label,
-      createdAt: s.createdAt
+      createdAt: s.createdAt,
+      cdpPort: s.cdpPort
     }
   }
 
@@ -266,7 +288,8 @@ export class TerminalManager extends EventEmitter {
       status: s.status,
       foregroundProcess: s.foregroundProcess,
       label: s.label,
-      createdAt: s.createdAt
+      createdAt: s.createdAt,
+      cdpPort: s.cdpPort
     }))
   }
 

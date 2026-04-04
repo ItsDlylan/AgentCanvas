@@ -8,21 +8,24 @@ interface OffscreenIndicatorsProps {
   onFocus: (sessionId: string) => void
 }
 
-const TILE_W = 640
-const TILE_H = 400
+const TERMINAL_W = 640
+const TERMINAL_H = 400
+const BROWSER_W = 800
+const BROWSER_H = 600
 const INDICATOR_SIZE = 12
 const EDGE_PADDING = 24
 
-const STATUS_COLORS: Record<TerminalStatus, string> = {
+const STATUS_COLORS: Record<TerminalStatus | 'browser', string> = {
   idle: '#71717a',
   running: '#22c55e',
-  waiting: '#fbbf24'
+  waiting: '#fbbf24',
+  browser: '#10b981'
 }
 
 interface Indicator {
   sessionId: string
   label: string
-  status: TerminalStatus
+  status: TerminalStatus | 'browser'
   screenX: number
   screenY: number
   isFocused: boolean
@@ -48,12 +51,14 @@ function compute(
   const results: Indicator[] = []
 
   for (const node of nodes) {
-    if (node.type !== 'terminal') continue
+    if (node.type !== 'terminal' && node.type !== 'browser') continue
     const data = node.data as Record<string, unknown>
     const sessionId = data.sessionId as string
     const label = data.label as string
-    const cx = node.position.x + TILE_W / 2
-    const cy = node.position.y + TILE_H / 2
+    const tileW = node.type === 'browser' ? BROWSER_W : TERMINAL_W
+    const tileH = node.type === 'browser' ? BROWSER_H : TERMINAL_H
+    const cx = node.position.x + tileW / 2
+    const cy = node.position.y + tileH / 2
     const m = 50 / zoom
 
     if (cx >= vl - m && cx <= vr + m && cy >= vt - m && cy <= vb + m) continue
@@ -71,7 +76,7 @@ function compute(
     results.push({
       sessionId,
       label,
-      status: statuses.get(sessionId)?.status ?? 'running',
+      status: node.type === 'browser' ? 'browser' : (statuses.get(sessionId)?.status ?? 'running'),
       screenX: Math.max(EDGE_PADDING, Math.min(cw - EDGE_PADDING, cw / 2 + dx * s)),
       screenY: Math.max(EDGE_PADDING, Math.min(ch - EDGE_PADDING, ch / 2 + dy * s)),
       isFocused: focusedId === sessionId

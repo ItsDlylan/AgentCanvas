@@ -10,13 +10,14 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
-    "@xyflow/react": "^12.6.0",
-    "@xterm/xterm": "^5.5.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/xterm": "^5.5.0",
+    "@xyflow/react": "^12.6.0",
     "node-pty": "^1.1.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@electron-toolkit/utils": "^3.0.0",
@@ -25,6 +26,7 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
     "electron": "^35.0.0",
     "electron-builder": "^26.0.0",
     "electron-vite": "^3.1.0",

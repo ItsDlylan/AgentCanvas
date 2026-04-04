@@ -2,6 +2,9 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { TerminalManager } from './terminal-manager'
+import { BrowserManager } from './browser-manager'
+import { CdpProxy } from './cdp-proxy'
+import { CanvasApi } from './canvas-api'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -12,7 +15,11 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist')
 app.commandLine.appendSwitch('enable-features', 'PassiveEventListenerDefault')
 
 const terminalManager = new TerminalManager()
+const browserManager = new BrowserManager()
+const cdpProxy = new CdpProxy()
+const canvasApi = new CanvasApi()
 let mainWindow: BrowserWindow | null = null
+let canvasApiPort = 0
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -26,7 +33,8 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      webviewTag: true
     }
   })
 
@@ -50,8 +58,13 @@ function createWindow(): void {
 
 // ── IPC Handlers ──────────────────────────────────────────
 
-ipcMain.handle('terminal:create', (_event, { id, label, cwd }) => {
-  terminalManager.create(id, label, cwd)
+ipcMain.handle('terminal:create', async (_event, { id, label, cwd }) => {
+  const extraEnv: Record<string, string> = {}
+  if (canvasApiPort) {
+    extraEnv.AGENT_CANVAS_API = `http://127.0.0.1:${canvasApiPort}`
+  }
+  const cdpPort = await terminalManager.create(id, label, cwd, 80, 24, extraEnv)
+  return { cdpPort }
 })
 
 ipcMain.handle('terminal:status', (_event, { id }) => {
@@ -72,6 +85,43 @@ ipcMain.handle('terminal:kill', (_event, { id }) => {
 
 ipcMain.handle('terminal:list', () => {
   return terminalManager.listSessions()
+})
+
+// ── Browser IPC Handlers ─────────────────────────────────
+
+ipcMain.handle('browser:create', (_event, { id, url }) => {
+  browserManager.create(id, url)
+})
+
+ipcMain.handle('browser:updateStatus', (_event, { id, ...info }) => {
+  browserManager.updateStatus(id, info)
+})
+
+ipcMain.handle('browser:destroy', (_event, { id }) => {
+  browserManager.destroy(id)
+})
+
+ipcMain.handle('browser:list', () => {
+  return browserManager.listSessions()
+})
+
+// ── CDP Proxy IPC Handlers ───────────────────────────────
+
+ipcMain.handle('browser:attachCdp', async (_event, { sessionId, webContentsId, linkedTerminalId }) => {
+  try {
+    // If this browser is linked to a terminal, the API may have already reserved
+    // a CDP server under the terminal's ID. Wire the debugger to it.
+    const reservationId = linkedTerminalId || sessionId
+    const port = await cdpProxy.wireDebugger(reservationId, webContentsId)
+    return { port }
+  } catch (err) {
+    console.error(`[CDP] Failed to wire debugger for ${sessionId}:`, err)
+    return { error: (err as Error).message }
+  }
+})
+
+ipcMain.handle('browser:detachCdp', (_event, { sessionId }) => {
+  cdpProxy.detach(sessionId)
 })
 
 // Debug: execute JS in the renderer and return result
@@ -153,10 +203,68 @@ terminalManager.on('status', (id: string, info: { status: string; cwd: string; f
   mainWindow?.webContents.send('terminal:status', { id, ...info })
 })
 
+// ── Canvas API Events ────────────────────────────────────
+// Forward HTTP API requests to the renderer as browser-request events
+
+canvasApi.on('browser-open', async (info: { url: string; terminalId?: string }, reply: (result: unknown) => void) => {
+  const terminalId = info.terminalId || 'api'
+
+  // Always reserve a CDP port IMMEDIATELY so agent-browser can connect
+  // before the webview even mounts. Use the terminal's pre-allocated port
+  // if available, otherwise allocate a new one.
+  let cdpPort: number
+  const reservationId = terminalId !== 'api' ? terminalId : `browser-${Date.now()}`
+
+  if (terminalId !== 'api') {
+    const termSession = terminalManager.getSession(terminalId)
+    cdpPort = termSession?.cdpPort ?? 0
+  } else {
+    cdpPort = 0 // Let the OS assign
+  }
+
+  try {
+    cdpPort = await cdpProxy.reserve(reservationId, cdpPort)
+  } catch (err) {
+    console.warn(`[CDP] Could not reserve port:`, err)
+  }
+
+  mainWindow?.webContents.send('terminal:browser-request', {
+    terminalId,
+    url: info.url,
+    reservationId
+  })
+  reply({ ok: true, cdpPort, message: `Browser tile opening for ${info.url}` })
+})
+
+canvasApi.on('browser-close', (info: { sessionId: string }, reply: (result: unknown) => void) => {
+  mainWindow?.webContents.send('canvas:browser-close', { sessionId: info.sessionId })
+  reply({ ok: true })
+})
+
+canvasApi.on('status-request', (reply: (data: unknown) => void) => {
+  const terminals = terminalManager.listSessions()
+  const browsers = browserManager.listSessions()
+  reply({ terminals, browsers })
+})
+
 // ── App Lifecycle ─────────────────────────────────────────
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.agentcanvas.app')
+
+  // Accept self-signed certificates for local dev domains (.test, .local, localhost)
+  app.on('certificate-error', (event, _webContents, url, _error, _cert, callback) => {
+    const hostname = new URL(url).hostname
+    if (hostname.endsWith('.test') || hostname.endsWith('.local') || hostname === 'localhost') {
+      event.preventDefault()
+      callback(true)
+    } else {
+      callback(false)
+    }
+  })
+
+  // Start the local control API before creating the window/terminals
+  canvasApiPort = await canvasApi.start()
 
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window)
@@ -171,5 +279,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   terminalManager.destroyAll()
+  browserManager.destroyAll()
+  cdpProxy.destroyAll()
+  canvasApi.stop()
   if (process.platform !== 'darwin') app.quit()
 })
