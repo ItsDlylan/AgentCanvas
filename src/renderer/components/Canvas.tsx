@@ -291,20 +291,7 @@ export default function Canvas() {
           <div className="flex items-center gap-3 pl-20">
             <span className="text-sm font-semibold text-zinc-300">Agent Canvas</span>
           </div>
-          <div className="titlebar-no-drag flex items-center gap-2">
-            <button
-              onClick={addTerminal}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-500"
-            >
-              + Terminal
-            </button>
-            <button
-              onClick={addBrowser}
-              className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-emerald-500"
-            >
-              + Browser
-            </button>
-          </div>
+          <div className="titlebar-no-drag flex items-center gap-2" />
         </div>
 
         {/* Canvas + Panel */}
