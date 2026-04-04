@@ -91,6 +91,30 @@ export function useTerminal({ sessionId, label, onReady, onExit }: UseTerminalOp
       // WebGL unavailable, falls back to canvas renderer
     }
 
+    // Fix mouse coordinate mismatch caused by CSS transform scaling.
+    // React Flow's viewport transform scales screen pixels but xterm divides
+    // by unscaled CSS-pixel cell dimensions. Correct in capture phase before
+    // xterm's bubble-phase handlers read the coordinates.
+    const container = containerRef.current
+    const fixMouseCoords = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect()
+      const scaleX = rect.width / container.offsetWidth
+      const scaleY = rect.height / container.offsetHeight
+      if (Math.abs(scaleX - 1) < 0.005 && Math.abs(scaleY - 1) < 0.005) return
+      Object.defineProperty(e, 'clientX', {
+        value: rect.left + (e.clientX - rect.left) / scaleX,
+        configurable: true
+      })
+      Object.defineProperty(e, 'clientY', {
+        value: rect.top + (e.clientY - rect.top) / scaleY,
+        configurable: true
+      })
+    }
+    const mouseFixEvents = ['mousedown', 'mousemove', 'mouseup'] as const
+    for (const type of mouseFixEvents) {
+      container.addEventListener(type, fixMouseCoords, { capture: true })
+    }
+
     fitAddon.fit()
 
     terminalRef.current = term
@@ -126,6 +150,9 @@ export function useTerminal({ sessionId, label, onReady, onExit }: UseTerminalOp
     onReady?.()
 
     return () => {
+      for (const type of mouseFixEvents) {
+        container.removeEventListener(type, fixMouseCoords, { capture: true })
+      }
       unsubData()
       unsubExit()
       term.dispose()
