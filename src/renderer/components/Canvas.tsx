@@ -267,6 +267,7 @@ export default function Canvas() {
   const onDoubleClick = useCallback(
     (event: React.MouseEvent) => {
       const target = event.target as HTMLElement
+      if (!target.closest('.react-flow__pane')) return
       if (target.closest('.react-flow__node')) return
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
       addTerminalAt({ x: position.x - 320, y: position.y - 200 })
