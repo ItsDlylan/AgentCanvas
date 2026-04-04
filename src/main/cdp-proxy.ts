@@ -81,10 +81,7 @@ export class CdpProxy extends EventEmitter {
       }
     })
 
-    const wsServer = new WebSocketServer({
-      server: httpServer,
-      path: new RegExp(`/devtools/page/.+`)
-    })
+    const wsServer = new WebSocketServer({ server: httpServer })
 
     wsServer.on('connection', (ws: WebSocket) => {
       clients.add(ws)
