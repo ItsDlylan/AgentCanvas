@@ -34,6 +34,7 @@ export interface CanvasSettings {
   maxZoom: number
   backgroundDotGap: number
   backgroundDotSize: number
+  panSpeed: number
 }
 
 export interface TemplateTile {
@@ -88,7 +89,8 @@ export const DEFAULT_SETTINGS: Settings = {
     minZoom: 0.2,
     maxZoom: 1.5,
     backgroundDotGap: 20,
-    backgroundDotSize: 1
+    backgroundDotSize: 1,
+    panSpeed: 0.5
   },
   templates: [
     {

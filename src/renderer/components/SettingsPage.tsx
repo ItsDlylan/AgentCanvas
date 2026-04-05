@@ -421,6 +421,15 @@ function CanvasSection({ settings, update }: { settings: Settings; update: (patc
             step={0.5}
           />
         </SettingRow>
+        <SettingRow label="Pan Speed" description="Scroll-to-pan speed multiplier (default 0.5)">
+          <NumberInput
+            value={settings.canvas.panSpeed}
+            onChange={(v) => update({ canvas: { ...settings.canvas, panSpeed: v } })}
+            min={0.1}
+            max={3.0}
+            step={0.1}
+          />
+        </SettingRow>
       </div>
     </div>
   )

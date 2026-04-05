@@ -895,6 +895,7 @@ export default function Canvas() {
             fitView={false}
             selectNodesOnDrag={false}
             panOnScroll
+            panOnScrollSpeed={settings.canvas.panSpeed}
             panOnDrag={[1, 2]}
             zoomOnPinch
             zoomOnDoubleClick={false}

@@ -32,6 +32,7 @@ export interface CanvasSettings {
   maxZoom: number
   backgroundDotGap: number
   backgroundDotSize: number
+  panSpeed: number
 }
 
 export interface TemplateTile {
