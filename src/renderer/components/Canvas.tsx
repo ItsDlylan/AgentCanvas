@@ -73,6 +73,54 @@ function findOpenPosition(
   return { x: 100, y: 100 + existingNodes.length * stepY }
 }
 
+/** Find the nearest open grid cell to a click position. */
+function snapToGrid(
+  click: { x: number; y: number },
+  existingNodes: Node[],
+  width: number,
+  height: number
+): { x: number; y: number } {
+  const stepX = width + GAP
+  const stepY = height + GAP
+
+  // Determine search center in grid coords
+  const centerCol = Math.round((click.x - 100) / stepX)
+  const centerRow = Math.round((click.y - 100) / stepY)
+
+  const isOccupied = (c: number, r: number) => {
+    const pos = { x: 100 + c * stepX, y: 100 + r * stepY }
+    return existingNodes.some((n) => {
+      const nw = (n.style?.width as number) ?? (n.type === 'browser' ? 800 : 640)
+      const nh = (n.style?.height as number) ?? (n.type === 'browser' ? 600 : 400)
+      return (
+        pos.x < n.position.x + nw &&
+        pos.x + width > n.position.x &&
+        pos.y < n.position.y + nh &&
+        pos.y + height > n.position.y
+      )
+    })
+  }
+
+  // Search grid cells in a square around the click, pick closest open one
+  const range = 10
+  let best: { x: number; y: number } | null = null
+  let bestDist = Infinity
+  for (let r = centerRow - range; r <= centerRow + range; r++) {
+    for (let c = centerCol - range; c <= centerCol + range; c++) {
+      if (isOccupied(c, r)) continue
+      const cellCenterX = 100 + c * stepX + width / 2
+      const cellCenterY = 100 + r * stepY + height / 2
+      const d = (click.x - cellCenterX) ** 2 + (click.y - cellCenterY) ** 2
+      if (d < bestDist) {
+        bestDist = d
+        best = { x: 100 + c * stepX, y: 100 + r * stepY }
+      }
+    }
+  }
+
+  return best ?? { x: 100, y: 100 + existingNodes.length * stepY }
+}
+
 export default function Canvas() {
   registerRender('Canvas')
   const { enabled: perfEnabled, stats: perfStats } = usePerformanceDebug()
@@ -407,9 +455,10 @@ export default function Canvas() {
       if (!target.closest('.react-flow__pane')) return
       if (target.closest('.react-flow__node')) return
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      addTerminalAt({ x: position.x - 320, y: position.y - 200 })
+      const safePos = snapToGrid(position, allNodes, 640, 400)
+      addTerminalAt(safePos)
     },
-    [screenToFlowPosition, addTerminalAt]
+    [screenToFlowPosition, addTerminalAt, allNodes]
   )
 
   // ── Workspace management ──
