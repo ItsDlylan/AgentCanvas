@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import type { Settings } from '@/types/settings'
 
 // Re-export for convenience
-export type { Settings, AppearanceSettings, TerminalSettings, BrowserSettings, CanvasSettings, WorkspaceTemplate, TemplateTile } from '@/types/settings'
+export type { Settings, AppearanceSettings, TerminalSettings, BrowserSettings, CanvasSettings, HotkeyAction, HotkeySettings, WorkspaceTemplate, TemplateTile } from '@/types/settings'
 
 // ── Fallback defaults (used before async load completes) ─
 
@@ -18,6 +18,17 @@ const FALLBACK: Settings = {
   terminal: { scrollback: 5000, customEnvVars: {} },
   browser: { defaultUrl: 'https://www.google.com', defaultDevicePreset: 'Default' },
   canvas: { tileGap: 40, defaultZoom: 0.85, minZoom: 0.2, maxZoom: 1.5, backgroundDotGap: 20, backgroundDotSize: 1, panSpeed: 0.5, minimapEnabled: true, minimapPosition: 'bottom-right' as const },
+  hotkeys: {
+    toggleProcessPanel: 'Mod+\\',
+    toggleWorkspacePanel: 'Mod+Shift+\\',
+    toggleMinimap: 'Mod+M',
+    newTerminal: 'Mod+T',
+    newBrowser: 'Mod+B',
+    newNote: 'Mod+N',
+    openSettings: 'Mod+,',
+    cycleFocusForward: 'Ctrl+Tab',
+    cycleFocusBackward: 'Ctrl+Shift+Tab'
+  },
   templates: []
 }
 

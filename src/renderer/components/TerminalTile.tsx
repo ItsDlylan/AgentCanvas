@@ -53,7 +53,7 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
     scrollback: settings.terminal.scrollback
   }
 
-  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, appearance, onExit: killTerminal })
+  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, appearance, hotkeys: settings.hotkeys, onExit: killTerminal })
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)

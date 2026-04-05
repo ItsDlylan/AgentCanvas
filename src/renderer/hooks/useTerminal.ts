@@ -3,6 +3,8 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { isGlobalHotkey } from '@/hooks/useHotkeys'
+import type { HotkeySettings } from '@/types/settings'
 
 export interface TerminalAppearance {
   terminalFontFamily: string
@@ -18,6 +20,7 @@ interface UseTerminalOptions {
   label: string
   cwd?: string
   appearance?: TerminalAppearance
+  hotkeys?: HotkeySettings
   onReady?: () => void
   onExit?: (sessionId: string) => void
 }
@@ -32,7 +35,7 @@ interface UseTerminalOptions {
  * the PTY keeps running, the next mount replays the scrollback buffer from
  * the main process so no history is lost.
  */
-export function useTerminal({ sessionId, label, cwd, appearance, onReady, onExit }: UseTerminalOptions) {
+export function useTerminal({ sessionId, label, cwd, appearance, hotkeys, onReady, onExit }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -139,8 +142,15 @@ export function useTerminal({ sessionId, label, cwd, appearance, onReady, onExit
     terminalRef.current = term
     fitAddonRef.current = fitAddon
 
-    // macOS-native key bindings
+    // macOS-native key bindings + global hotkey interception
     term.attachCustomKeyEventHandler((event) => {
+      // Intercept global hotkeys before xterm processes them.
+      // xterm swallows the event so it won't bubble to window — re-dispatch
+      // a clone on window so useHotkeys picks it up.
+      if (event.type === 'keydown' && hotkeys && isGlobalHotkey(event, hotkeys)) {
+        window.dispatchEvent(new KeyboardEvent('keydown', event))
+        return false
+      }
       if (event.metaKey && event.key === 'Backspace' && event.type === 'keydown') {
         window.terminal.write(sessionId, '\x15')
         return false

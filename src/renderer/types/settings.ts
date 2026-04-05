@@ -52,11 +52,25 @@ export interface WorkspaceTemplate {
   tiles: TemplateTile[]
 }
 
+export type HotkeyAction =
+  | 'toggleProcessPanel'
+  | 'toggleWorkspacePanel'
+  | 'toggleMinimap'
+  | 'newTerminal'
+  | 'newBrowser'
+  | 'newNote'
+  | 'openSettings'
+  | 'cycleFocusForward'
+  | 'cycleFocusBackward'
+
+export type HotkeySettings = Record<HotkeyAction, string>
+
 export interface Settings {
   general: GeneralSettings
   appearance: AppearanceSettings
   terminal: TerminalSettings
   browser: BrowserSettings
   canvas: CanvasSettings
+  hotkeys: HotkeySettings
   templates: WorkspaceTemplate[]
 }

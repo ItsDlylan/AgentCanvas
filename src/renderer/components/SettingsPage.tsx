@@ -1,9 +1,10 @@
-import { memo, useState, useCallback } from 'react'
-import { useSettings, type Settings, type WorkspaceTemplate, type TemplateTile } from '@/hooks/useSettings'
+import { memo, useState, useCallback, useEffect } from 'react'
+import { useSettings, type Settings, type WorkspaceTemplate, type TemplateTile, type HotkeyAction } from '@/hooks/useSettings'
+import { formatHotkey, captureHotkey, DEFAULT_HOTKEYS } from '@/hooks/useHotkeys'
 import { DEVICE_PRESETS } from '@/constants/devicePresets'
 import { v4 as uuid } from 'uuid'
 
-type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'templates'
+type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates'
 
 interface SettingsPageProps {
   onClose: () => void
@@ -15,6 +16,7 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'terminal', label: 'Terminal' },
   { id: 'browser', label: 'Browser' },
   { id: 'canvas', label: 'Canvas' },
+  { id: 'hotkeys', label: 'Hotkeys' },
   { id: 'templates', label: 'Templates' }
 ]
 
@@ -461,6 +463,102 @@ function CanvasSection({ settings, update }: { settings: Settings; update: (patc
   )
 }
 
+// ── Hotkeys section ──────────────────────────────────────
+
+const HOTKEY_ACTION_META: Record<HotkeyAction, { label: string; description: string }> = {
+  toggleProcessPanel: { label: 'Toggle Process Panel', description: 'Show/hide the right panel' },
+  toggleWorkspacePanel: { label: 'Toggle Workspace Panel', description: 'Show/hide the left panel' },
+  toggleMinimap: { label: 'Toggle Minimap', description: 'Show/hide the minimap HUD' },
+  newTerminal: { label: 'New Terminal', description: 'Spawn a new terminal tile' },
+  newBrowser: { label: 'New Browser', description: 'Spawn a new browser tile' },
+  newNote: { label: 'New Note', description: 'Spawn a new note tile' },
+  openSettings: { label: 'Open Settings', description: 'Open the settings page' },
+  cycleFocusForward: { label: 'Next Tile', description: 'Cycle focus to the next tile' },
+  cycleFocusBackward: { label: 'Previous Tile', description: 'Cycle focus to the previous tile' }
+}
+
+function HotkeyInput({
+  binding,
+  isRecording,
+  onStartRecording,
+  onReset
+}: {
+  binding: string
+  isRecording: boolean
+  onStartRecording: () => void
+  onReset: () => void
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={onStartRecording}
+        className={`min-w-[120px] rounded border px-3 py-1.5 text-left font-mono text-xs transition-colors ${
+          isRecording
+            ? 'animate-pulse border-blue-500 bg-blue-500/10 text-blue-300'
+            : 'border-zinc-700 bg-zinc-800 text-zinc-200 hover:bg-zinc-700'
+        }`}
+      >
+        {isRecording ? 'Press a key...' : formatHotkey(binding)}
+      </button>
+      <button
+        onClick={onReset}
+        className="rounded p-1 text-zinc-600 hover:bg-zinc-700 hover:text-zinc-300"
+        title="Reset to default"
+      >
+        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+      </button>
+    </div>
+  )
+}
+
+function HotkeysSection({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }) {
+  const [recordingAction, setRecordingAction] = useState<HotkeyAction | null>(null)
+
+  useEffect(() => {
+    if (!recordingAction) return
+    const handler = (e: KeyboardEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      if (e.key === 'Escape') {
+        setRecordingAction(null)
+        return
+      }
+      const binding = captureHotkey(e)
+      if (!binding) return
+      update({ hotkeys: { ...settings.hotkeys, [recordingAction]: binding } })
+      setRecordingAction(null)
+    }
+    window.addEventListener('keydown', handler, { capture: true })
+    return () => window.removeEventListener('keydown', handler, { capture: true })
+  }, [recordingAction, settings.hotkeys, update])
+
+  return (
+    <div>
+      <h2 className="mb-4 text-sm font-semibold text-zinc-200">Hotkeys</h2>
+      <p className="mb-4 text-[10px] text-zinc-600">
+        Click a binding to record a new shortcut. Press Escape to cancel.
+      </p>
+      <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
+        {(Object.keys(HOTKEY_ACTION_META) as HotkeyAction[]).map((action) => {
+          const meta = HOTKEY_ACTION_META[action]
+          return (
+            <SettingRow key={action} label={meta.label} description={meta.description}>
+              <HotkeyInput
+                binding={settings.hotkeys[action]}
+                isRecording={recordingAction === action}
+                onStartRecording={() => setRecordingAction(action)}
+                onReset={() => update({ hotkeys: { ...settings.hotkeys, [action]: DEFAULT_HOTKEYS[action] } })}
+              />
+            </SettingRow>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Template tile type colors ────────────────────────────
 
 const TILE_COLORS: Record<string, string> = {
@@ -789,6 +887,7 @@ function SettingsPageComponent({ onClose }: SettingsPageProps) {
           {activeCategory === 'terminal' && <TerminalSection settings={settings} update={update} />}
           {activeCategory === 'browser' && <BrowserSection settings={settings} update={update} />}
           {activeCategory === 'canvas' && <CanvasSection settings={settings} update={update} />}
+          {activeCategory === 'hotkeys' && <HotkeysSection settings={settings} update={update} />}
           {activeCategory === 'templates' && <TemplatesSection settings={settings} update={update} />}
         </div>
       </div>

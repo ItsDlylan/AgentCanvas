@@ -54,12 +54,26 @@ export interface WorkspaceTemplate {
   tiles: TemplateTile[]
 }
 
+export type HotkeyAction =
+  | 'toggleProcessPanel'
+  | 'toggleWorkspacePanel'
+  | 'toggleMinimap'
+  | 'newTerminal'
+  | 'newBrowser'
+  | 'newNote'
+  | 'openSettings'
+  | 'cycleFocusForward'
+  | 'cycleFocusBackward'
+
+export type HotkeySettings = Record<HotkeyAction, string>
+
 export interface Settings {
   general: GeneralSettings
   appearance: AppearanceSettings
   terminal: TerminalSettings
   browser: BrowserSettings
   canvas: CanvasSettings
+  hotkeys: HotkeySettings
   templates: WorkspaceTemplate[]
 }
 
@@ -95,6 +109,17 @@ export const DEFAULT_SETTINGS: Settings = {
     panSpeed: 0.5,
     minimapEnabled: true,
     minimapPosition: 'bottom-right'
+  },
+  hotkeys: {
+    toggleProcessPanel: 'Mod+\\',
+    toggleWorkspacePanel: 'Mod+Shift+\\',
+    toggleMinimap: 'Mod+M',
+    newTerminal: 'Mod+T',
+    newBrowser: 'Mod+B',
+    newNote: 'Mod+N',
+    openSettings: 'Mod+,',
+    cycleFocusForward: 'Ctrl+Tab',
+    cycleFocusBackward: 'Ctrl+Shift+Tab'
   },
   templates: [
     {

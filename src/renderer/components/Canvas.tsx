@@ -35,6 +35,8 @@ import { PerformanceOverlay } from './PerformanceOverlay'
 import { BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
 import { DEFAULT_WORKSPACE, type Workspace } from '@/types/workspace'
 import { useSettings, type WorkspaceTemplate } from '@/hooks/useSettings'
+import { useHotkeys } from '@/hooks/useHotkeys'
+import type { HotkeyAction } from '@/types/settings'
 import { SettingsPage } from './SettingsPage'
 
 const nodeTypes: NodeTypes = {
@@ -215,10 +217,15 @@ function snapToGrid(
   return best ?? { x: 100, y: 100 + existingNodes.length * stepY }
 }
 
+// ── Jump hints overlay (Ctrl-hold to show, press letter to jump) ──
+
+// 1-9, 0, then A-Z
+const JUMP_KEYS = '1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
 export default function Canvas() {
   registerRender('Canvas')
   const { enabled: perfEnabled, stats: perfStats } = usePerformanceDebug()
-  const { settings } = useSettings()
+  const { settings, updateSettings } = useSettings()
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   // ── All nodes/edges (across all workspaces) ──
@@ -931,6 +938,139 @@ export default function Canvas() {
   const togglePanel = useCallback(() => setPanelOpen((o) => !o), [])
   const toggleWorkspacePanel = useCallback(() => setWorkspacePanelOpen((o) => !o), [])
 
+  // ── Hotkeys ──
+
+  const cycleFocus = useCallback(
+    (direction: 1 | -1) => {
+      const tileIds = visibleNodes
+        .filter((n) => tileWorkspaceMap.get((n.data as Record<string, unknown>).sessionId as string) === activeWorkspaceId)
+        .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+        .map((n) => (n.data as Record<string, unknown>).sessionId as string)
+
+      if (tileIds.length === 0) return
+
+      const currentIndex = focusedId ? tileIds.indexOf(focusedId) : -1
+      const nextIndex =
+        currentIndex === -1
+          ? direction === 1 ? 0 : tileIds.length - 1
+          : (currentIndex + direction + tileIds.length) % tileIds.length
+
+      focusTerminal(tileIds[nextIndex])
+    },
+    [visibleNodes, tileWorkspaceMap, activeWorkspaceId, focusedId, focusTerminal]
+  )
+
+  const hotkeyActions = useMemo<Record<HotkeyAction, () => void>>(
+    () => ({
+      toggleProcessPanel: togglePanel,
+      toggleWorkspacePanel: toggleWorkspacePanel,
+      toggleMinimap: () => {
+        updateSettings({ canvas: { ...settings.canvas, minimapEnabled: !settings.canvas.minimapEnabled } })
+      },
+      newTerminal: () => addTerminal(),
+      newBrowser: () => addBrowser(),
+      newNote: addNote,
+      openSettings: () => setSettingsOpen(true),
+      cycleFocusForward: () => cycleFocus(1),
+      cycleFocusBackward: () => cycleFocus(-1)
+    }),
+    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, addTerminal, addBrowser, addNote, cycleFocus]
+  )
+
+  useHotkeys(settings.hotkeys, hotkeyActions)
+
+  // ── Ctrl-hold jump hints ──
+  // Hold Ctrl for 300ms (without pressing another key) to show jump badges.
+  // Press the letter to jump to that tile. Releasing Ctrl or pressing any
+  // non-matching key exits jump mode. The delay prevents conflict with
+  // fast Ctrl+C / Ctrl+Z combos.
+
+  const [jumpMode, setJumpMode] = useState(false)
+  const ctrlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Assignments follow the Process Panel display order:
+  // terminals → browsers (active workspace) → notes
+  const jumpAssignments = useMemo(() => {
+    if (!jumpMode) return new Map<string, string>()
+    const terminals = visibleNodes.filter((n) => n.type === 'terminal')
+    const browsers = visibleNodes.filter((n) => {
+      if (n.type !== 'browser') return false
+      const sid = (n.data as Record<string, unknown>).sessionId as string
+      return tileWorkspaceMap.get(sid) === activeWorkspaceId
+    })
+    const notes = visibleNodes.filter((n) => n.type === 'notes')
+    const ordered = [...terminals, ...browsers, ...notes]
+    const map = new Map<string, string>()
+    ordered.forEach((n, i) => {
+      if (i >= JUMP_KEYS.length) return
+      const sid = (n.data as Record<string, unknown>).sessionId as string
+      map.set(sid, JUMP_KEYS[i])
+    })
+    return map
+  }, [jumpMode, visibleNodes, tileWorkspaceMap, activeWorkspaceId])
+
+  useEffect(() => {
+    const clearTimer = () => {
+      if (ctrlTimerRef.current) {
+        clearTimeout(ctrlTimerRef.current)
+        ctrlTimerRef.current = null
+      }
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Bare Ctrl press starts the 300ms timer
+      if (e.key === 'Control' && !e.shiftKey && !e.altKey && !e.metaKey) {
+        clearTimer()
+        ctrlTimerRef.current = setTimeout(() => {
+          ctrlTimerRef.current = null
+          setJumpMode(true)
+        }, 300)
+        return
+      }
+
+      // Any other key while timer is pending → cancel (it's a Ctrl+X combo)
+      if (!jumpMode) {
+        clearTimer()
+        return
+      }
+
+      // In jump mode: Ctrl+key jumps to tile (stay in jump mode while Ctrl held)
+      if (e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey && e.key.length === 1) {
+        const pressed = e.key.toUpperCase()
+        for (const [sessionId, key] of jumpAssignments) {
+          if (key === pressed) {
+            e.preventDefault()
+            e.stopPropagation()
+            focusTerminal(sessionId)
+            return
+          }
+        }
+      }
+    }
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Control') {
+        clearTimer()
+        setJumpMode(false)
+      }
+    }
+
+    const onBlur = () => {
+      clearTimer()
+      setJumpMode(false)
+    }
+
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      clearTimer()
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [jumpMode, jumpAssignments, focusTerminal])
+
   return (
     <FocusedTerminalContext.Provider value={focusCtx}>
       <div className="flex h-screen w-screen flex-col">
@@ -1038,6 +1178,7 @@ export default function Canvas() {
             tileWorkspaceMap={tileWorkspaceMap}
             workspaces={workspaces}
             activeWorkspaceId={activeWorkspaceId}
+            jumpHints={jumpAssignments}
           />
           {/* Right-click context menu */}
           {contextMenu && (

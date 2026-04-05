@@ -22,6 +22,16 @@ interface ProcessPanelProps {
   tileWorkspaceMap: Map<string, string>
   workspaces: Workspace[]
   activeWorkspaceId: string
+  jumpHints: Map<string, string>
+}
+
+function JumpBadge({ hint }: { hint: string | undefined }) {
+  if (!hint) return null
+  return (
+    <span className="ml-auto shrink-0 rounded border border-blue-400/50 bg-blue-500/20 px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-blue-300">
+      {hint}
+    </span>
+  )
 }
 
 const STATUS_CONFIG: Record<TerminalStatus, { dot: string; label: string; labelColor: string }> = {
@@ -51,7 +61,8 @@ function ProcessPanelComponent({
   onToggle,
   tileWorkspaceMap,
   workspaces,
-  activeWorkspaceId
+  activeWorkspaceId,
+  jumpHints
 }: ProcessPanelProps) {
   registerRender('ProcessPanel')
   const terminals = nodes.filter((n) => n.type === 'terminal')
@@ -142,6 +153,7 @@ function ProcessPanelComponent({
             </span>
           )}
         </div>
+        <JumpBadge hint={jumpHints.get(sessionId)} />
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -258,6 +270,7 @@ function ProcessPanelComponent({
                         </span>
                       )}
                     </div>
+                    <JumpBadge hint={jumpHints.get(sessionId)} />
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -316,6 +329,7 @@ function ProcessPanelComponent({
                         </span>
                       </div>
                     </div>
+                    <JumpBadge hint={jumpHints.get(sessionId)} />
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
