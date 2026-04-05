@@ -312,7 +312,7 @@ terminalManager.on('exit', (id: string, exitCode: number) => {
   mainWindow?.webContents.send('terminal:exit', { id, exitCode })
 })
 
-terminalManager.on('status', (id: string, info: { status: string; cwd: string; foregroundProcess: string }) => {
+terminalManager.on('status', (id: string, info: { status: string; cwd: string; foregroundProcess: string; metadata?: Record<string, unknown> }) => {
   mainWindow?.webContents.send('terminal:status', { id, ...info })
   recordIpc('terminal:status')
 })
@@ -364,6 +364,11 @@ canvasApi.on('browser-resize', (info: { sessionId: string; width: number; height
 canvasApi.on('browser-close', (info: { sessionId: string }, reply: (result: unknown) => void) => {
   mainWindow?.webContents.send('canvas:browser-close', { sessionId: info.sessionId })
   reply({ ok: true })
+})
+
+canvasApi.on('terminal-metadata', (info: { terminalId: string; key: string; value: unknown }, reply: (result: unknown) => void) => {
+  const ok = terminalManager.setMetadata(info.terminalId, info.key, info.value)
+  reply(ok ? { ok: true } : { ok: false, error: 'Terminal not found' })
 })
 
 canvasApi.on('status-request', (reply: (data: unknown) => void) => {

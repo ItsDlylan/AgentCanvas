@@ -137,6 +137,25 @@ export class CanvasApi extends EventEmitter {
       return
     }
 
+    if (req.method === 'POST' && url === '/api/terminal/metadata') {
+      this.readBody(req).then((body) => {
+        const { terminalId, key, value } = body as { terminalId?: string; key?: string; value?: unknown }
+        if (!terminalId || !key) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'terminalId and key are required' }))
+          return
+        }
+        this.emit('terminal-metadata', { terminalId, key, value }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
     res.writeHead(404)
     res.end(JSON.stringify({ error: 'Not found' }))
   }

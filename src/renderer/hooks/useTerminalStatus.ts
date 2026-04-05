@@ -6,6 +6,7 @@ export interface TerminalStatusInfo {
   status: TerminalStatus
   cwd: string
   foregroundProcess: string
+  metadata?: Record<string, unknown>
 }
 
 type Listener = () => void

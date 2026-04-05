@@ -6,6 +6,7 @@ export interface TerminalStatusInfo {
   status: TerminalStatus
   cwd: string
   foregroundProcess: string
+  metadata?: Record<string, unknown>
 }
 
 export interface TerminalAPI {
@@ -15,7 +16,7 @@ export interface TerminalAPI {
   resize: (id: string, cols: number, rows: number) => Promise<void>
   kill: (id: string) => Promise<void>
   getStatus: (id: string) => Promise<TerminalStatusInfo | undefined>
-  list: () => Promise<Array<{ id: string; cwd: string; status: TerminalStatus; foregroundProcess: string; label: string; createdAt: number; cdpPort: number }>>
+  list: () => Promise<Array<{ id: string; cwd: string; status: TerminalStatus; foregroundProcess: string; label: string; createdAt: number; cdpPort: number; metadata: Record<string, unknown> }>>
   onData: (callback: (id: string, data: string) => void) => () => void
   onExit: (callback: (id: string, exitCode: number) => void) => () => void
   onStatus: (callback: (id: string, info: TerminalStatusInfo) => void) => () => void
@@ -51,9 +52,9 @@ const terminalAPI: TerminalAPI = {
   onStatus: (callback) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      { id, status, cwd, foregroundProcess }: { id: string; status: TerminalStatus; cwd: string; foregroundProcess: string }
+      { id, status, cwd, foregroundProcess, metadata }: { id: string; status: TerminalStatus; cwd: string; foregroundProcess: string; metadata?: Record<string, unknown> }
     ) => {
-      callback(id, { status, cwd, foregroundProcess })
+      callback(id, { status, cwd, foregroundProcess, metadata })
     }
     ipcRenderer.on('terminal:status', handler)
     return () => ipcRenderer.removeListener('terminal:status', handler)

@@ -24,6 +24,7 @@ export interface TerminalSessionInfo {
   label: string
   createdAt: number
   cdpPort: number
+  metadata: Record<string, unknown>
 }
 
 export interface TerminalSession {
@@ -39,6 +40,7 @@ export interface TerminalSession {
   lastDataAt: number
   idleTimer: ReturnType<typeof setTimeout> | null
   cdpPort: number
+  metadata: Record<string, unknown>
 }
 
 // Patterns that indicate the terminal is waiting for user input
@@ -133,7 +135,8 @@ export class TerminalManager extends EventEmitter {
       createdAt: Date.now(),
       lastDataAt: Date.now(),
       idleTimer: null,
-      cdpPort
+      cdpPort,
+      metadata: {}
     }
 
     this.sessions.set(id, session)
@@ -196,7 +199,8 @@ export class TerminalManager extends EventEmitter {
     this.emit('status', id, {
       status: session.status,
       cwd: session.cwd,
-      foregroundProcess: session.foregroundProcess
+      foregroundProcess: session.foregroundProcess,
+      metadata: session.metadata
     })
   }
 
@@ -317,7 +321,8 @@ export class TerminalManager extends EventEmitter {
       foregroundProcess: s.foregroundProcess,
       label: s.label,
       createdAt: s.createdAt,
-      cdpPort: s.cdpPort
+      cdpPort: s.cdpPort,
+      metadata: s.metadata
     }
   }
 
@@ -329,8 +334,17 @@ export class TerminalManager extends EventEmitter {
       foregroundProcess: s.foregroundProcess,
       label: s.label,
       createdAt: s.createdAt,
-      cdpPort: s.cdpPort
+      cdpPort: s.cdpPort,
+      metadata: s.metadata
     }))
+  }
+
+  setMetadata(id: string, key: string, value: unknown): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    session.metadata[key] = value
+    this.throttledEmitStatus(id)
+    return true
   }
 
   destroyAll(): void {

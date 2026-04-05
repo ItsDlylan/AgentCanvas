@@ -160,6 +160,14 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
               {shortenPath(cwd)}
             </span>
           )}
+          {statusInfo?.metadata?.worktree && (
+            <span
+              className="pl-4 text-[10px] text-emerald-500"
+              title={(statusInfo.metadata.worktree as { url?: string }).url}
+            >
+              {(statusInfo.metadata.worktree as { branch?: string }).branch}
+            </span>
+          )}
         </div>
         <button
           className="titlebar-no-drag rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
