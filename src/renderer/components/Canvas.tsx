@@ -20,6 +20,7 @@ import '@xyflow/react/dist/style.css'
 import { v4 as uuid } from 'uuid'
 import { TerminalTile } from './TerminalTile'
 import { BrowserTile } from './BrowserTile'
+import { NotesTile } from './NotesTile'
 import { ProcessPanel } from './ProcessPanel'
 import { WorkspacePanel } from './WorkspacePanel'
 import { OffscreenIndicators } from './OffscreenIndicators'
@@ -33,7 +34,16 @@ import { DEFAULT_WORKSPACE, type Workspace } from '@/types/workspace'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
-  browser: BrowserTile as unknown as NodeTypes['browser']
+  browser: BrowserTile as unknown as NodeTypes['browser'],
+  notes: NotesTile as unknown as NodeTypes['notes']
+}
+
+function defaultTileWidth(type: string | undefined): number {
+  return type === 'browser' ? 800 : type === 'notes' ? 400 : 640
+}
+
+function defaultTileHeight(type: string | undefined): number {
+  return type === 'browser' ? 600 : type === 'notes' ? 400 : 400
 }
 
 const defaultViewport = { x: 100, y: 100, zoom: 0.85 }
@@ -58,8 +68,8 @@ function findOpenPosition(
       y: 100 + Math.floor(slot / colSpan) * stepY
     }
     const overlaps = existingNodes.some((n) => {
-      const nw = (n.style?.width as number) ?? (n.type === 'browser' ? 800 : 640)
-      const nh = (n.style?.height as number) ?? (n.type === 'browser' ? 600 : 400)
+      const nw = (n.style?.width as number) ?? defaultTileWidth(n.type)
+      const nh = (n.style?.height as number) ?? defaultTileHeight(n.type)
       return (
         candidate.x < n.position.x + nw &&
         candidate.x + width > n.position.x &&
@@ -90,8 +100,8 @@ function snapToGrid(
   const isOccupied = (c: number, r: number) => {
     const pos = { x: 100 + c * stepX, y: 100 + r * stepY }
     return existingNodes.some((n) => {
-      const nw = (n.style?.width as number) ?? (n.type === 'browser' ? 800 : 640)
-      const nh = (n.style?.height as number) ?? (n.type === 'browser' ? 600 : 400)
+      const nw = (n.style?.width as number) ?? defaultTileWidth(n.type)
+      const nh = (n.style?.height as number) ?? defaultTileHeight(n.type)
       return (
         pos.x < n.position.x + nw &&
         pos.x + width > n.position.x &&
@@ -149,6 +159,41 @@ export default function Canvas() {
   const activeWorkspaceIdRef = useRef(activeWorkspaceId)
   activeWorkspaceIdRef.current = activeWorkspaceId
 
+  // ── Note close/delete (must be defined before visibleNodes) ──
+
+  const removeTileFromCanvas = useCallback((sessionId: string) => {
+    setAllNodes((nds) =>
+      nds.filter((n) => (n.data as Record<string, unknown>).sessionId !== sessionId)
+    )
+    setAllEdges((eds) =>
+      eds.filter((e) => e.source !== sessionId && e.target !== sessionId)
+    )
+    setTileWorkspaceMap((prev) => {
+      const next = new Map(prev)
+      next.delete(sessionId)
+      return next
+    })
+    setFocusedId((prev) => (prev === sessionId ? null : prev))
+  }, [])
+
+  const closeNote = useCallback(
+    (sessionId: string) => {
+      // Soft close: mark as soft-deleted in file, remove from canvas
+      window.note.save(sessionId, { isSoftDeleted: true })
+      removeTileFromCanvas(sessionId)
+    },
+    [removeTileFromCanvas]
+  )
+
+  const deleteNote = useCallback(
+    (sessionId: string) => {
+      // Hard delete: remove from canvas AND delete file
+      window.note.delete(sessionId)
+      removeTileFromCanvas(sessionId)
+    },
+    [removeTileFromCanvas]
+  )
+
   // ── Compute visible nodes/edges for active workspace ──
   // Browser nodes from ALL workspaces stay mounted so their webview + CDP connection
   // persists across workspace switches (agents can keep controlling them).
@@ -172,9 +217,16 @@ export default function Canvas() {
               data: { ...n.data, isBackground: true }
             }
           }
+          // Inject close/delete callbacks into notes data
+          if (n.type === 'notes') {
+            return {
+              ...n,
+              data: { ...n.data, onClose: closeNote, onDelete: deleteNote }
+            }
+          }
           return n
         }),
-    [allNodes, tileWorkspaceMap, activeWorkspaceId]
+    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote]
   )
 
   const visibleNodeIds = useMemo(
@@ -188,9 +240,37 @@ export default function Canvas() {
   )
 
   // ── ReactFlow change handlers (operate on full arrays) ──
+  const notesSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      setAllNodes((nds) => applyNodeChanges(changes, nds))
+      setAllNodes((nds) => {
+        const updated = applyNodeChanges(changes, nds)
+
+        // Debounced save of note position/size when dragged or resized
+        const hasPositionOrDimension = changes.some(
+          (c) => c.type === 'position' || c.type === 'dimensions'
+        )
+        if (hasPositionOrDimension) {
+          if (notesSaveTimerRef.current) clearTimeout(notesSaveTimerRef.current)
+          notesSaveTimerRef.current = setTimeout(() => {
+            notesSaveTimerRef.current = null
+            for (const n of updated) {
+              if (n.type !== 'notes') continue
+              const sid = (n.data as Record<string, unknown>).sessionId as string
+              const w = (n.style?.width as number) ?? 400
+              const h = (n.style?.height as number) ?? 400
+              window.note.save(sid, {
+                position: n.position,
+                width: n.measured?.width ?? w,
+                height: n.measured?.height ?? h
+              })
+            }
+          }, 500)
+        }
+
+        return updated
+      })
     },
     []
   )
@@ -203,7 +283,28 @@ export default function Canvas() {
   )
 
   const onConnect: OnConnect = useCallback(
-    (params) => setAllEdges((eds) => addEdge(params, eds)),
+    (params) => {
+      setAllEdges((eds) => addEdge(params, eds))
+
+      // When connecting a terminal to a notes tile, sync the note's workspace to the terminal's
+      const sourceNode = allNodesRef.current.find((n) => n.id === params.source)
+      const targetNode = allNodesRef.current.find((n) => n.id === params.target)
+      if (sourceNode?.type === 'terminal' && targetNode?.type === 'notes') {
+        const terminalWs = tileWorkspaceMapRef.current.get(params.source!)
+        if (terminalWs) {
+          const noteId = params.target!
+          setTileWorkspaceMap((prev) => new Map(prev).set(noteId, terminalWs))
+          window.note.save(noteId, { workspaceId: terminalWs, linkedTerminalId: params.source! })
+        }
+      } else if (sourceNode?.type === 'notes' && targetNode?.type === 'terminal') {
+        const terminalWs = tileWorkspaceMapRef.current.get(params.target!)
+        if (terminalWs) {
+          const noteId = params.source!
+          setTileWorkspaceMap((prev) => new Map(prev).set(noteId, terminalWs))
+          window.note.save(noteId, { workspaceId: terminalWs, linkedTerminalId: params.target! })
+        }
+      }
+    },
     []
   )
 
@@ -214,6 +315,50 @@ export default function Canvas() {
         setWorkspaces(data.workspaces)
         setActiveWorkspaceId(data.activeWorkspaceId)
       }
+    })
+  }, [])
+
+  // ── Load persisted notes on mount ──
+  useEffect(() => {
+    window.note.list().then((noteFiles) => {
+      const notesToRestore = noteFiles.filter((nf) => !nf.meta.isSoftDeleted)
+      if (notesToRestore.length === 0) return
+
+      setAllNodes((nds) => {
+        // Avoid duplicates if this effect re-runs (HMR / StrictMode)
+        const existingIds = new Set(nds.map((n) => n.id))
+        const newNodes: Node[] = []
+        const wsMapEntries: [string, string][] = []
+
+        for (const nf of notesToRestore) {
+          const { noteId, label, workspaceId, position, width, height } = nf.meta
+          if (existingIds.has(noteId)) continue
+          tileCount++
+          newNodes.push({
+            id: noteId,
+            type: 'notes',
+            position,
+            style: { width, height },
+            data: {
+              sessionId: noteId,
+              label,
+              linkedTerminalId: nf.meta.linkedTerminalId
+            },
+            dragHandle: '.notes-tile-header'
+          })
+          wsMapEntries.push([noteId, workspaceId])
+        }
+
+        if (newNodes.length > 0) {
+          setTileWorkspaceMap((prev) => {
+            const next = new Map(prev)
+            for (const [sid, wsId] of wsMapEntries) next.set(sid, wsId)
+            return next
+          })
+        }
+
+        return [...nds, ...newNodes]
+      })
     })
   }, [])
 
@@ -253,20 +398,15 @@ export default function Canvas() {
       )
       if (node?.type === 'browser') {
         window.browser.destroy(sessionId)
+      } else if (node?.type === 'notes') {
+        // For notes in killTerminal (e.g. workspace removal), delete the file
+        window.note.delete(sessionId)
       } else {
         window.terminal.kill(sessionId)
       }
-      setAllNodes((nds) =>
-        nds.filter((n) => (n.data as Record<string, unknown>).sessionId !== sessionId)
-      )
-      setTileWorkspaceMap((prev) => {
-        const next = new Map(prev)
-        next.delete(sessionId)
-        return next
-      })
-      setFocusedId((prev) => (prev === sessionId ? null : prev))
+      removeTileFromCanvas(sessionId)
     },
-    []
+    [removeTileFromCanvas]
   )
 
   const addBrowserAt = useCallback(
@@ -399,8 +539,8 @@ export default function Canvas() {
         (n) => (n.data as Record<string, unknown>).sessionId === sessionId
       )
       if (!node) return
-      const defaultW = node.type === 'browser' ? 800 : 640
-      const defaultH = node.type === 'browser' ? 600 : 400
+      const defaultW = defaultTileWidth(node.type)
+      const defaultH = defaultTileHeight(node.type)
       const cx = (node.measured?.width ?? (node.style?.width as number) ?? defaultW) / 2
       const cy = (node.measured?.height ?? (node.style?.height as number) ?? defaultH) / 2
       setCenter(node.position.x + cx, node.position.y + cy, {
@@ -448,6 +588,73 @@ export default function Canvas() {
   )
 
   const addTerminal = useCallback((width?: number, height?: number) => addTerminalAt(undefined, width, height), [addTerminalAt])
+
+  const addNoteAt = useCallback(
+    (position?: { x: number; y: number }) => {
+      tileCount++
+      const sessionId = uuid()
+      const visible = visibleNodes
+      const pos = position ?? findOpenPosition(visible, 400, 400, 4)
+      const label = `Note ${tileCount}`
+      const wsId = activeWorkspaceIdRef.current
+      const newNode: Node = {
+        id: sessionId,
+        type: 'notes',
+        position: pos,
+        style: { width: 400, height: 400 },
+        data: {
+          sessionId,
+          label,
+          onClose: closeNote,
+          onDelete: deleteNote
+        },
+        dragHandle: '.notes-tile-header'
+      }
+      setAllNodes((nds) => [...nds, newNode])
+      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, wsId))
+      setFocusedId(sessionId)
+      setCenter(pos.x + 200, pos.y + 200, { zoom: 1, duration: 400 })
+
+      // Persist metadata
+      window.note.save(sessionId, {
+        noteId: sessionId,
+        label,
+        workspaceId: wsId,
+        isSoftDeleted: false,
+        position: pos,
+        width: 400,
+        height: 400,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      })
+    },
+    [visibleNodes, setCenter, closeNote, deleteNote]
+  )
+
+  const addNote = useCallback(() => addNoteAt(undefined), [addNoteAt])
+
+  // ── Right-click context menu ──
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowPos: { x: number; y: number } } | null>(null)
+
+  const onContextMenu = useCallback(
+    (event: React.MouseEvent) => {
+      const target = event.target as HTMLElement
+      if (!target.closest('.react-flow__pane')) return
+      if (target.closest('.react-flow__node')) return
+      event.preventDefault()
+      const flowPos = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      setContextMenu({ x: event.clientX, y: event.clientY, flowPos })
+    },
+    [screenToFlowPosition]
+  )
+
+  // Close context menu on any click
+  useEffect(() => {
+    if (!contextMenu) return
+    const handler = () => setContextMenu(null)
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [contextMenu])
 
   const onDoubleClick = useCallback(
     (event: React.MouseEvent) => {
@@ -550,6 +757,8 @@ export default function Canvas() {
         )
         if (node?.type === 'browser') {
           window.browser.destroy(sessionId)
+        } else if (node?.type === 'notes') {
+          window.note.delete(sessionId)
         } else {
           window.terminal.kill(sessionId)
         }
@@ -635,6 +844,7 @@ export default function Canvas() {
             onConnect={onConnect}
             onPaneClick={onPaneClick}
             onDoubleClick={onDoubleClick}
+            onContextMenu={onContextMenu}
             nodeTypes={nodeTypes}
             defaultViewport={defaultViewport}
             proOptions={proOptions}
@@ -687,12 +897,55 @@ export default function Canvas() {
             onKill={killTerminal}
             onAddTerminal={addTerminal}
             onAddBrowser={addBrowser}
+            onAddNote={addNote}
             open={panelOpen}
             onToggle={togglePanel}
             tileWorkspaceMap={tileWorkspaceMap}
             workspaces={workspaces}
             activeWorkspaceId={activeWorkspaceId}
           />
+          {/* Right-click context menu */}
+          {contextMenu && (
+            <div
+              className="fixed z-50 min-w-[160px] rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-xl"
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => {
+                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 640, 400)
+                  addTerminalAt(safePos)
+                  setContextMenu(null)
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+              >
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+                Terminal
+              </button>
+              <button
+                onClick={() => {
+                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 800, 600)
+                  addBrowserAt(safePos)
+                  setContextMenu(null)
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+              >
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                Browser
+              </button>
+              <button
+                onClick={() => {
+                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 400, 400)
+                  addNoteAt(safePos)
+                  setContextMenu(null)
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+              >
+                <span className="h-2 w-2 rounded-full bg-amber-400" />
+                Note
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </FocusedTerminalContext.Provider>

@@ -13,20 +13,23 @@ const DEFAULT_TERMINAL_W = 640
 const DEFAULT_TERMINAL_H = 400
 const DEFAULT_BROWSER_W = 800
 const DEFAULT_BROWSER_H = 600
+const DEFAULT_NOTES_W = 400
+const DEFAULT_NOTES_H = 400
 const INDICATOR_SIZE = 12
 const EDGE_PADDING = 24
 
-const STATUS_COLORS: Record<TerminalStatus | 'browser', string> = {
+const STATUS_COLORS: Record<TerminalStatus | 'browser' | 'notes', string> = {
   idle: '#71717a',
   running: '#22c55e',
   waiting: '#fbbf24',
-  browser: '#10b981'
+  browser: '#10b981',
+  notes: '#f59e0b'
 }
 
 interface Indicator {
   sessionId: string
   label: string
-  status: TerminalStatus | 'browser'
+  status: TerminalStatus | 'browser' | 'notes'
   screenX: number
   screenY: number
   isFocused: boolean
@@ -52,12 +55,12 @@ function compute(
   const results: Indicator[] = []
 
   for (const node of nodes) {
-    if (node.type !== 'terminal' && node.type !== 'browser') continue
+    if (node.type !== 'terminal' && node.type !== 'browser' && node.type !== 'notes') continue
     const data = node.data as Record<string, unknown>
     const sessionId = data.sessionId as string
     const label = data.label as string
-    const defaultW = node.type === 'browser' ? DEFAULT_BROWSER_W : DEFAULT_TERMINAL_W
-    const defaultH = node.type === 'browser' ? DEFAULT_BROWSER_H : DEFAULT_TERMINAL_H
+    const defaultW = node.type === 'browser' ? DEFAULT_BROWSER_W : node.type === 'notes' ? DEFAULT_NOTES_W : DEFAULT_TERMINAL_W
+    const defaultH = node.type === 'browser' ? DEFAULT_BROWSER_H : node.type === 'notes' ? DEFAULT_NOTES_H : DEFAULT_TERMINAL_H
     const tileW = node.measured?.width ?? (node.style?.width as number) ?? defaultW
     const tileH = node.measured?.height ?? (node.style?.height as number) ?? defaultH
     const cx = node.position.x + tileW / 2
@@ -79,7 +82,7 @@ function compute(
     results.push({
       sessionId,
       label,
-      status: node.type === 'browser' ? 'browser' : (statuses.get(sessionId)?.status ?? 'running'),
+      status: node.type === 'browser' ? 'browser' : node.type === 'notes' ? 'notes' : (statuses.get(sessionId)?.status ?? 'running'),
       screenX: Math.max(EDGE_PADDING, Math.min(cw - EDGE_PADDING, cw / 2 + dx * s)),
       screenY: Math.max(EDGE_PADDING, Math.min(ch - EDGE_PADDING, ch / 2 + dy * s)),
       isFocused: focusedId === sessionId

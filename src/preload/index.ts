@@ -157,6 +157,42 @@ const workspaceAPI: WorkspaceAPI = {
 
 contextBridge.exposeInMainWorld('workspace', workspaceAPI)
 
+// ── Note API ──────────────────────────────────────────────
+
+export interface NoteMeta {
+  noteId: string
+  label: string
+  workspaceId: string
+  isSoftDeleted: boolean
+  position: { x: number; y: number }
+  width: number
+  height: number
+  linkedTerminalId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface NoteFile {
+  meta: NoteMeta
+  content: Record<string, unknown>
+}
+
+export interface NoteAPI {
+  load: (noteId: string) => Promise<NoteFile | null>
+  save: (noteId: string, meta: Partial<NoteMeta>, content?: Record<string, unknown>) => Promise<void>
+  delete: (noteId: string) => Promise<void>
+  list: () => Promise<NoteFile[]>
+}
+
+const noteAPI: NoteAPI = {
+  load: (noteId) => ipcRenderer.invoke('note:load', { noteId }),
+  save: (noteId, meta, content) => ipcRenderer.invoke('note:save', { noteId, meta, content }),
+  delete: (noteId) => ipcRenderer.invoke('note:delete', { noteId }),
+  list: () => ipcRenderer.invoke('note:list')
+}
+
+contextBridge.exposeInMainWorld('note', noteAPI)
+
 // Debug APIs
 contextBridge.exposeInMainWorld('debug', {
   profile: (durationMs = 3000) => ipcRenderer.invoke('debug:profile', durationMs),

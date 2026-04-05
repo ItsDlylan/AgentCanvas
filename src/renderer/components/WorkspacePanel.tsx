@@ -152,6 +152,7 @@ function WorkspacePanelComponent({
               const wsTiles = isExpanded ? tilesForWorkspace(ws.id) : []
               const wsTerminals = wsTiles.filter((n) => n.type === 'terminal')
               const wsBrowsers = wsTiles.filter((n) => n.type === 'browser')
+              const wsNotes = wsTiles.filter((n) => n.type === 'notes')
 
               return (
                 <div key={ws.id}>
@@ -249,7 +250,7 @@ function WorkspacePanelComponent({
                   {/* Expanded process list */}
                   {isExpanded && (
                     <div className="ml-4 mt-0.5 flex flex-col gap-0.5 border-l border-zinc-800 pl-2">
-                      {wsTerminals.length === 0 && wsBrowsers.length === 0 && (
+                      {wsTerminals.length === 0 && wsBrowsers.length === 0 && wsNotes.length === 0 && (
                         <span className="px-2 py-1.5 text-[10px] text-zinc-600">No tiles</span>
                       )}
 
@@ -330,6 +331,42 @@ function WorkspacePanelComponent({
                             </span>
                             <span className="ml-auto shrink-0 text-[9px] text-emerald-500/70">
                               Browser
+                            </span>
+                          </button>
+                        )
+                      })}
+
+                      {/* Notes */}
+                      {wsNotes.map((node) => {
+                        const data = node.data as Record<string, unknown>
+                        const sessionId = data.sessionId as string
+                        const label = data.label as string
+                        const isFocused = focusedId === sessionId && isActive
+
+                        return (
+                          <button
+                            key={node.id}
+                            onClick={() => onFocusProcess(ws.id, sessionId)}
+                            className={`group flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors ${
+                              isFocused
+                                ? 'bg-blue-500/10 ring-1 ring-blue-500/20'
+                                : 'hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                isFocused ? 'bg-blue-400' : 'bg-amber-400'
+                              }`}
+                            />
+                            <span
+                              className={`truncate text-[11px] ${
+                                isFocused ? 'text-blue-300' : 'text-zinc-400'
+                              }`}
+                            >
+                              {label}
+                            </span>
+                            <span className="ml-auto shrink-0 text-[9px] text-amber-400/70">
+                              Note
                             </span>
                           </button>
                         )

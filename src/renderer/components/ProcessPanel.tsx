@@ -14,6 +14,7 @@ interface ProcessPanelProps {
   onKill: (sessionId: string) => void
   onAddTerminal: (width?: number, height?: number) => void
   onAddBrowser: (preset?: DevicePreset) => void
+  onAddNote: () => void
   open: boolean
   onToggle: () => void
   tileWorkspaceMap: Map<string, string>
@@ -42,6 +43,7 @@ function ProcessPanelComponent({
   onKill,
   onAddTerminal,
   onAddBrowser,
+  onAddNote,
   open,
   onToggle,
   tileWorkspaceMap,
@@ -51,6 +53,7 @@ function ProcessPanelComponent({
   registerRender('ProcessPanel')
   const terminals = nodes.filter((n) => n.type === 'terminal')
   const allBrowsers = nodes.filter((n) => n.type === 'browser')
+  const notes = nodes.filter((n) => n.type === 'notes')
   const browsers = allBrowsers.filter((n) => {
     const sid = (n.data as Record<string, unknown>).sessionId as string
     return tileWorkspaceMap.get(sid) === activeWorkspaceId
@@ -187,13 +190,13 @@ function ProcessPanelComponent({
             Processes
           </span>
           <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-400">
-            {terminals.length + allBrowsers.length}
+            {terminals.length + allBrowsers.length + notes.length}
           </span>
         </div>
 
         {/* Process list */}
         <div className="flex-1 overflow-y-auto p-2">
-          {terminals.length === 0 && allBrowsers.length === 0 ? (
+          {terminals.length === 0 && allBrowsers.length === 0 && notes.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-8 text-center">
               <span className="text-xs text-zinc-600">No active tiles</span>
             </div>
@@ -272,6 +275,61 @@ function ProcessPanelComponent({
 
               {/* Browser entries (current workspace) */}
               {browsers.map((node) => renderBrowserEntry(node, false))}
+
+              {/* Note entries */}
+              {notes.map((node) => {
+                const data = node.data as Record<string, unknown>
+                const sessionId = data.sessionId as string
+                const label = data.label as string
+                const isFocused = focusedId === sessionId
+
+                return (
+                  <button
+                    key={node.id}
+                    onClick={() => onFocus(sessionId)}
+                    className={`group flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors ${
+                      isFocused
+                        ? 'bg-blue-500/10 ring-1 ring-blue-500/20'
+                        : 'hover:bg-zinc-800'
+                    }`}
+                  >
+                    <span
+                      className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${isFocused ? 'bg-blue-400' : 'bg-amber-400'}`}
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`truncate text-xs font-medium ${
+                            isFocused ? 'text-blue-300' : 'text-zinc-300'
+                          }`}
+                        >
+                          {label}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-amber-400/70">
+                          Note
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onKill(sessionId)
+                      }}
+                      className="mt-0.5 shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition-opacity hover:bg-zinc-700 hover:text-red-400 group-hover:opacity-100"
+                    >
+                      <svg
+                        className="h-3 w-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </button>
+                )
+              })}
             </div>
 
             {/* Background browsers from other workspaces */}
@@ -295,7 +353,7 @@ function ProcessPanelComponent({
         </div>
 
         {/* Footer */}
-        <div className="flex gap-1.5 border-t border-zinc-800 p-2">
+        <div className="flex flex-wrap gap-1.5 border-t border-zinc-800 p-2">
           {/* Terminal split button */}
           <div className="relative flex-1" onMouseDown={(e) => e.stopPropagation()}>
             {terminalPresetsOpen && (
@@ -375,6 +433,17 @@ function ProcessPanelComponent({
               </button>
             </div>
           </div>
+
+          {/* Note button */}
+          <button
+            onClick={() => onAddNote()}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-zinc-800 py-2 text-xs font-medium text-amber-400 transition-colors hover:bg-zinc-700 hover:text-amber-300"
+          >
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Note
+          </button>
         </div>
       </div>
     </>

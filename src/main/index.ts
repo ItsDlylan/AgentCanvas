@@ -7,6 +7,7 @@ import { CdpProxy } from './cdp-proxy'
 import { CanvasApi } from './canvas-api'
 import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
+import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -172,6 +173,24 @@ ipcMain.handle('workspace:pickDirectory', async () => {
   })
   if (result.canceled || result.filePaths.length === 0) return null
   return result.filePaths[0]
+})
+
+// ── Note IPC Handlers ───────────────────────────────────
+
+ipcMain.handle('note:load', (_event, { noteId }) => {
+  return loadNote(noteId)
+})
+
+ipcMain.handle('note:save', (_event, { noteId, meta, content }) => {
+  saveNote(noteId, meta, content)
+})
+
+ipcMain.handle('note:delete', (_event, { noteId }) => {
+  deleteNote(noteId)
+})
+
+ipcMain.handle('note:list', () => {
+  return listNotes()
 })
 
 // ── Performance Monitor IPC ──────────────────────────────
@@ -358,6 +377,9 @@ app.whenReady().then(async () => {
       callback(false)
     }
   })
+
+  // Ensure ~/AgentCanvas/tmp/ exists for note storage
+  ensureNoteDir()
 
   // Start the local control API before creating the window/terminals
   canvasApiPort = await canvasApi.start()
