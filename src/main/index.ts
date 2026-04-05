@@ -61,6 +61,25 @@ function createWindow(): void {
 // ── IPC Handlers ──────────────────────────────────────────
 
 ipcMain.handle('terminal:create', async (_event, { id, label, cwd }) => {
+  // Reconnect: session already exists (component remounted after workspace switch)
+  const existingSession = terminalManager.getSession(id)
+  if (existingSession) {
+    console.log(`[terminal:create] reconnect for ${id}, scrollback=${(scrollbackBuffers.get(id) || '').length} bytes`)
+    pausedSessions.add(id)
+    // Fold any pending unflushed data into scrollback before clearing
+    const pending = dataBuffers.get(id) || ''
+    if (pending) {
+      let buf = (scrollbackBuffers.get(id) || '') + pending
+      if (buf.length > MAX_SCROLLBACK) {
+        const trimPoint = buf.indexOf('\n', buf.length - MAX_SCROLLBACK)
+        buf = trimPoint >= 0 ? buf.slice(trimPoint + 1) : buf.slice(-MAX_SCROLLBACK)
+      }
+      scrollbackBuffers.set(id, buf)
+      dataBuffers.delete(id)
+    }
+    return { cdpPort: existingSession.cdpPort, isReconnect: true }
+  }
+
   const extraEnv: Record<string, string> = {}
   if (canvasApiPort) {
     extraEnv.AGENT_CANVAS_API = `http://127.0.0.1:${canvasApiPort}`
@@ -83,6 +102,13 @@ ipcMain.handle('terminal:resize', (_event, { id, cols, rows }) => {
 
 ipcMain.handle('terminal:kill', (_event, { id }) => {
   terminalManager.kill(id)
+})
+
+ipcMain.handle('terminal:resume', (_event, { id }) => {
+  const scrollback = scrollbackBuffers.get(id) || ''
+  console.log(`[terminal:resume] ${id}, returning ${scrollback.length} bytes`)
+  pausedSessions.delete(id)
+  return { scrollback }
 })
 
 ipcMain.handle('terminal:list', () => {
@@ -218,6 +244,11 @@ const dataBuffers = new Map<string, string>()
 let flushScheduled = false
 const FLUSH_INTERVAL_MS = 4
 
+// ── Scrollback Buffers (for workspace-switch reconnect) ──
+const scrollbackBuffers = new Map<string, string>()
+const pausedSessions = new Set<string>()
+const MAX_SCROLLBACK = 1_048_576 // 1MB
+
 function scheduleFlush(): void {
   if (flushScheduled) return
   flushScheduled = true
@@ -232,12 +263,25 @@ function scheduleFlush(): void {
 }
 
 terminalManager.on('data', (id: string, data: string) => {
+  // Always accumulate in scrollback buffer (for reconnect after workspace switch)
+  let buf = (scrollbackBuffers.get(id) || '') + data
+  if (buf.length > MAX_SCROLLBACK) {
+    const trimPoint = buf.indexOf('\n', buf.length - MAX_SCROLLBACK)
+    buf = trimPoint >= 0 ? buf.slice(trimPoint + 1) : buf.slice(-MAX_SCROLLBACK)
+  }
+  scrollbackBuffers.set(id, buf)
+
+  // Only buffer for IPC if not paused (paused during reconnect)
+  if (pausedSessions.has(id)) return
   const existing = dataBuffers.get(id) || ''
   dataBuffers.set(id, existing + data)
   scheduleFlush()
 })
 
 terminalManager.on('exit', (id: string, exitCode: number) => {
+  scrollbackBuffers.delete(id)
+  pausedSessions.delete(id)
+  dataBuffers.delete(id)
   mainWindow?.webContents.send('terminal:exit', { id, exitCode })
 })
 

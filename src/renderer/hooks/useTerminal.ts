@@ -17,6 +17,10 @@ interface UseTerminalOptions {
  *
  * Uses WebGL addon (like Collaborator) — GPU-rendered terminals don't
  * trigger CPU re-rasterization during canvas pan transforms.
+ *
+ * Supports reconnect: when a workspace switch unmounts the component while
+ * the PTY keeps running, the next mount replays the scrollback buffer from
+ * the main process so no history is lost.
  */
 export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -40,6 +44,10 @@ export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTermi
   useEffect(() => {
     if (!containerRef.current || mountedRef.current) return
     mountedRef.current = true
+
+    let cancelled = false
+    let unsubData: (() => void) | null = null
+    let unsubExit: (() => void) | null = null
 
     const term = new Terminal({
       cursorBlink: false,   // Saves 5-13% CPU per terminal (rAF loop)
@@ -130,32 +138,69 @@ export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTermi
       return true
     })
 
-    window.terminal.create(sessionId, label, cwd)
-
+    // Forward user input to PTY
     term.onData((data) => {
       window.terminal.write(sessionId, data)
     })
 
-    const unsubData = window.terminal.onData((id, data) => {
-      if (id === sessionId) term.write(data)
+    // Subscribe to PTY output — queue during replay, write directly when live
+    let live = false
+    const dataQueue: string[] = []
+
+    unsubData = window.terminal.onData((id, data) => {
+      if (id !== sessionId) return
+      if (live) {
+        term.write(data)
+      } else {
+        dataQueue.push(data)
+      }
     })
 
-    const unsubExit = window.terminal.onExit((id) => {
+    unsubExit = window.terminal.onExit((id) => {
       if (id === sessionId) {
         onExit?.(sessionId)
       }
     })
 
-    window.terminal.resize(sessionId, term.cols, term.rows)
+    // Create or reconnect to PTY session
+    ;(async () => {
+      console.log(`[useTerminal] create called for ${sessionId}`)
+      const result = await window.terminal.create(sessionId, label, cwd)
+      console.log(`[useTerminal] create returned:`, result)
+      if (cancelled) return
 
-    onReady?.()
+      if (result.isReconnect) {
+        console.log(`[useTerminal] reconnect — calling resume for ${sessionId}`)
+        const { scrollback } = await window.terminal.resume(sessionId)
+        if (cancelled) return
+        console.log(`[useTerminal] resume returned ${scrollback.length} bytes of scrollback`)
+        // Wait a frame for WebGL renderer to finish initializing dimensions
+        await new Promise(resolve => requestAnimationFrame(resolve))
+        if (cancelled) return
+        if (scrollback) term.write(scrollback)
+        // Discard queued data — it's all pre-pause and already in the scrollback
+        dataQueue.length = 0
+      } else {
+        console.log(`[useTerminal] new session — flushing ${dataQueue.length} queued items`)
+        // New terminal — flush any early data that arrived during create
+        for (const d of dataQueue) term.write(d)
+        dataQueue.length = 0
+      }
+
+      if (cancelled) return
+      live = true
+
+      window.terminal.resize(sessionId, term.cols, term.rows)
+      onReady?.()
+    })()
 
     return () => {
+      cancelled = true
       for (const type of mouseFixEvents) {
         container.removeEventListener(type, fixMouseCoords, { capture: true })
       }
-      unsubData()
-      unsubExit()
+      unsubData?.()
+      unsubExit?.()
       term.dispose()
       mountedRef.current = false
     }

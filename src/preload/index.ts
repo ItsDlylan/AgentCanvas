@@ -9,7 +9,8 @@ export interface TerminalStatusInfo {
 }
 
 export interface TerminalAPI {
-  create: (id: string, label: string, cwd?: string) => Promise<{ cdpPort: number }>
+  create: (id: string, label: string, cwd?: string) => Promise<{ cdpPort: number; isReconnect?: boolean }>
+  resume: (id: string) => Promise<{ scrollback: string }>
   write: (id: string, data: string) => Promise<void>
   resize: (id: string, cols: number, rows: number) => Promise<void>
   kill: (id: string) => Promise<void>
@@ -24,6 +25,7 @@ export interface TerminalAPI {
 
 const terminalAPI: TerminalAPI = {
   create: (id, label, cwd) => ipcRenderer.invoke('terminal:create', { id, label, cwd }),
+  resume: (id) => ipcRenderer.invoke('terminal:resume', { id }),
   write: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
   resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
   kill: (id) => ipcRenderer.invoke('terminal:kill', { id }),
