@@ -169,6 +169,7 @@ export interface NoteMeta {
   width: number
   height: number
   linkedTerminalId?: string
+  linkedNoteId?: string
   createdAt: number
   updatedAt: number
 }

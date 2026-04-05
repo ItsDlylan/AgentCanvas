@@ -379,23 +379,76 @@ export default function Canvas() {
     (params) => {
       setAllEdges((eds) => addEdge(params, eds))
 
-      // When connecting a terminal to a notes tile, sync the note's workspace to the terminal's
       const sourceNode = allNodesRef.current.find((n) => n.id === params.source)
       const targetNode = allNodesRef.current.find((n) => n.id === params.target)
+
+      // Helper: persist linkedTerminalId on a note and sync its workspace
+      const linkNoteToTerminal = (noteId: string, terminalId: string) => {
+        const terminalWs = tileWorkspaceMapRef.current.get(terminalId)
+        if (terminalWs) {
+          setTileWorkspaceMap((prev) => new Map(prev).set(noteId, terminalWs))
+          window.note.save(noteId, { workspaceId: terminalWs, linkedTerminalId: terminalId })
+        } else {
+          window.note.save(noteId, { linkedTerminalId: terminalId })
+        }
+        // Update node data so grouping picks it up immediately
+        setAllNodes((nds) =>
+          nds.map((n) =>
+            n.id === noteId
+              ? { ...n, data: { ...n.data, linkedTerminalId: terminalId } }
+              : n
+          )
+        )
+      }
+
+      // terminal -> notes
       if (sourceNode?.type === 'terminal' && targetNode?.type === 'notes') {
-        const terminalWs = tileWorkspaceMapRef.current.get(params.source!)
-        if (terminalWs) {
-          const noteId = params.target!
-          setTileWorkspaceMap((prev) => new Map(prev).set(noteId, terminalWs))
-          window.note.save(noteId, { workspaceId: terminalWs, linkedTerminalId: params.source! })
+        linkNoteToTerminal(params.target!, params.source!)
+      }
+      // notes -> terminal
+      else if (sourceNode?.type === 'notes' && targetNode?.type === 'terminal') {
+        linkNoteToTerminal(params.source!, params.target!)
+      }
+      // notes -> notes: propagate terminal link, or create standalone note group
+      else if (sourceNode?.type === 'notes' && targetNode?.type === 'notes') {
+        const sourceLinkedTerminal = (sourceNode.data as Record<string, unknown>).linkedTerminalId as string | undefined
+        const targetLinkedTerminal = (targetNode.data as Record<string, unknown>).linkedTerminalId as string | undefined
+        if (sourceLinkedTerminal && !targetLinkedTerminal) {
+          linkNoteToTerminal(params.target!, sourceLinkedTerminal)
+        } else if (targetLinkedTerminal && !sourceLinkedTerminal) {
+          linkNoteToTerminal(params.source!, targetLinkedTerminal)
+        } else if (!sourceLinkedTerminal && !targetLinkedTerminal) {
+          // Standalone note group — source is the parent, target becomes child
+          // If the source already has a linkedNoteId, propagate that root instead
+          const sourceLinkedNote = (sourceNode.data as Record<string, unknown>).linkedNoteId as string | undefined
+          const parentNoteId = sourceLinkedNote || params.source!
+          window.note.save(params.target!, { linkedNoteId: parentNoteId })
+          setAllNodes((nds) =>
+            nds.map((n) =>
+              n.id === params.target
+                ? { ...n, data: { ...n.data, linkedNoteId: parentNoteId } }
+                : n
+            )
+          )
         }
-      } else if (sourceNode?.type === 'notes' && targetNode?.type === 'terminal') {
-        const terminalWs = tileWorkspaceMapRef.current.get(params.target!)
-        if (terminalWs) {
-          const noteId = params.source!
-          setTileWorkspaceMap((prev) => new Map(prev).set(noteId, terminalWs))
-          window.note.save(noteId, { workspaceId: terminalWs, linkedTerminalId: params.target! })
-        }
+      }
+      // terminal -> browser or browser -> terminal: persist linkedTerminalId on browser node data
+      else if (sourceNode?.type === 'terminal' && targetNode?.type === 'browser') {
+        setAllNodes((nds) =>
+          nds.map((n) =>
+            n.id === params.target
+              ? { ...n, data: { ...n.data, linkedTerminalId: params.source } }
+              : n
+          )
+        )
+      } else if (sourceNode?.type === 'browser' && targetNode?.type === 'terminal') {
+        setAllNodes((nds) =>
+          nds.map((n) =>
+            n.id === params.source
+              ? { ...n, data: { ...n.data, linkedTerminalId: params.target } }
+              : n
+          )
+        )
       }
     },
     []
@@ -435,7 +488,8 @@ export default function Canvas() {
             data: {
               sessionId: noteId,
               label,
-              linkedTerminalId: nf.meta.linkedTerminalId
+              linkedTerminalId: nf.meta.linkedTerminalId,
+              linkedNoteId: nf.meta.linkedNoteId
             },
             dragHandle: '.notes-tile-header'
           })
@@ -452,6 +506,46 @@ export default function Canvas() {
 
         return [...nds, ...newNodes]
       })
+
+      // Reconstruct edges from persisted note metadata
+      const edgesToRestore: Edge[] = []
+      const edgeIds = new Set<string>()
+      for (const nf of notesToRestore) {
+        const { noteId, linkedTerminalId, linkedNoteId } = nf.meta
+        if (linkedTerminalId) {
+          const edgeId = `edge-${linkedTerminalId}-${noteId}`
+          if (!edgeIds.has(edgeId)) {
+            edgesToRestore.push({
+              id: edgeId,
+              source: linkedTerminalId,
+              target: noteId,
+              animated: true,
+              style: { stroke: '#22c55e', strokeWidth: 2 }
+            })
+            edgeIds.add(edgeId)
+          }
+        }
+        if (linkedNoteId) {
+          const edgeId = `edge-${linkedNoteId}-${noteId}`
+          if (!edgeIds.has(edgeId)) {
+            edgesToRestore.push({
+              id: edgeId,
+              source: linkedNoteId,
+              target: noteId,
+              animated: true,
+              style: { stroke: '#f59e0b', strokeWidth: 2 }
+            })
+            edgeIds.add(edgeId)
+          }
+        }
+      }
+      if (edgesToRestore.length > 0) {
+        setAllEdges((eds) => {
+          const existing = new Set(eds.map((e) => e.id))
+          const newEdges = edgesToRestore.filter((e) => !existing.has(e.id))
+          return newEdges.length > 0 ? [...eds, ...newEdges] : eds
+        })
+      }
     })
   }, [])
 
@@ -1310,6 +1404,7 @@ export default function Canvas() {
 
           <ProcessPanel
             nodes={visibleNodes}
+            edges={visibleEdges}
             focusedId={focusedId}
             onFocus={focusTerminal}
             onFocusProcess={handleFocusProcess}

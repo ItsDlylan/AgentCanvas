@@ -10,6 +10,7 @@ export interface NotesNodeData {
   sessionId: string
   label: string
   linkedTerminalId?: string
+  linkedNoteId?: string
   onClose?: (sessionId: string) => void
   onDelete?: (sessionId: string) => void
 }
