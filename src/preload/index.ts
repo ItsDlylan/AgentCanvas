@@ -130,6 +130,31 @@ const browserAPI: BrowserAPI = {
 
 contextBridge.exposeInMainWorld('browser', browserAPI)
 
+// ── Workspace API ────────────────────────────────────────
+
+export interface WorkspaceInfo {
+  id: string
+  name: string
+  path: string | null
+  isDefault: boolean
+  createdAt: number
+}
+
+export interface WorkspaceAPI {
+  load: () => Promise<{ workspaces: WorkspaceInfo[]; activeWorkspaceId: string }>
+  save: (workspaces: WorkspaceInfo[], activeWorkspaceId: string) => Promise<void>
+  pickDirectory: () => Promise<string | null>
+}
+
+const workspaceAPI: WorkspaceAPI = {
+  load: () => ipcRenderer.invoke('workspace:load'),
+  save: (workspaces, activeWorkspaceId) =>
+    ipcRenderer.invoke('workspace:save', { workspaces, activeWorkspaceId }),
+  pickDirectory: () => ipcRenderer.invoke('workspace:pickDirectory')
+}
+
+contextBridge.exposeInMainWorld('workspace', workspaceAPI)
+
 // Debug APIs
 contextBridge.exposeInMainWorld('debug', {
   profile: (durationMs = 3000) => ipcRenderer.invoke('debug:profile', durationMs),

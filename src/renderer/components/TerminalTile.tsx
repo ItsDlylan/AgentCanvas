@@ -28,7 +28,7 @@ function shortenPath(path: string): string {
 
 function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
-  const { sessionId, label } = data as unknown as TerminalNodeData
+  const { sessionId, label, cwd: initialCwd } = data as unknown as TerminalNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
@@ -42,7 +42,7 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
   const cwd = statusInfo?.cwd
   const cfg = STATUS_CONFIG[status]
 
-  const { containerRef, fit } = useTerminal({ sessionId, label, onExit: killTerminal })
+  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, onExit: killTerminal })
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)

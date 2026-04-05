@@ -4,13 +4,16 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  useNodesState,
-  useEdgesState,
   useReactFlow,
+  applyNodeChanges,
+  applyEdgeChanges,
   type Node,
   type Edge,
   type NodeTypes,
+  type NodeChange,
+  type EdgeChange,
   type OnConnect,
+  type Viewport,
   addEdge
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
@@ -18,6 +21,7 @@ import { v4 as uuid } from 'uuid'
 import { TerminalTile } from './TerminalTile'
 import { BrowserTile } from './BrowserTile'
 import { ProcessPanel } from './ProcessPanel'
+import { WorkspacePanel } from './WorkspacePanel'
 import { OffscreenIndicators } from './OffscreenIndicators'
 import { FocusedTerminalContext } from '@/hooks/useFocusedTerminal'
 import { PanDetector } from './PanDetector'
@@ -25,6 +29,7 @@ import { navigateBrowser } from '@/hooks/useBrowserNavigation'
 import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug'
 import { PerformanceOverlay } from './PerformanceOverlay'
 import { BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
+import { DEFAULT_WORKSPACE, type Workspace } from '@/types/workspace'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
@@ -71,23 +76,113 @@ function findOpenPosition(
 export default function Canvas() {
   registerRender('Canvas')
   const { enabled: perfEnabled, stats: perfStats } = usePerformanceDebug()
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+
+  // ── All nodes/edges (across all workspaces) ──
+  const [allNodes, setAllNodes] = useState<Node[]>([])
+  const [allEdges, setAllEdges] = useState<Edge[]>([])
+
+  // ── Workspace state ──
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WORKSPACE])
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState('default')
+  const [tileWorkspaceMap, setTileWorkspaceMap] = useState<Map<string, string>>(new Map())
+  const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true)
+  const viewportCache = useRef<Map<string, Viewport>>(new Map())
+
   const [panelOpen, setPanelOpen] = useState(true)
   const [focusedId, setFocusedId] = useState<string | null>(null)
-  const { setCenter, screenToFlowPosition } = useReactFlow()
+  const { setCenter, getViewport, setViewport, fitView, screenToFlowPosition } = useReactFlow()
 
-  const nodesRef = useRef(nodes)
-  nodesRef.current = nodes
+  const allNodesRef = useRef(allNodes)
+  allNodesRef.current = allNodes
+
+  const tileWorkspaceMapRef = useRef(tileWorkspaceMap)
+  tileWorkspaceMapRef.current = tileWorkspaceMap
+
+  const activeWorkspaceIdRef = useRef(activeWorkspaceId)
+  activeWorkspaceIdRef.current = activeWorkspaceId
+
+  // ── Compute visible nodes/edges for active workspace ──
+  const visibleNodes = useMemo(
+    () =>
+      allNodes.filter((n) => {
+        const sid = (n.data as Record<string, unknown>).sessionId as string
+        return tileWorkspaceMap.get(sid) === activeWorkspaceId
+      }),
+    [allNodes, tileWorkspaceMap, activeWorkspaceId]
+  )
+
+  const visibleNodeIds = useMemo(
+    () => new Set(visibleNodes.map((n) => n.id)),
+    [visibleNodes]
+  )
+
+  const visibleEdges = useMemo(
+    () => allEdges.filter((e) => visibleNodeIds.has(e.source) && visibleNodeIds.has(e.target)),
+    [allEdges, visibleNodeIds]
+  )
+
+  // ── ReactFlow change handlers (operate on full arrays) ──
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      setAllNodes((nds) => applyNodeChanges(changes, nds))
+    },
+    []
+  )
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      setAllEdges((eds) => applyEdgeChanges(changes, eds))
+    },
+    []
+  )
 
   const onConnect: OnConnect = useCallback(
-    (params) => setEdges((eds) => addEdge(params, eds)),
-    [setEdges]
+    (params) => setAllEdges((eds) => addEdge(params, eds)),
+    []
   )
+
+  // ── Load workspaces on mount ──
+  useEffect(() => {
+    window.workspace.load().then((data) => {
+      if (data) {
+        setWorkspaces(data.workspaces)
+        setActiveWorkspaceId(data.activeWorkspaceId)
+      }
+    })
+  }, [])
+
+  // ── Save workspaces when they change ──
+  const workspacesLoaded = useRef(false)
+  useEffect(() => {
+    // Skip the initial render before load completes
+    if (!workspacesLoaded.current) {
+      workspacesLoaded.current = true
+      return
+    }
+    window.workspace.save(workspaces, activeWorkspaceId)
+  }, [workspaces, activeWorkspaceId])
+
+  // ── Global terminal:exit listener (cleans up tiles even when hidden) ──
+  useEffect(() => {
+    const unsub = window.terminal.onExit((id) => {
+      setAllNodes((nds) =>
+        nds.filter((n) => (n.data as Record<string, unknown>).sessionId !== id)
+      )
+      setTileWorkspaceMap((prev) => {
+        const next = new Map(prev)
+        next.delete(id)
+        return next
+      })
+      setFocusedId((prev) => (prev === id ? null : prev))
+    })
+    return unsub
+  }, [])
+
+  // ── Tile management ──
 
   const killTerminal = useCallback(
     (sessionId: string) => {
-      const node = nodesRef.current.find(
+      const node = allNodesRef.current.find(
         (n) => (n.data as Record<string, unknown>).sessionId === sessionId
       )
       if (node?.type === 'browser') {
@@ -95,12 +190,17 @@ export default function Canvas() {
       } else {
         window.terminal.kill(sessionId)
       }
-      setNodes((nds) =>
+      setAllNodes((nds) =>
         nds.filter((n) => (n.data as Record<string, unknown>).sessionId !== sessionId)
       )
+      setTileWorkspaceMap((prev) => {
+        const next = new Map(prev)
+        next.delete(sessionId)
+        return next
+      })
       setFocusedId((prev) => (prev === sessionId ? null : prev))
     },
-    [setNodes]
+    []
   )
 
   const addBrowserAt = useCallback(
@@ -109,7 +209,8 @@ export default function Canvas() {
       const sessionId = uuid()
       const tileW = preset ? preset.width + BROWSER_CHROME_WIDTH : 800
       const tileH = preset ? preset.height + BROWSER_CHROME_HEIGHT : 600
-      const pos = position ?? findOpenPosition(nodesRef.current, tileW, tileH, 3)
+      const visible = visibleNodes
+      const pos = position ?? findOpenPosition(visible, tileW, tileH, 3)
       const newNode: Node = {
         id: sessionId,
         type: 'browser',
@@ -123,11 +224,12 @@ export default function Canvas() {
         },
         dragHandle: '.browser-tile-header'
       }
-      setNodes((nds) => [...nds, newNode])
+      setAllNodes((nds) => [...nds, newNode])
+      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, activeWorkspaceIdRef.current))
       setFocusedId(sessionId)
       setCenter(pos.x + tileW / 2, pos.y + tileH / 2, { zoom: 1, duration: 400 })
     },
-    [setNodes, setCenter]
+    [visibleNodes, setCenter]
   )
 
   const addBrowser = useCallback((preset?: DevicePreset) => addBrowserAt(undefined, preset), [addBrowserAt])
@@ -140,7 +242,7 @@ export default function Canvas() {
 
       // If a browser already exists for this terminal, navigate it instead of spawning a new one
       if (isLinked) {
-        const existing = nodesRef.current.find(
+        const existing = allNodesRef.current.find(
           (n) => n.type === 'browser' && (n.data as Record<string, unknown>).linkedTerminalId === terminalId
         )
         if (existing) {
@@ -151,7 +253,7 @@ export default function Canvas() {
         }
       }
 
-      const terminalNode = nodesRef.current.find(
+      const terminalNode = allNodesRef.current.find(
         (n) => (n.data as Record<string, unknown>).sessionId === terminalId
       )
 
@@ -176,7 +278,15 @@ export default function Canvas() {
         dragHandle: '.browser-tile-header'
       }
 
-      setNodes((nds) => [...nds, newNode])
+      setAllNodes((nds) => [...nds, newNode])
+
+      // Inherit workspace from the terminal, or fall back to active workspace
+      const terminalWorkspace = isLinked
+        ? tileWorkspaceMapRef.current.get(terminalId)
+        : undefined
+      setTileWorkspaceMap((prev) =>
+        new Map(prev).set(sessionId, terminalWorkspace ?? activeWorkspaceIdRef.current)
+      )
 
       // Create edge only if linked to a real terminal
       if (terminalNode) {
@@ -187,12 +297,12 @@ export default function Canvas() {
           animated: true,
           style: { stroke: '#10b981', strokeWidth: 2 }
         }
-        setEdges((eds) => [...eds, newEdge])
+        setAllEdges((eds) => [...eds, newEdge])
       }
 
       setFocusedId(sessionId)
     },
-    [setNodes, setEdges]
+    []
   )
 
   useEffect(() => {
@@ -205,7 +315,7 @@ export default function Canvas() {
   // Handle agentic browser resize via API
   useEffect(() => {
     const unsub = window.terminal.onBrowserResize((sessionId, width, height) => {
-      setNodes(nds => nds.map(n => {
+      setAllNodes(nds => nds.map(n => {
         const data = n.data as Record<string, unknown>
         if (data.sessionId === sessionId) {
           return { ...n, width, height, style: { ...n.style, width, height } }
@@ -214,12 +324,12 @@ export default function Canvas() {
       }))
     })
     return unsub
-  }, [setNodes])
+  }, [])
 
   const focusTerminal = useCallback(
     (sessionId: string) => {
       setFocusedId(sessionId)
-      const node = nodesRef.current.find(
+      const node = allNodesRef.current.find(
         (n) => (n.data as Record<string, unknown>).sessionId === sessionId
       )
       if (!node) return
@@ -243,7 +353,14 @@ export default function Canvas() {
     (position?: { x: number; y: number }, width = 640, height = 400) => {
       tileCount++
       const sessionId = uuid()
-      const pos = position ?? findOpenPosition(nodesRef.current, width, height, 4)
+      const visible = visibleNodes
+      const pos = position ?? findOpenPosition(visible, width, height, 4)
+
+      // Get workspace path for terminal CWD
+      const wsId = activeWorkspaceIdRef.current
+      const ws = workspaces.find((w) => w.id === wsId)
+      const cwd = ws?.path ?? undefined
+
       const newNode: Node = {
         id: sessionId,
         type: 'terminal',
@@ -251,15 +368,17 @@ export default function Canvas() {
         style: { width, height },
         data: {
           sessionId,
-          label: `Terminal ${tileCount}`
+          label: `Terminal ${tileCount}`,
+          cwd
         },
         dragHandle: '.terminal-tile-header'
       }
-      setNodes((nds) => [...nds, newNode])
+      setAllNodes((nds) => [...nds, newNode])
+      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, wsId))
       setFocusedId(sessionId)
       setCenter(pos.x + width / 2, pos.y + height / 2, { zoom: 1, duration: 400 })
     },
-    [setNodes, setCenter]
+    [visibleNodes, workspaces, setCenter]
   )
 
   const addTerminal = useCallback((width?: number, height?: number) => addTerminalAt(undefined, width, height), [addTerminalAt])
@@ -275,13 +394,152 @@ export default function Canvas() {
     [screenToFlowPosition, addTerminalAt]
   )
 
+  // ── Workspace management ──
+
+  // Switch to a workspace and focus a specific tile
+  const handleFocusProcess = useCallback(
+    (workspaceId: string, sessionId: string) => {
+      if (workspaceId !== activeWorkspaceId) {
+        // Save current viewport, switch workspace
+        viewportCache.current.set(activeWorkspaceId, getViewport())
+        setActiveWorkspaceId(workspaceId)
+        // Focus the tile after workspace switch settles
+        requestAnimationFrame(() => {
+          setFocusedId(sessionId)
+          const node = allNodesRef.current.find(
+            (n) => (n.data as Record<string, unknown>).sessionId === sessionId
+          )
+          if (!node) return
+          const defaultW = node.type === 'browser' ? 800 : 640
+          const defaultH = node.type === 'browser' ? 600 : 400
+          const cx = (node.measured?.width ?? (node.style?.width as number) ?? defaultW) / 2
+          const cy = (node.measured?.height ?? (node.style?.height as number) ?? defaultH) / 2
+          setCenter(node.position.x + cx, node.position.y + cy, { zoom: 1, duration: 400 })
+        })
+      } else {
+        focusTerminal(sessionId)
+      }
+    },
+    [activeWorkspaceId, getViewport, setCenter, focusTerminal]
+  )
+
+  const handleSelectWorkspace = useCallback(
+    (id: string) => {
+      if (id === activeWorkspaceId) return
+      // Save current viewport
+      viewportCache.current.set(activeWorkspaceId, getViewport())
+      setActiveWorkspaceId(id)
+      setFocusedId(null)
+      // Restore target viewport
+      const saved = viewportCache.current.get(id)
+      if (saved) {
+        // Use requestAnimationFrame to ensure ReactFlow has processed the new nodes
+        requestAnimationFrame(() => {
+          setViewport(saved, { duration: 300 })
+        })
+      } else {
+        requestAnimationFrame(() => {
+          fitView({ duration: 300, padding: 0.2 })
+        })
+      }
+    },
+    [activeWorkspaceId, getViewport, setViewport, fitView]
+  )
+
+  const handleAddWorkspace = useCallback(async () => {
+    const dirPath = await window.workspace.pickDirectory()
+    if (!dirPath) return
+    // Check if workspace with this path already exists
+    const existing = workspaces.find((w) => w.path === dirPath)
+    if (existing) {
+      handleSelectWorkspace(existing.id)
+      return
+    }
+    const name = dirPath.split('/').pop() || dirPath
+    const ws: Workspace = {
+      id: uuid(),
+      name,
+      path: dirPath,
+      isDefault: false,
+      createdAt: Date.now()
+    }
+    setWorkspaces((prev) => [...prev, ws])
+    handleSelectWorkspace(ws.id)
+  }, [workspaces, handleSelectWorkspace])
+
+  const handleRemoveWorkspace = useCallback(
+    (id: string) => {
+      const ws = workspaces.find((w) => w.id === id)
+      if (!ws || ws.isDefault) return
+
+      // Kill all tiles belonging to this workspace
+      const tilesToKill: string[] = []
+      for (const [sessionId, wsId] of tileWorkspaceMapRef.current) {
+        if (wsId === id) tilesToKill.push(sessionId)
+      }
+      for (const sessionId of tilesToKill) {
+        const node = allNodesRef.current.find(
+          (n) => (n.data as Record<string, unknown>).sessionId === sessionId
+        )
+        if (node?.type === 'browser') {
+          window.browser.destroy(sessionId)
+        } else {
+          window.terminal.kill(sessionId)
+        }
+      }
+      setAllNodes((nds) =>
+        nds.filter((n) => !tilesToKill.includes((n.data as Record<string, unknown>).sessionId as string))
+      )
+      setAllEdges((eds) =>
+        eds.filter((e) => !tilesToKill.includes(e.source) && !tilesToKill.includes(e.target))
+      )
+      setTileWorkspaceMap((prev) => {
+        const next = new Map(prev)
+        for (const sid of tilesToKill) next.delete(sid)
+        return next
+      })
+
+      // Remove workspace
+      setWorkspaces((prev) => prev.filter((w) => w.id !== id))
+      viewportCache.current.delete(id)
+
+      // Switch to default if we just removed the active workspace
+      if (activeWorkspaceId === id) {
+        setActiveWorkspaceId('default')
+        setFocusedId(null)
+        requestAnimationFrame(() => {
+          fitView({ duration: 300, padding: 0.2 })
+        })
+      }
+    },
+    [workspaces, activeWorkspaceId, fitView]
+  )
+
+  const handleRenameWorkspace = useCallback(
+    (id: string, name: string) => {
+      setWorkspaces((prev) =>
+        prev.map((w) => (w.id === id && !w.isDefault ? { ...w, name } : w))
+      )
+    },
+    []
+  )
+
+  // ── Context + render ──
+
   const focusCtx = useMemo(
     () => ({ focusedId, setFocusedId, killTerminal }),
     [focusedId, killTerminal]
   )
 
+  const activeWorkspace = useMemo(
+    () => workspaces.find((w) => w.id === activeWorkspaceId) ?? DEFAULT_WORKSPACE,
+    [workspaces, activeWorkspaceId]
+  )
+
   const proOptions = useMemo(() => ({ hideAttribution: true }), [])
   const togglePanel = useCallback(() => setPanelOpen((o) => !o), [])
+  const toggleWorkspacePanel = useCallback(() => setWorkspacePanelOpen((o) => !o), [])
+
   return (
     <FocusedTerminalContext.Provider value={focusCtx}>
       <div className="flex h-screen w-screen flex-col">
@@ -290,15 +548,21 @@ export default function Canvas() {
         <div className="titlebar-drag flex h-12 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-4">
           <div className="flex items-center gap-3 pl-20">
             <span className="text-sm font-semibold text-zinc-300">Agent Canvas</span>
+            {!activeWorkspace.isDefault && (
+              <>
+                <span className="text-zinc-600">|</span>
+                <span className="text-sm font-medium text-zinc-400">{activeWorkspace.name}</span>
+              </>
+            )}
           </div>
           <div className="titlebar-no-drag flex items-center gap-2" />
         </div>
 
-        {/* Canvas + Panel */}
+        {/* Canvas + Panels */}
         <div className="relative flex-1 overflow-hidden">
           <ReactFlow
-            nodes={nodes}
-            edges={edges}
+            nodes={visibleNodes}
+            edges={visibleEdges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
@@ -327,14 +591,29 @@ export default function Canvas() {
             <PanDetector />
           </ReactFlow>
 
+          <WorkspacePanel
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
+            tileWorkspaceMap={tileWorkspaceMap}
+            nodes={allNodes}
+            focusedId={focusedId}
+            onSelect={handleSelectWorkspace}
+            onFocusProcess={handleFocusProcess}
+            onAdd={handleAddWorkspace}
+            onRemove={handleRemoveWorkspace}
+            onRename={handleRenameWorkspace}
+            open={workspacePanelOpen}
+            onToggle={toggleWorkspacePanel}
+          />
+
           <OffscreenIndicators
-            nodes={nodes}
+            nodes={visibleNodes}
             focusedId={focusedId}
             onFocus={focusTerminal}
           />
 
           <ProcessPanel
-            nodes={nodes}
+            nodes={visibleNodes}
             focusedId={focusedId}
             onFocus={focusTerminal}
             onKill={killTerminal}

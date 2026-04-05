@@ -1,11 +1,12 @@
 /// <reference types="vite/client" />
 
-import type { TerminalAPI, BrowserAPI } from '../preload/index'
+import type { TerminalAPI, BrowserAPI, WorkspaceAPI } from '../preload/index'
 
 declare global {
   interface Window {
     terminal: TerminalAPI
     browser: BrowserAPI
+    workspace: WorkspaceAPI
   }
 
   namespace JSX {

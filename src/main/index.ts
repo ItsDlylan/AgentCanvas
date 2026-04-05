@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { TerminalManager } from './terminal-manager'
@@ -6,6 +6,7 @@ import { BrowserManager } from './browser-manager'
 import { CdpProxy } from './cdp-proxy'
 import { CanvasApi } from './canvas-api'
 import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
+import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -127,6 +128,26 @@ ipcMain.handle('browser:detachCdp', (_event, { sessionId }) => {
 
 ipcMain.handle('browser:cdpCommand', async (_event, { sessionId, method, params }) => {
   return cdpProxy.sendCommand(sessionId, method, params)
+})
+
+// ── Workspace IPC Handlers ───────────────────────────────
+
+ipcMain.handle('workspace:load', () => {
+  return loadWorkspaces()
+})
+
+ipcMain.handle('workspace:save', (_event, { workspaces, activeWorkspaceId }) => {
+  saveWorkspaces({ workspaces, activeWorkspaceId })
+})
+
+ipcMain.handle('workspace:pickDirectory', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Select Project Directory'
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
+  return result.filePaths[0]
 })
 
 // ── Performance Monitor IPC ──────────────────────────────

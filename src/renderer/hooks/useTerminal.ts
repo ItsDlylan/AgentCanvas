@@ -7,6 +7,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 interface UseTerminalOptions {
   sessionId: string
   label: string
+  cwd?: string
   onReady?: () => void
   onExit?: (sessionId: string) => void
 }
@@ -17,7 +18,7 @@ interface UseTerminalOptions {
  * Uses WebGL addon (like Collaborator) — GPU-rendered terminals don't
  * trigger CPU re-rasterization during canvas pan transforms.
  */
-export function useTerminal({ sessionId, label, onReady, onExit }: UseTerminalOptions) {
+export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -129,7 +130,7 @@ export function useTerminal({ sessionId, label, onReady, onExit }: UseTerminalOp
       return true
     })
 
-    window.terminal.create(sessionId, label)
+    window.terminal.create(sessionId, label, cwd)
 
     term.onData((data) => {
       window.terminal.write(sessionId, data)
