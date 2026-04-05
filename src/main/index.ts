@@ -64,7 +64,6 @@ ipcMain.handle('terminal:create', async (_event, { id, label, cwd }) => {
   // Reconnect: session already exists (component remounted after workspace switch)
   const existingSession = terminalManager.getSession(id)
   if (existingSession) {
-    console.log(`[terminal:create] reconnect for ${id}, scrollback=${(scrollbackBuffers.get(id) || '').length} bytes`)
     pausedSessions.add(id)
     // Fold any pending unflushed data into scrollback before clearing
     const pending = dataBuffers.get(id) || ''
@@ -106,7 +105,6 @@ ipcMain.handle('terminal:kill', (_event, { id }) => {
 
 ipcMain.handle('terminal:resume', (_event, { id }) => {
   const scrollback = scrollbackBuffers.get(id) || ''
-  console.log(`[terminal:resume] ${id}, returning ${scrollback.length} bytes`)
   pausedSessions.delete(id)
   return { scrollback }
 })

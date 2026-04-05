@@ -164,16 +164,13 @@ export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTermi
 
     // Create or reconnect to PTY session
     ;(async () => {
-      console.log(`[useTerminal] create called for ${sessionId}`)
       const result = await window.terminal.create(sessionId, label, cwd)
-      console.log(`[useTerminal] create returned:`, result)
       if (cancelled) return
 
       if (result.isReconnect) {
-        console.log(`[useTerminal] reconnect — calling resume for ${sessionId}`)
+        // Replay scrollback from main process buffer
         const { scrollback } = await window.terminal.resume(sessionId)
         if (cancelled) return
-        console.log(`[useTerminal] resume returned ${scrollback.length} bytes of scrollback`)
         // Wait a frame for WebGL renderer to finish initializing dimensions
         await new Promise(resolve => requestAnimationFrame(resolve))
         if (cancelled) return
@@ -181,7 +178,6 @@ export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTermi
         // Discard queued data — it's all pre-pause and already in the scrollback
         dataQueue.length = 0
       } else {
-        console.log(`[useTerminal] new session — flushing ${dataQueue.length} queued items`)
         // New terminal — flush any early data that arrived during create
         for (const d of dataQueue) term.write(d)
         dataQueue.length = 0

@@ -102,12 +102,30 @@ export default function Canvas() {
   activeWorkspaceIdRef.current = activeWorkspaceId
 
   // ── Compute visible nodes/edges for active workspace ──
+  // Browser nodes from ALL workspaces stay mounted so their webview + CDP connection
+  // persists across workspace switches (agents can keep controlling them).
   const visibleNodes = useMemo(
     () =>
-      allNodes.filter((n) => {
-        const sid = (n.data as Record<string, unknown>).sessionId as string
-        return tileWorkspaceMap.get(sid) === activeWorkspaceId
-      }),
+      allNodes
+        .filter((n) => {
+          const sid = (n.data as Record<string, unknown>).sessionId as string
+          const inActiveWorkspace = tileWorkspaceMap.get(sid) === activeWorkspaceId
+          return inActiveWorkspace || n.type === 'browser'
+        })
+        .map((n) => {
+          const sid = (n.data as Record<string, unknown>).sessionId as string
+          const inActiveWorkspace = tileWorkspaceMap.get(sid) === activeWorkspaceId
+          if (!inActiveWorkspace && n.type === 'browser') {
+            return {
+              ...n,
+              selectable: false,
+              draggable: false,
+              focusable: false,
+              data: { ...n.data, isBackground: true }
+            }
+          }
+          return n
+        }),
     [allNodes, tileWorkspaceMap, activeWorkspaceId]
   )
 
@@ -616,11 +634,15 @@ export default function Canvas() {
             nodes={visibleNodes}
             focusedId={focusedId}
             onFocus={focusTerminal}
+            onFocusProcess={handleFocusProcess}
             onKill={killTerminal}
             onAddTerminal={addTerminal}
             onAddBrowser={addBrowser}
             open={panelOpen}
             onToggle={togglePanel}
+            tileWorkspaceMap={tileWorkspaceMap}
+            workspaces={workspaces}
+            activeWorkspaceId={activeWorkspaceId}
           />
         </div>
       </div>

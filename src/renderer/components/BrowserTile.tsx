@@ -13,6 +13,7 @@ export interface BrowserNodeData {
   linkedTerminalId?: string
   reservationId?: string
   initialPreset?: DevicePreset
+  isBackground?: boolean
 }
 
 const CHROME_HEIGHT = BROWSER_CHROME_HEIGHT
@@ -20,23 +21,24 @@ const CHROME_WIDTH = BROWSER_CHROME_WIDTH
 
 function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
   registerRender('BrowserTile')
-  const { sessionId, label, initialUrl, linkedTerminalId, reservationId, initialPreset } = data as unknown as BrowserNodeData
+  const { sessionId, label, initialUrl, linkedTerminalId, reservationId, initialPreset, isBackground } = data as unknown as BrowserNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
   const bodyRef = useRef<HTMLDivElement>(null)
-  const [urlInput, setUrlInput] = useState(initialUrl || 'https://www.google.com')
-  const [isResizing, setIsResizing] = useState(false)
-  const [presetOpen, setPresetOpen] = useState(false)
-  const { setNodes } = useReactFlow()
 
-  const { webviewRef, state, navigate, goBack, goForward, reload, setViewportSize } = useBrowser({
+  const { webviewRef, state, navigate, goBack, goForward, reload, setViewportSize, startUrl } = useBrowser({
     sessionId,
     initialUrl: initialUrl || 'https://www.google.com',
     linkedTerminalId,
     reservationId,
     initialPreset
   })
+
+  const [urlInput, setUrlInput] = useState(startUrl)
+  const [isResizing, setIsResizing] = useState(false)
+  const [presetOpen, setPresetOpen] = useState(false)
+  const { setNodes } = useReactFlow()
 
   // Sync address bar with navigation
   useEffect(() => {
@@ -109,25 +111,35 @@ function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
   const viewportW = width != null ? Math.round(width - CHROME_WIDTH) : null
   const viewportH = height != null ? Math.round(height - CHROME_HEIGHT) : null
 
+  // Keep the webview in a stable position in the React tree so it's never
+  // destroyed when switching between background and foreground modes.
+  // Only the surrounding chrome (header, address bar, handles) is conditional.
   return (
     <div
       className={`browser-tile ${
-        isFocused ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]' : ''
+        !isBackground && isFocused ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]' : ''
       }`}
-      style={{ width: '100%', height: '100%', pointerEvents: isPanning ? 'none' : 'auto' }}
-      onMouseDown={handleFocus}
+      style={{
+        width: '100%',
+        height: '100%',
+        pointerEvents: isBackground ? 'none' : isPanning ? 'none' : 'auto',
+        opacity: isBackground ? 0 : 1
+      }}
+      onMouseDown={isBackground ? undefined : handleFocus}
     >
-      <NodeResizer
-        minWidth={320}
-        minHeight={300}
-        isVisible={isFocused}
-        color="#3b82f6"
-        onResizeStart={onResizeStart}
-        onResizeEnd={onResizeEnd}
-      />
+      {!isBackground && (
+        <NodeResizer
+          minWidth={320}
+          minHeight={300}
+          isVisible={isFocused}
+          color="#3b82f6"
+          onResizeStart={onResizeStart}
+          onResizeEnd={onResizeEnd}
+        />
+      )}
 
       {/* Dimension overlay during resize */}
-      {isResizing && width != null && height != null && (
+      {!isBackground && isResizing && width != null && height != null && (
         <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
           <span className="rounded bg-black/80 px-2 py-1 text-xs font-mono text-zinc-300">
             {Math.round(width)} x {Math.round(height)}
@@ -139,108 +151,114 @@ function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
       )}
 
       {/* Header / drag handle */}
-      <div className={`browser-tile-header ${isFocused ? 'border-b-blue-500/30' : ''}`}>
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <span
-            className={`h-2 w-2 shrink-0 rounded-full ${
-              state.loading ? 'bg-blue-400 animate-pulse' : 'bg-green-500'
-            }`}
-          />
-          <span
-            className={`text-xs font-medium truncate ${
-              isFocused ? 'text-zinc-200' : 'text-zinc-400'
-            }`}
-          >
-            {state.title || label}
-          </span>
-          {viewportW != null && viewportH != null && (
-            <span className="text-[10px] text-zinc-500">{viewportW}x{viewportH}</span>
-          )}
-          {state.cdpPort && (
-            <span className="text-[10px] text-purple-400" title={`CDP proxy on port ${state.cdpPort}`}>
-              CDP:{state.cdpPort}
+      {!isBackground && (
+        <div className={`browser-tile-header ${isFocused ? 'border-b-blue-500/30' : ''}`}>
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                state.loading ? 'bg-blue-400 animate-pulse' : 'bg-green-500'
+              }`}
+            />
+            <span
+              className={`text-xs font-medium truncate ${
+                isFocused ? 'text-zinc-200' : 'text-zinc-400'
+              }`}
+            >
+              {state.title || label}
             </span>
-          )}
+            {viewportW != null && viewportH != null && (
+              <span className="text-[10px] text-zinc-500">{viewportW}x{viewportH}</span>
+            )}
+            {state.cdpPort && (
+              <span className="text-[10px] text-purple-400" title={`CDP proxy on port ${state.cdpPort}`}>
+                CDP:{state.cdpPort}
+              </span>
+            )}
+          </div>
+          <button
+            className="titlebar-no-drag rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+            onClick={() => killTerminal(sessionId)}
+          >
+            Close
+          </button>
         </div>
-        <button
-          className="titlebar-no-drag rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
-          onClick={() => killTerminal(sessionId)}
-        >
-          Close
-        </button>
-      </div>
+      )}
 
       {/* Address bar */}
-      <div className="browser-tile-addressbar titlebar-no-drag">
-        <button
-          onClick={goBack}
-          disabled={!state.canGoBack}
-          className="browser-nav-btn"
-          title="Back"
-        >
-          &#8592;
-        </button>
-        <button
-          onClick={goForward}
-          disabled={!state.canGoForward}
-          className="browser-nav-btn"
-          title="Forward"
-        >
-          &#8594;
-        </button>
-        <button onClick={reload} className="browser-nav-btn" title="Reload">
-          &#8635;
-        </button>
-        <form onSubmit={handleUrlSubmit} className="flex-1 min-w-0">
-          <input
-            type="text"
-            value={urlInput}
-            onChange={(e) => setUrlInput(e.target.value)}
-            className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none focus:ring-1 focus:ring-blue-500/50"
-          />
-        </form>
-        {/* Device preset dropdown */}
-        <div className="relative" onMouseDown={(e) => e.stopPropagation()}>
+      {!isBackground && (
+        <div className="browser-tile-addressbar titlebar-no-drag">
           <button
-            onClick={() => setPresetOpen(!presetOpen)}
+            onClick={goBack}
+            disabled={!state.canGoBack}
             className="browser-nav-btn"
-            title="Device presets"
+            title="Back"
           >
-            &#9783;
+            &#8592;
           </button>
-          {presetOpen && (
-            <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
-              {DEVICE_PRESETS.map((preset) => (
-                <button
-                  key={preset.name}
-                  className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
-                  onClick={() => handlePresetSelect(preset)}
-                >
-                  <span>{preset.name}</span>
-                  {preset.width > 0 && (
-                    <span className="ml-1 text-zinc-500">{preset.width}x{preset.height}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
+          <button
+            onClick={goForward}
+            disabled={!state.canGoForward}
+            className="browser-nav-btn"
+            title="Forward"
+          >
+            &#8594;
+          </button>
+          <button onClick={reload} className="browser-nav-btn" title="Reload">
+            &#8635;
+          </button>
+          <form onSubmit={handleUrlSubmit} className="flex-1 min-w-0">
+            <input
+              type="text"
+              value={urlInput}
+              onChange={(e) => setUrlInput(e.target.value)}
+              className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none focus:ring-1 focus:ring-blue-500/50"
+            />
+          </form>
+          {/* Device preset dropdown */}
+          <div className="relative" onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setPresetOpen(!presetOpen)}
+              className="browser-nav-btn"
+              title="Device presets"
+            >
+              &#9783;
+            </button>
+            {presetOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 w-44 rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
+                {DEVICE_PRESETS.map((preset) => (
+                  <button
+                    key={preset.name}
+                    className="w-full px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+                    onClick={() => handlePresetSelect(preset)}
+                  >
+                    <span>{preset.name}</span>
+                    {preset.width > 0 && (
+                      <span className="ml-1 text-zinc-500">{preset.width}x{preset.height}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Browser body — webview is GPU-composited by Electron, no snapshot needed */}
+      {/* Browser body — webview is GPU-composited by Electron, no snapshot needed.
+          Always rendered (even when background) to keep the webview alive for CDP. */}
       <div
-        ref={bodyRef}
-        className="browser-tile-body titlebar-no-drag"
+        ref={isBackground ? undefined : bodyRef}
+        className={isBackground ? undefined : 'browser-tile-body titlebar-no-drag'}
+        style={isBackground ? { width: 800, height: 600 } : undefined}
       >
         <webview
           ref={webviewRef}
-          src={initialUrl || 'https://www.google.com'}
-          style={{ width: '100%', height: '100%', pointerEvents: isFocused ? 'auto' : 'none' }}
+          src={startUrl}
+          style={{ width: '100%', height: '100%', pointerEvents: !isBackground && isFocused ? 'auto' : 'none' }}
         />
       </div>
 
-      <Handle type="target" position={Position.Left} className="!bg-zinc-600" />
-      <Handle type="source" position={Position.Right} className="!bg-zinc-600" />
+      {!isBackground && <Handle type="target" position={Position.Left} className="!bg-zinc-600" />}
+      {!isBackground && <Handle type="source" position={Position.Right} className="!bg-zinc-600" />}
     </div>
   )
 }

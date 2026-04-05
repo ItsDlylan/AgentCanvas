@@ -2,6 +2,9 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { registerNavigator } from './useBrowserNavigation'
 import type { DevicePreset } from '@/constants/devicePresets'
 
+// Track last known URL per session for reconnect after workspace switch
+const savedUrls = new Map<string, string>()
+
 interface UseBrowserOptions {
   sessionId: string
   initialUrl?: string
@@ -22,8 +25,10 @@ export interface BrowserState {
 export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', linkedTerminalId, reservationId, initialPreset }: UseBrowserOptions) {
   const webviewRef = useRef<Electron.WebviewTag | null>(null)
   const mountedRef = useRef(false)
+  // Use saved URL from previous mount (workspace switch) or fall back to initialUrl
+  const startUrl = savedUrls.get(sessionId) || initialUrl
   const [state, setState] = useState<BrowserState>({
-    url: initialUrl,
+    url: startUrl,
     title: 'New Tab',
     loading: true,
     canGoBack: false,
@@ -66,7 +71,7 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
       if (!el || mountedRef.current) return
       mountedRef.current = true
 
-      // Register session in main process
+      // Register session in main process (returns early if session already exists)
       window.browser.create(sessionId, initialUrl)
 
       const pushStatus = (partial: Partial<BrowserState>): void => {
@@ -75,6 +80,7 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
       }
 
       el.addEventListener('did-navigate', ((e: Electron.DidNavigateEvent) => {
+        savedUrls.set(sessionId, e.url)
         pushStatus({
           url: e.url,
           loading: false,
@@ -84,6 +90,7 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
       }) as EventListener)
 
       el.addEventListener('did-navigate-in-page', ((e: Electron.DidNavigateInPageEvent) => {
+        savedUrls.set(sessionId, e.url)
         pushStatus({
           url: e.url,
           canGoBack: el.canGoBack(),
@@ -125,16 +132,17 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
     [sessionId, initialUrl, linkedTerminalId, initialPreset, setViewportSize]
   )
 
-  // Cleanup on unmount
+  // Cleanup on unmount — detach CDP but don't destroy session
+  // (session metadata stays in BrowserManager for reconnect after workspace switch;
+  // explicit kill is handled by Canvas.tsx calling window.browser.destroy directly)
   useEffect(() => {
     return () => {
       if (mountedRef.current) {
         window.browser.detachCdp(sessionId)
-        window.browser.destroy(sessionId)
         mountedRef.current = false
       }
     }
   }, [sessionId])
 
-  return { webviewRef: setWebviewRef, containerRef: webviewRef, state, navigate, goBack, goForward, reload, setViewportSize }
+  return { webviewRef: setWebviewRef, containerRef: webviewRef, state, navigate, goBack, goForward, reload, setViewportSize, startUrl }
 }
