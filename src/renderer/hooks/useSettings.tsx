@@ -17,7 +17,7 @@ const FALLBACK: Settings = {
   },
   terminal: { scrollback: 5000, customEnvVars: {} },
   browser: { defaultUrl: 'https://www.google.com', defaultDevicePreset: 'Default' },
-  canvas: { tileGap: 40, defaultZoom: 0.85, minZoom: 0.2, maxZoom: 1.5, backgroundDotGap: 20, backgroundDotSize: 1, panSpeed: 0.5 },
+  canvas: { tileGap: 40, defaultZoom: 0.85, minZoom: 0.2, maxZoom: 1.5, backgroundDotGap: 20, backgroundDotSize: 1, panSpeed: 0.5, minimapEnabled: true, minimapPosition: 'bottom-right' as const },
   templates: []
 }
 

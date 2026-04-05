@@ -35,6 +35,8 @@ export interface CanvasSettings {
   backgroundDotGap: number
   backgroundDotSize: number
   panSpeed: number
+  minimapEnabled: boolean
+  minimapPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 }
 
 export interface TemplateTile {
@@ -90,7 +92,9 @@ export const DEFAULT_SETTINGS: Settings = {
     maxZoom: 1.5,
     backgroundDotGap: 20,
     backgroundDotSize: 1,
-    panSpeed: 0.5
+    panSpeed: 0.5,
+    minimapEnabled: true,
+    minimapPosition: 'bottom-right'
   },
   templates: [
     {

@@ -122,7 +122,7 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
       className={`relative h-5 w-9 rounded-full transition-colors ${value ? 'bg-blue-500' : 'bg-zinc-700'}`}
     >
       <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${value ? 'translate-x-4' : 'translate-x-0.5'}`}
+        className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform ${value ? 'translate-x-[16px]' : 'translate-x-0'}`}
       />
     </button>
   )
@@ -428,6 +428,32 @@ function CanvasSection({ settings, update }: { settings: Settings; update: (patc
             min={0.1}
             max={3.0}
             step={0.1}
+          />
+        </SettingRow>
+        <SectionDivider />
+        <SettingRow label="Minimap" description="Show a mini overview map of all tiles on the canvas">
+          <Toggle
+            value={settings.canvas.minimapEnabled}
+            onChange={(v) => update({ canvas: { ...settings.canvas, minimapEnabled: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Minimap Position" description="Corner of the screen where the minimap appears">
+          <SelectInput
+            value={settings.canvas.minimapPosition}
+            onChange={(v) =>
+              update({
+                canvas: {
+                  ...settings.canvas,
+                  minimapPosition: v as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+                }
+              })
+            }
+            options={[
+              { value: 'top-left', label: 'Top Left' },
+              { value: 'top-right', label: 'Top Right' },
+              { value: 'bottom-left', label: 'Bottom Left' },
+              { value: 'bottom-right', label: 'Bottom Right' }
+            ]}
           />
         </SettingRow>
       </div>

@@ -287,3 +287,8 @@
 .react-flow__resize-control.line {
   border-color: #3b82f640 !important;
 }
+
+/* Minimap dark theme */
+.react-flow__minimap {
+  background-color: #18181b !important;
+}

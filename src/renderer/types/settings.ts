@@ -33,6 +33,8 @@ export interface CanvasSettings {
   backgroundDotGap: number
   backgroundDotSize: number
   panSpeed: number
+  minimapEnabled: boolean
+  minimapPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
 }
 
 export interface TemplateTile {

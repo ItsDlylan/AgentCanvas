@@ -4,7 +4,10 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
+  Panel,
   useReactFlow,
+  useStore,
   applyNodeChanges,
   applyEdgeChanges,
   type Node,
@@ -38,6 +41,87 @@ const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
   browser: BrowserTile as unknown as NodeTypes['browser'],
   notes: NotesTile as unknown as NodeTypes['notes']
+}
+
+const MINIMAP_NODE_COLORS: Record<string, string> = {
+  terminal: '#22c55e',
+  browser:  '#3b82f6',
+  notes:    '#f59e0b',
+}
+
+function minimapNodeColor(node: Node): string {
+  return MINIMAP_NODE_COLORS[node.type ?? ''] ?? '#71717a'
+}
+
+function CanvasMiniMap({ position, panelOpen, workspacePanelOpen }: {
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  panelOpen: boolean
+  workspacePanelOpen: boolean
+}) {
+  const edges = useStore((s) => s.edges)
+  const nodeLookup = useStore((s) => s.nodeLookup)
+
+  // Inject edge lines into the minimap SVG so they share the same viewBox
+  useEffect(() => {
+    const svg = document.querySelector<SVGSVGElement>('.react-flow__minimap-svg')
+    if (!svg) return
+
+    // Get or create edge group, insert before the mask path
+    let edgeGroup = svg.querySelector('.minimap-edges') as SVGGElement | null
+    if (!edgeGroup) {
+      edgeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+      edgeGroup.setAttribute('class', 'minimap-edges')
+      const mask = svg.querySelector('.react-flow__minimap-mask')
+      if (mask) svg.insertBefore(edgeGroup, mask)
+      else svg.appendChild(edgeGroup)
+    }
+
+    // Clear previous lines
+    edgeGroup.innerHTML = ''
+
+    // Draw edges
+    for (const e of edges) {
+      const source = nodeLookup.get(e.source)
+      const target = nodeLookup.get(e.target)
+      if (!source || !target) continue
+      const sx = source.internals.positionAbsolute.x + (source.measured?.width ?? 0) / 2
+      const sy = source.internals.positionAbsolute.y + (source.measured?.height ?? 0) / 2
+      const tx = target.internals.positionAbsolute.x + (target.measured?.width ?? 0) / 2
+      const ty = target.internals.positionAbsolute.y + (target.measured?.height ?? 0) / 2
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line')
+      line.setAttribute('x1', String(sx))
+      line.setAttribute('y1', String(sy))
+      line.setAttribute('x2', String(tx))
+      line.setAttribute('y2', String(ty))
+      line.setAttribute('stroke', '#a1a1aa')
+      line.setAttribute('stroke-width', '8')
+      line.setAttribute('stroke-dasharray', '12 6')
+      line.setAttribute('opacity', '0.8')
+      edgeGroup.appendChild(line)
+    }
+  }, [edges, nodeLookup])
+
+  return (
+    <MiniMap
+      position={position}
+      nodeColor={minimapNodeColor}
+      nodeStrokeColor="transparent"
+      maskColor="rgba(0, 0, 0, 0.7)"
+      pannable
+      zoomable
+      style={{
+        backgroundColor: '#18181b',
+        borderRadius: 8,
+        border: '1px solid #27272a',
+        zIndex: 20,
+        transition: 'margin 0.2s ease',
+        ...(position.includes('bottom') ? { marginBottom: position === 'bottom-left' ? 95 : 4 } : {}),
+        ...(position.includes('top') ? { marginTop: 4 } : {}),
+        ...(position.includes('right') && panelOpen ? { marginRight: 256 + 15 } : {}),
+        ...(position.includes('left') && workspacePanelOpen ? { marginLeft: 240 + 15 } : {}),
+      }}
+    />
+  )
 }
 
 function defaultTileWidth(type: string | undefined): number {
@@ -909,6 +993,13 @@ export default function Canvas() {
               className="!rounded-lg !border-zinc-700 !bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!bg-zinc-800 [&>button]:!fill-zinc-400 [&>button:hover]:!bg-zinc-700"
             />
             <PanDetector />
+            {settings.canvas.minimapEnabled && (
+              <CanvasMiniMap
+                position={settings.canvas.minimapPosition}
+                panelOpen={panelOpen}
+                workspacePanelOpen={workspacePanelOpen}
+              />
+            )}
           </ReactFlow>
 
           <WorkspacePanel
