@@ -8,6 +8,7 @@ import { CanvasApi } from './canvas-api'
 import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
+import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -80,11 +81,12 @@ ipcMain.handle('terminal:create', async (_event, { id, label, cwd }) => {
     return { cdpPort: existingSession.cdpPort, isReconnect: true }
   }
 
-  const extraEnv: Record<string, string> = {}
+  const currentSettings = loadSettings()
+  const extraEnv: Record<string, string> = { ...currentSettings.terminal.customEnvVars }
   if (canvasApiPort) {
     extraEnv.AGENT_CANVAS_API = `http://127.0.0.1:${canvasApiPort}`
   }
-  const cdpPort = await terminalManager.create(id, label, cwd, 80, 24, extraEnv)
+  const cdpPort = await terminalManager.create(id, label, cwd, 80, 24, extraEnv, currentSettings.general.shell)
   return { cdpPort }
 })
 
@@ -156,6 +158,14 @@ ipcMain.handle('browser:cdpCommand', async (_event, { sessionId, method, params 
 })
 
 // ── Workspace IPC Handlers ───────────────────────────────
+
+// ── Settings IPC ──
+ipcMain.handle('settings:load', () => loadSettings())
+ipcMain.handle('settings:save', (_event, { settings }: { settings: Settings }) => {
+  saveSettings(settings)
+  mainWindow?.webContents.send('settings:changed', settings)
+})
+ipcMain.handle('settings:defaults', () => DEFAULT_SETTINGS)
 
 ipcMain.handle('workspace:load', () => {
   return loadWorkspaces()

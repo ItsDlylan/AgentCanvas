@@ -3,6 +3,7 @@ import type { Node } from '@xyflow/react'
 import { useAllTerminalStatuses, type TerminalStatus } from '@/hooks/useTerminalStatus'
 import { useAllBrowserStatuses } from '@/hooks/useBrowserStatus'
 import { registerRender } from '@/hooks/usePerformanceDebug'
+import { useSettings, type WorkspaceTemplate } from '@/hooks/useSettings'
 import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS, type DevicePreset } from '@/constants/devicePresets'
 import type { Workspace } from '@/types/workspace'
 
@@ -15,6 +16,7 @@ interface ProcessPanelProps {
   onAddTerminal: (width?: number, height?: number) => void
   onAddBrowser: (preset?: DevicePreset) => void
   onAddNote: () => void
+  onSpawnTemplate: (template: WorkspaceTemplate) => void
   open: boolean
   onToggle: () => void
   tileWorkspaceMap: Map<string, string>
@@ -44,6 +46,7 @@ function ProcessPanelComponent({
   onAddTerminal,
   onAddBrowser,
   onAddNote,
+  onSpawnTemplate,
   open,
   onToggle,
   tileWorkspaceMap,
@@ -66,16 +69,19 @@ function ProcessPanelComponent({
   const browserStatuses = useAllBrowserStatuses()
   const [terminalPresetsOpen, setTerminalPresetsOpen] = useState(false)
   const [browserPresetsOpen, setBrowserPresetsOpen] = useState(false)
+  const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
+  const { settings } = useSettings()
 
   useEffect(() => {
-    if (!terminalPresetsOpen && !browserPresetsOpen) return
+    if (!terminalPresetsOpen && !browserPresetsOpen && !templateMenuOpen) return
     const handler = () => {
       setTerminalPresetsOpen(false)
       setBrowserPresetsOpen(false)
+      setTemplateMenuOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [terminalPresetsOpen, browserPresetsOpen])
+  }, [terminalPresetsOpen, browserPresetsOpen, templateMenuOpen])
 
   const renderBrowserEntry = (node: Node, isBackground: boolean) => {
     const data = node.data as Record<string, unknown>
@@ -444,6 +450,39 @@ function ProcessPanelComponent({
             </svg>
             Note
           </button>
+
+          {/* Template button */}
+          {settings.templates.length > 0 && (
+            <div className="relative w-full" onMouseDown={(e) => e.stopPropagation()}>
+              {templateMenuOpen && (
+                <div className="absolute bottom-full left-0 right-0 z-50 mb-1 rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
+                  {settings.templates.map((tmpl) => (
+                    <button
+                      key={tmpl.id}
+                      onClick={() => {
+                        onSpawnTemplate(tmpl)
+                        setTemplateMenuOpen(false)
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                      <span className="flex-1">{tmpl.name}</span>
+                      <span className="text-zinc-600">{tmpl.tiles.length} tiles</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                onClick={() => setTemplateMenuOpen(!templateMenuOpen)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md bg-zinc-800 py-2 text-xs font-medium text-blue-400 transition-colors hover:bg-zinc-700 hover:text-blue-300"
+              >
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm0 8a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zm10 0a1 1 0 011-1h4a1 1 0 011 1v6a1 1 0 01-1 1h-4a1 1 0 01-1-1v-6z" />
+                </svg>
+                Template
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </>

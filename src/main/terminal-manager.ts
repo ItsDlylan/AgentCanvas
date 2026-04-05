@@ -81,13 +81,13 @@ export class TerminalManager extends EventEmitter {
   private statusThrottleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private pendingStatusEmit = new Map<string, boolean>()
 
-  async create(id: string, label: string, cwd?: string, cols = 80, rows = 24, extraEnv?: Record<string, string>): Promise<number> {
+  async create(id: string, label: string, cwd?: string, cols = 80, rows = 24, extraEnv?: Record<string, string>, customShell?: string): Promise<number> {
     if (this.sessions.has(id)) return this.sessions.get(id)!.cdpPort
 
     const cdpPort = await getAvailablePort()
 
     const shell =
-      process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : '/bin/zsh')
+      customShell || process.env.SHELL || (os.platform() === 'win32' ? 'powershell.exe' : '/bin/zsh')
     const workingDir = cwd || os.homedir()
 
     let userEnv = { ...process.env }

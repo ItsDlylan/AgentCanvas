@@ -1,10 +1,13 @@
 import { ReactFlowProvider } from '@xyflow/react'
 import Canvas from './components/Canvas'
+import { SettingsProvider } from './hooks/useSettings'
 
 export default function App() {
   return (
-    <ReactFlowProvider>
-      <Canvas />
-    </ReactFlowProvider>
+    <SettingsProvider>
+      <ReactFlowProvider>
+        <Canvas />
+      </ReactFlowProvider>
+    </SettingsProvider>
   )
 }

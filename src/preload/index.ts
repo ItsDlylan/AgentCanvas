@@ -193,6 +193,30 @@ const noteAPI: NoteAPI = {
 
 contextBridge.exposeInMainWorld('note', noteAPI)
 
+// ── Settings API ─────────────────────────────────────────
+
+export interface SettingsAPI {
+  load: () => Promise<import('../main/settings-store').Settings>
+  save: (settings: import('../main/settings-store').Settings) => Promise<void>
+  getDefaults: () => Promise<import('../main/settings-store').Settings>
+  onChanged: (callback: (settings: import('../main/settings-store').Settings) => void) => () => void
+}
+
+const settingsAPI: SettingsAPI = {
+  load: () => ipcRenderer.invoke('settings:load'),
+  save: (settings) => ipcRenderer.invoke('settings:save', { settings }),
+  getDefaults: () => ipcRenderer.invoke('settings:defaults'),
+  onChanged: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, settings: import('../main/settings-store').Settings) => {
+      callback(settings)
+    }
+    ipcRenderer.on('settings:changed', handler)
+    return () => ipcRenderer.removeListener('settings:changed', handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('settings', settingsAPI)
+
 // Debug APIs
 contextBridge.exposeInMainWorld('debug', {
   profile: (durationMs = 3000) => ipcRenderer.invoke('debug:profile', durationMs),

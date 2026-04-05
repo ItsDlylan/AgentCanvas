@@ -4,10 +4,20 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 
+export interface TerminalAppearance {
+  terminalFontFamily: string
+  terminalFontSize: number
+  terminalLineHeight: number
+  cursorStyle: 'bar' | 'block' | 'underline'
+  cursorBlink: boolean
+  scrollback: number
+}
+
 interface UseTerminalOptions {
   sessionId: string
   label: string
   cwd?: string
+  appearance?: TerminalAppearance
   onReady?: () => void
   onExit?: (sessionId: string) => void
 }
@@ -22,7 +32,7 @@ interface UseTerminalOptions {
  * the PTY keeps running, the next mount replays the scrollback buffer from
  * the main process so no history is lost.
  */
-export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTerminalOptions) {
+export function useTerminal({ sessionId, label, cwd, appearance, onReady, onExit }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -50,11 +60,11 @@ export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTermi
     let unsubExit: (() => void) | null = null
 
     const term = new Terminal({
-      cursorBlink: false,   // Saves 5-13% CPU per terminal (rAF loop)
-      cursorStyle: 'bar',
-      fontSize: 13,
-      fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-      lineHeight: 1.2,
+      cursorBlink: appearance?.cursorBlink ?? false,
+      cursorStyle: appearance?.cursorStyle ?? 'bar',
+      fontSize: appearance?.terminalFontSize ?? 13,
+      fontFamily: appearance?.terminalFontFamily ?? "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      lineHeight: appearance?.terminalLineHeight ?? 1.2,
       smoothScrollDuration: 0,
       theme: {
         background: '#09090b',
@@ -79,7 +89,7 @@ export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTermi
         brightWhite: '#ffffff'
       },
       allowTransparency: true,
-      scrollback: 5000
+      scrollback: appearance?.scrollback ?? 5000
     })
 
     const fitAddon = new FitAddon()
@@ -201,6 +211,39 @@ export function useTerminal({ sessionId, label, cwd, onReady, onExit }: UseTermi
       mountedRef.current = false
     }
   }, [sessionId, onReady])
+
+  // Live-apply appearance changes to already-open terminals
+  useEffect(() => {
+    const term = terminalRef.current
+    if (!term || !appearance) return
+    let changed = false
+    if (term.options.fontSize !== appearance.terminalFontSize) {
+      term.options.fontSize = appearance.terminalFontSize
+      changed = true
+    }
+    if (term.options.fontFamily !== appearance.terminalFontFamily) {
+      term.options.fontFamily = appearance.terminalFontFamily
+      changed = true
+    }
+    if (term.options.lineHeight !== appearance.terminalLineHeight) {
+      term.options.lineHeight = appearance.terminalLineHeight
+      changed = true
+    }
+    if (term.options.cursorBlink !== appearance.cursorBlink) {
+      term.options.cursorBlink = appearance.cursorBlink
+    }
+    if (term.options.cursorStyle !== appearance.cursorStyle) {
+      term.options.cursorStyle = appearance.cursorStyle
+    }
+    if (changed) fit()
+  }, [
+    appearance?.terminalFontSize,
+    appearance?.terminalFontFamily,
+    appearance?.terminalLineHeight,
+    appearance?.cursorBlink,
+    appearance?.cursorStyle,
+    fit
+  ])
 
   return { containerRef, fit, terminal: terminalRef }
 }

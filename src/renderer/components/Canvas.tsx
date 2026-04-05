@@ -31,6 +31,8 @@ import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug
 import { PerformanceOverlay } from './PerformanceOverlay'
 import { BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
 import { DEFAULT_WORKSPACE, type Workspace } from '@/types/workspace'
+import { useSettings, type WorkspaceTemplate } from '@/hooks/useSettings'
+import { SettingsPage } from './SettingsPage'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
@@ -46,21 +48,18 @@ function defaultTileHeight(type: string | undefined): number {
   return type === 'browser' ? 600 : type === 'notes' ? 400 : 400
 }
 
-const defaultViewport = { x: 100, y: 100, zoom: 0.85 }
-
 let tileCount = 0
-
-const GAP = 40 // px between tiles when auto-placing
 
 /** Find a position that doesn't overlap any existing node. */
 function findOpenPosition(
   existingNodes: Node[],
   width: number,
   height: number,
-  colSpan: number
+  colSpan: number,
+  gap: number
 ): { x: number; y: number } {
-  const stepX = width + GAP
-  const stepY = height + GAP
+  const stepX = width + gap
+  const stepY = height + gap
 
   for (let slot = 0; slot < 200; slot++) {
     const candidate = {
@@ -88,10 +87,11 @@ function snapToGrid(
   click: { x: number; y: number },
   existingNodes: Node[],
   width: number,
-  height: number
+  height: number,
+  gap: number
 ): { x: number; y: number } {
-  const stepX = width + GAP
-  const stepY = height + GAP
+  const stepX = width + gap
+  const stepY = height + gap
 
   // Determine search center in grid coords
   const centerCol = Math.round((click.x - 100) / stepX)
@@ -134,6 +134,8 @@ function snapToGrid(
 export default function Canvas() {
   registerRender('Canvas')
   const { enabled: perfEnabled, stats: perfStats } = usePerformanceDebug()
+  const { settings } = useSettings()
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   // ── All nodes/edges (across all workspaces) ──
   const [allNodes, setAllNodes] = useState<Node[]>([])
@@ -416,7 +418,7 @@ export default function Canvas() {
       const tileW = preset ? preset.width + BROWSER_CHROME_WIDTH : 800
       const tileH = preset ? preset.height + BROWSER_CHROME_HEIGHT : 600
       const visible = visibleNodes
-      const pos = position ?? findOpenPosition(visible, tileW, tileH, 3)
+      const pos = position ?? findOpenPosition(visible, tileW, tileH, 3, settings.canvas.tileGap)
       const newNode: Node = {
         id: sessionId,
         type: 'browser',
@@ -425,7 +427,7 @@ export default function Canvas() {
         data: {
           sessionId,
           label: `Browser ${tileCount}`,
-          initialUrl: 'https://www.google.com',
+          initialUrl: settings.browser.defaultUrl,
           initialPreset: preset && (preset.mobile || preset.dpr > 1) ? preset : undefined
         },
         dragHandle: '.browser-tile-header'
@@ -560,7 +562,7 @@ export default function Canvas() {
       tileCount++
       const sessionId = uuid()
       const visible = visibleNodes
-      const pos = position ?? findOpenPosition(visible, width, height, 4)
+      const pos = position ?? findOpenPosition(visible, width, height, 4, settings.canvas.tileGap)
 
       // Get workspace path for terminal CWD
       const wsId = activeWorkspaceIdRef.current
@@ -594,7 +596,7 @@ export default function Canvas() {
       tileCount++
       const sessionId = uuid()
       const visible = visibleNodes
-      const pos = position ?? findOpenPosition(visible, 400, 400, 4)
+      const pos = position ?? findOpenPosition(visible, 400, 400, 4, settings.canvas.tileGap)
       const label = `Note ${tileCount}`
       const wsId = activeWorkspaceIdRef.current
       const newNode: Node = {
@@ -633,6 +635,35 @@ export default function Canvas() {
 
   const addNote = useCallback(() => addNoteAt(undefined), [addNoteAt])
 
+  // ── Template spawning ──
+  const spawnTemplate = useCallback(
+    (template: WorkspaceTemplate, origin?: { x: number; y: number }) => {
+      const gap = settings.canvas.tileGap
+      // Find a clear area for the template bounding box
+      let maxW = 0, maxH = 0
+      for (const t of template.tiles) {
+        maxW = Math.max(maxW, t.relativePosition.x + t.width)
+        maxH = Math.max(maxH, t.relativePosition.y + t.height)
+      }
+      const basePos = origin ?? findOpenPosition(visibleNodes, maxW, maxH, 2, gap)
+
+      for (const tile of template.tiles) {
+        const pos = {
+          x: basePos.x + tile.relativePosition.x,
+          y: basePos.y + tile.relativePosition.y
+        }
+        if (tile.type === 'terminal') {
+          addTerminalAt(pos, tile.width, tile.height)
+        } else if (tile.type === 'browser') {
+          addBrowserAt(pos)
+        } else if (tile.type === 'notes') {
+          addNoteAt(pos)
+        }
+      }
+    },
+    [settings.canvas.tileGap, visibleNodes, addTerminalAt, addBrowserAt, addNoteAt]
+  )
+
   // ── Right-click context menu ──
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowPos: { x: number; y: number } } | null>(null)
 
@@ -662,7 +693,7 @@ export default function Canvas() {
       if (!target.closest('.react-flow__pane')) return
       if (target.closest('.react-flow__node')) return
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      const safePos = snapToGrid(position, allNodes, 640, 400)
+      const safePos = snapToGrid(position, allNodes, 640, 400, settings.canvas.tileGap)
       addTerminalAt(safePos)
     },
     [screenToFlowPosition, addTerminalAt, allNodes]
@@ -831,7 +862,18 @@ export default function Canvas() {
               </>
             )}
           </div>
-          <div className="titlebar-no-drag flex items-center gap-2" />
+          <div className="titlebar-no-drag flex items-center gap-2">
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="rounded p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
+              title="Settings"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         {/* Canvas + Panels */}
@@ -846,10 +888,10 @@ export default function Canvas() {
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}
             nodeTypes={nodeTypes}
-            defaultViewport={defaultViewport}
+            defaultViewport={{ x: 100, y: 100, zoom: settings.canvas.defaultZoom }}
             proOptions={proOptions}
-            minZoom={0.2}
-            maxZoom={1.5}
+            minZoom={settings.canvas.minZoom}
+            maxZoom={settings.canvas.maxZoom}
             fitView={false}
             selectNodesOnDrag={false}
             panOnScroll
@@ -860,7 +902,7 @@ export default function Canvas() {
             deleteKeyCode="Delete"
             className="bg-zinc-950"
           >
-            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#27272a" />
+            <Background variant={BackgroundVariant.Dots} gap={settings.canvas.backgroundDotGap} size={settings.canvas.backgroundDotSize} color="#27272a" />
             <Controls
               showInteractive={false}
               className="!rounded-lg !border-zinc-700 !bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!bg-zinc-800 [&>button]:!fill-zinc-400 [&>button:hover]:!bg-zinc-700"
@@ -898,6 +940,7 @@ export default function Canvas() {
             onAddTerminal={addTerminal}
             onAddBrowser={addBrowser}
             onAddNote={addNote}
+            onSpawnTemplate={spawnTemplate}
             open={panelOpen}
             onToggle={togglePanel}
             tileWorkspaceMap={tileWorkspaceMap}
@@ -913,7 +956,7 @@ export default function Canvas() {
             >
               <button
                 onClick={() => {
-                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 640, 400)
+                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 640, 400, settings.canvas.tileGap)
                   addTerminalAt(safePos)
                   setContextMenu(null)
                 }}
@@ -924,7 +967,7 @@ export default function Canvas() {
               </button>
               <button
                 onClick={() => {
-                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 800, 600)
+                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 800, 600, settings.canvas.tileGap)
                   addBrowserAt(safePos)
                   setContextMenu(null)
                 }}
@@ -935,7 +978,7 @@ export default function Canvas() {
               </button>
               <button
                 onClick={() => {
-                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 400, 400)
+                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 400, 400, settings.canvas.tileGap)
                   addNoteAt(safePos)
                   setContextMenu(null)
                 }}
@@ -944,8 +987,32 @@ export default function Canvas() {
                 <span className="h-2 w-2 rounded-full bg-amber-400" />
                 Note
               </button>
+              {settings.templates.length > 0 && (
+                <>
+                  <div className="my-1 border-t border-zinc-700" />
+                  <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+                    Templates
+                  </div>
+                  {settings.templates.map((tmpl) => (
+                    <button
+                      key={tmpl.id}
+                      onClick={() => {
+                        spawnTemplate(tmpl, contextMenu.flowPos)
+                        setContextMenu(null)
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+                    >
+                      <span className="h-2 w-2 rounded-full bg-blue-500" />
+                      {tmpl.name}
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
           )}
+
+          {/* Settings overlay */}
+          {settingsOpen && <SettingsPage onClose={() => setSettingsOpen(false)} />}
         </div>
       </div>
     </FocusedTerminalContext.Provider>

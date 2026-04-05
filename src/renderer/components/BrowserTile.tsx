@@ -4,6 +4,7 @@ import { useBrowser } from '@/hooks/useBrowser'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import { useIsPanning } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
+import { useSettings } from '@/hooks/useSettings'
 import { DEVICE_PRESETS, BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
 
 export interface BrowserNodeData {
@@ -23,13 +24,14 @@ function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
   registerRender('BrowserTile')
   const { sessionId, label, initialUrl, linkedTerminalId, reservationId, initialPreset, isBackground } = data as unknown as BrowserNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
+  const { settings } = useSettings()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
   const bodyRef = useRef<HTMLDivElement>(null)
 
   const { webviewRef, state, navigate, goBack, goForward, reload, setViewportSize, startUrl } = useBrowser({
     sessionId,
-    initialUrl: initialUrl || 'https://www.google.com',
+    initialUrl: initialUrl || settings.browser.defaultUrl,
     linkedTerminalId,
     reservationId,
     initialPreset

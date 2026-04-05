@@ -5,6 +5,7 @@ import { useTerminalStatus } from '@/hooks/useTerminalStatus'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
+import { useSettings } from '@/hooks/useSettings'
 import type { TerminalStatus } from '@/hooks/useTerminalStatus'
 
 export interface TerminalNodeData {
@@ -30,6 +31,7 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
   const { sessionId, label, cwd: initialCwd } = data as unknown as TerminalNodeData
   const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
+  const { settings } = useSettings()
   const isPanning = useIsPanning()
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -42,7 +44,16 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
   const cwd = statusInfo?.cwd
   const cfg = STATUS_CONFIG[status]
 
-  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, onExit: killTerminal })
+  const appearance = {
+    terminalFontFamily: settings.appearance.terminalFontFamily,
+    terminalFontSize: settings.appearance.terminalFontSize,
+    terminalLineHeight: settings.appearance.terminalLineHeight,
+    cursorStyle: settings.appearance.cursorStyle,
+    cursorBlink: settings.appearance.cursorBlink,
+    scrollback: settings.terminal.scrollback
+  }
+
+  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, appearance, onExit: killTerminal })
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)
