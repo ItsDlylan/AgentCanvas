@@ -1071,6 +1071,90 @@ export default function Canvas() {
     }
   }, [jumpMode, jumpAssignments, focusTerminal])
 
+  // ── Option-hold workspace jump hints ──
+  // Hold Option/Alt for 300ms to show workspace badges in the Workspace Panel.
+
+  const [wsJumpMode, setWsJumpMode] = useState(false)
+  const optionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const wsJumpAssignments = useMemo(() => {
+    if (!wsJumpMode) return new Map<string, string>()
+    const map = new Map<string, string>()
+    workspaces.forEach((ws, i) => {
+      if (i >= JUMP_KEYS.length) return
+      map.set(ws.id, JUMP_KEYS[i])
+    })
+    return map
+  }, [wsJumpMode, workspaces])
+
+  useEffect(() => {
+    const clearTimer = () => {
+      if (optionTimerRef.current) {
+        clearTimeout(optionTimerRef.current)
+        optionTimerRef.current = null
+      }
+    }
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Bare Alt/Option press starts the 300ms timer
+      if (e.key === 'Alt' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        clearTimer()
+        optionTimerRef.current = setTimeout(() => {
+          optionTimerRef.current = null
+          setWsJumpMode(true)
+        }, 300)
+        return
+      }
+
+      // Any other key while timer is pending → cancel
+      if (!wsJumpMode) {
+        clearTimer()
+        return
+      }
+
+      // In workspace jump mode: Alt+key switches workspace
+      // On macOS, Alt+letter produces special characters (e.g., å for Alt+A),
+      // so use event.code to get the physical key.
+      if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && e.code) {
+        const code = e.code
+        let pressed: string | null = null
+        if (code.startsWith('Key')) pressed = code.slice(3)
+        else if (code.startsWith('Digit')) pressed = code.slice(5)
+        if (!pressed) return
+        for (const [wsId, key] of wsJumpAssignments) {
+          if (key === pressed) {
+            e.preventDefault()
+            e.stopPropagation()
+            handleSelectWorkspace(wsId)
+            return
+          }
+        }
+      }
+    }
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Alt') {
+        clearTimer()
+        setWsJumpMode(false)
+      }
+    }
+
+    const onBlur = () => {
+      clearTimer()
+      setWsJumpMode(false)
+    }
+
+    window.addEventListener('keydown', onKeyDown, { capture: true })
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      clearTimer()
+      window.removeEventListener('keydown', onKeyDown, { capture: true })
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [wsJumpMode, wsJumpAssignments, handleSelectWorkspace])
+
   return (
     <FocusedTerminalContext.Provider value={focusCtx}>
       <div className="flex h-screen w-screen flex-col">
@@ -1155,6 +1239,7 @@ export default function Canvas() {
             onRename={handleRenameWorkspace}
             open={workspacePanelOpen}
             onToggle={toggleWorkspacePanel}
+            jumpHints={wsJumpAssignments}
           />
 
           <OffscreenIndicators

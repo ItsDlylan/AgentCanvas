@@ -18,6 +18,7 @@ interface WorkspacePanelProps {
   onRename: (id: string, name: string) => void
   open: boolean
   onToggle: () => void
+  jumpHints: Map<string, string>
 }
 
 const STATUS_CONFIG: Record<TerminalStatus, { dot: string; label: string; labelColor: string }> = {
@@ -45,7 +46,8 @@ function WorkspacePanelComponent({
   onRemove,
   onRename,
   open,
-  onToggle
+  onToggle,
+  jumpHints
 }: WorkspacePanelProps) {
   registerRender('WorkspacePanel')
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
@@ -211,6 +213,11 @@ function WorkspacePanelComponent({
                             {count > 0 && (
                               <span className="shrink-0 rounded-full bg-zinc-800 px-1.5 text-[10px] text-zinc-500">
                                 {count}
+                              </span>
+                            )}
+                            {jumpHints.get(ws.id) && (
+                              <span className="ml-auto shrink-0 rounded border border-purple-400/50 bg-purple-500/20 px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-purple-300">
+                                {jumpHints.get(ws.id)}
                               </span>
                             )}
                           </div>
