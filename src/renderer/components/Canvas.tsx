@@ -1169,6 +1169,8 @@ export default function Canvas() {
             onFocus={focusTerminal}
             onFocusProcess={handleFocusProcess}
             onKill={killTerminal}
+            onCloseNote={closeNote}
+            onDeleteNote={deleteNote}
             onAddTerminal={addTerminal}
             onAddBrowser={addBrowser}
             onAddNote={addNote}

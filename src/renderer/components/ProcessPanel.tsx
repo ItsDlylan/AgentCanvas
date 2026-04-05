@@ -13,6 +13,8 @@ interface ProcessPanelProps {
   onFocus: (sessionId: string) => void
   onFocusProcess: (workspaceId: string, sessionId: string) => void
   onKill: (sessionId: string) => void
+  onCloseNote: (sessionId: string) => void
+  onDeleteNote: (sessionId: string) => void
   onAddTerminal: (width?: number, height?: number) => void
   onAddBrowser: (preset?: DevicePreset) => void
   onAddNote: () => void
@@ -53,6 +55,8 @@ function ProcessPanelComponent({
   onFocus,
   onFocusProcess,
   onKill,
+  onCloseNote,
+  onDeleteNote,
   onAddTerminal,
   onAddBrowser,
   onAddNote,
@@ -330,23 +334,34 @@ function ProcessPanelComponent({
                       </div>
                     </div>
                     <JumpBadge hint={jumpHints.get(sessionId)} />
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        onKill(sessionId)
-                      }}
-                      className="mt-0.5 shrink-0 rounded p-0.5 text-zinc-600 opacity-0 transition-opacity hover:bg-zinc-700 hover:text-red-400 group-hover:opacity-100"
-                    >
-                      <svg
-                        className="h-3 w-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
+                    <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      {/* Soft close — remove from canvas, keep file */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onCloseNote(sessionId)
+                        }}
+                        className="rounded p-0.5 text-zinc-600 hover:bg-zinc-700 hover:text-zinc-300"
+                        title="Close (keep file)"
                       >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                      {/* Hard delete — remove from canvas AND delete file */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onDeleteNote(sessionId)
+                        }}
+                        className="rounded p-0.5 text-zinc-600 hover:bg-zinc-700 hover:text-red-400"
+                        title="Delete permanently"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </button>
                 )
               })}
