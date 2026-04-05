@@ -474,7 +474,8 @@ const HOTKEY_ACTION_META: Record<HotkeyAction, { label: string; description: str
   newNote: { label: 'New Note', description: 'Spawn a new note tile' },
   openSettings: { label: 'Open Settings', description: 'Open the settings page' },
   cycleFocusForward: { label: 'Next Tile', description: 'Cycle focus to the next tile' },
-  cycleFocusBackward: { label: 'Previous Tile', description: 'Cycle focus to the previous tile' }
+  cycleFocusBackward: { label: 'Previous Tile', description: 'Cycle focus to the previous tile' },
+  killFocused: { label: 'Kill Focused Tile', description: 'Close the currently focused tile' }
 }
 
 function HotkeyInput({

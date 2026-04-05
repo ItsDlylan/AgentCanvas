@@ -27,7 +27,8 @@ const FALLBACK: Settings = {
     newNote: 'Mod+N',
     openSettings: 'Mod+,',
     cycleFocusForward: 'Ctrl+Tab',
-    cycleFocusBackward: 'Ctrl+Shift+Tab'
+    cycleFocusBackward: 'Ctrl+Shift+Tab',
+    killFocused: 'Mod+D'
   },
   templates: []
 }

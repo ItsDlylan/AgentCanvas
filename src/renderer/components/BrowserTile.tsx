@@ -23,7 +23,7 @@ const CHROME_WIDTH = BROWSER_CHROME_WIDTH
 function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
   registerRender('BrowserTile')
   const { sessionId, label, initialUrl, linkedTerminalId, reservationId, initialPreset, isBackground } = data as unknown as BrowserNodeData
-  const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
+  const { focusedId, setFocusedId, killTerminal, killHighlight } = useFocusedTerminal()
   const { settings } = useSettings()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
@@ -119,7 +119,11 @@ function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
   return (
     <div
       className={`browser-tile ${
-        !isBackground && isFocused ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]' : ''
+        !isBackground && isFocused && killHighlight
+          ? 'ring-1 ring-red-500/80 shadow-[0_0_25px_rgba(239,68,68,0.3)] animate-pulse'
+          : !isBackground && isFocused
+            ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
+            : ''
       }`}
       style={{
         width: '100%',

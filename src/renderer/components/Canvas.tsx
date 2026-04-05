@@ -922,11 +922,60 @@ export default function Canvas() {
     []
   )
 
+  // ── Mod-hold kill highlight ──
+  // Hold Cmd/Ctrl for 300ms to pulse the focused tile red, hinting that
+  // Mod+D will kill it.
+
+  const [killHighlight, setKillHighlight] = useState(false)
+  const modTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const modKey = navigator.platform.includes('Mac') ? 'Meta' : 'Control'
+    const clearTimer = () => {
+      if (modTimerRef.current) {
+        clearTimeout(modTimerRef.current)
+        modTimerRef.current = null
+      }
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === modKey && !e.altKey && !e.shiftKey && focusedId) {
+        clearTimer()
+        modTimerRef.current = setTimeout(() => {
+          modTimerRef.current = null
+          setKillHighlight(true)
+        }, 300)
+      } else if (killHighlight || modTimerRef.current) {
+        // Any other key cancels or we're past the highlight
+        // Don't clear killHighlight here — let keyup handle it
+        clearTimer()
+      }
+    }
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === modKey) {
+        clearTimer()
+        setKillHighlight(false)
+      }
+    }
+    const onBlur = () => {
+      clearTimer()
+      setKillHighlight(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      clearTimer()
+      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [focusedId, killHighlight])
+
   // ── Context + render ──
 
   const focusCtx = useMemo(
-    () => ({ focusedId, setFocusedId, killTerminal }),
-    [focusedId, killTerminal]
+    () => ({ focusedId, setFocusedId, killTerminal, killHighlight }),
+    [focusedId, killTerminal, killHighlight]
   )
 
   const activeWorkspace = useMemo(
@@ -972,9 +1021,20 @@ export default function Canvas() {
       newNote: addNote,
       openSettings: () => setSettingsOpen(true),
       cycleFocusForward: () => cycleFocus(1),
-      cycleFocusBackward: () => cycleFocus(-1)
+      cycleFocusBackward: () => cycleFocus(-1),
+      killFocused: () => {
+        if (!focusedId) return
+        const node = allNodesRef.current.find(
+          (n) => (n.data as Record<string, unknown>).sessionId === focusedId
+        )
+        if (node?.type === 'notes') {
+          closeNote(focusedId)
+        } else {
+          killTerminal(focusedId)
+        }
+      }
     }),
-    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, addTerminal, addBrowser, addNote, cycleFocus]
+    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, addTerminal, addBrowser, addNote, cycleFocus, focusedId, closeNote, killTerminal]
   )
 
   useHotkeys(settings.hotkeys, hotkeyActions)

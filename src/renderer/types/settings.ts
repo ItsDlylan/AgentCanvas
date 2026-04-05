@@ -62,6 +62,7 @@ export type HotkeyAction =
   | 'openSettings'
   | 'cycleFocusForward'
   | 'cycleFocusBackward'
+  | 'killFocused'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 

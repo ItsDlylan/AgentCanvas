@@ -17,7 +17,7 @@ export interface NotesNodeData {
 function NotesTileComponent({ data, width, height }: NodeProps) {
   registerRender('NotesTile')
   const { sessionId, label, onClose, onDelete } = data as unknown as NotesNodeData
-  const { focusedId, setFocusedId } = useFocusedTerminal()
+  const { focusedId, setFocusedId, killHighlight } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
   const bodyElRef = useRef<HTMLDivElement | null>(null)
@@ -46,9 +46,11 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
   return (
     <div
       className={`notes-tile ${
-        isFocused
-          ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
-          : ''
+        isFocused && killHighlight
+          ? 'ring-1 ring-red-500/80 shadow-[0_0_25px_rgba(239,68,68,0.3)] animate-pulse'
+          : isFocused
+            ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
+            : ''
       }`}
       style={{ width: '100%', height: '100%', pointerEvents: isPanning ? 'none' : 'auto' }}
       onMouseDown={handleFocus}

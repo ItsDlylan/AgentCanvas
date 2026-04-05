@@ -64,6 +64,7 @@ export type HotkeyAction =
   | 'openSettings'
   | 'cycleFocusForward'
   | 'cycleFocusBackward'
+  | 'killFocused'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -119,7 +120,8 @@ export const DEFAULT_SETTINGS: Settings = {
     newNote: 'Mod+N',
     openSettings: 'Mod+,',
     cycleFocusForward: 'Ctrl+Tab',
-    cycleFocusBackward: 'Ctrl+Shift+Tab'
+    cycleFocusBackward: 'Ctrl+Shift+Tab',
+    killFocused: 'Mod+D'
   },
   templates: [
     {

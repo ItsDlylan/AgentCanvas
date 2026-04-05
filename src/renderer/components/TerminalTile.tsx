@@ -30,7 +30,7 @@ function shortenPath(path: string): string {
 function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
   const { sessionId, label, cwd: initialCwd } = data as unknown as TerminalNodeData
-  const { focusedId, setFocusedId, killTerminal } = useFocusedTerminal()
+  const { focusedId, setFocusedId, killTerminal, killHighlight } = useFocusedTerminal()
   const { settings } = useSettings()
   const isPanning = useIsPanning()
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
@@ -118,9 +118,11 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
   return (
     <div
       className={`terminal-tile ${
-        isFocused
-          ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
-          : ''
+        isFocused && killHighlight
+          ? 'ring-1 ring-red-500/80 shadow-[0_0_25px_rgba(239,68,68,0.3)] animate-pulse'
+          : isFocused
+            ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
+            : ''
       }`}
       style={{ width: '100%', height: '100%', pointerEvents: isPanning ? 'none' : 'auto' }}
       onMouseDown={handleFocus}

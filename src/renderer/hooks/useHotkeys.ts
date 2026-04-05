@@ -43,7 +43,7 @@ export function isGlobalHotkey(
   event: KeyboardEvent,
   hotkeys: HotkeySettings | undefined
 ): boolean {
-  const resolved = hotkeys ?? DEFAULT_HOTKEYS
+  const resolved = { ...DEFAULT_HOTKEYS, ...hotkeys }
   for (const binding of Object.values(resolved)) {
     if (matchesHotkey(event, binding)) return true
   }
@@ -102,7 +102,8 @@ export const DEFAULT_HOTKEYS: HotkeySettings = {
   newNote: 'Mod+N',
   openSettings: 'Mod+,',
   cycleFocusForward: 'Ctrl+Tab',
-  cycleFocusBackward: 'Ctrl+Shift+Tab'
+  cycleFocusBackward: 'Ctrl+Shift+Tab',
+  killFocused: 'Mod+D'
 }
 
 // ── Hook ────────────────────────────────────────────────
@@ -116,7 +117,7 @@ export function useHotkeys(
   actions: Record<HotkeyAction, () => void>
 ): void {
   useEffect(() => {
-    const resolved = hotkeys ?? DEFAULT_HOTKEYS
+    const resolved = { ...DEFAULT_HOTKEYS, ...hotkeys }
     const handler = (event: KeyboardEvent) => {
       // Don't intercept when an input/textarea/select is focused (e.g. settings fields)
       const tag = (event.target as HTMLElement)?.tagName
