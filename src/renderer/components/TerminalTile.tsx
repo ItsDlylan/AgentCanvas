@@ -6,6 +6,7 @@ import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { useSettings } from '@/hooks/useSettings'
+import { WorktreePicker } from './WorktreePicker'
 import type { TerminalStatus } from '@/hooks/useTerminalStatus'
 
 export interface TerminalNodeData {
@@ -172,6 +173,11 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
           )}
         </div>
         <div className="flex items-center gap-1">
+          <WorktreePicker
+            sessionId={sessionId}
+            cwd={cwd}
+            currentWorktree={statusInfo?.metadata?.worktree as { branch?: string; path?: string } | undefined}
+          />
           <button
             className={`titlebar-no-drag rounded px-1.5 py-0.5 text-xs ${
               showingDiff ? 'bg-purple-500/20 text-purple-400' : 'text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300'

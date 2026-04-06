@@ -9,6 +9,13 @@ export interface TerminalStatusInfo {
   metadata?: Record<string, unknown>
 }
 
+export interface WorktreeInfo {
+  path: string
+  branch: string
+  head: string
+  bare: boolean
+}
+
 export interface TerminalAPI {
   create: (id: string, label: string, cwd?: string, metadata?: Record<string, unknown>) => Promise<{ cdpPort: number; isReconnect?: boolean }>
   resume: (id: string) => Promise<{ scrollback: string }>
@@ -17,6 +24,8 @@ export interface TerminalAPI {
   kill: (id: string) => Promise<void>
   getStatus: (id: string) => Promise<TerminalStatusInfo | undefined>
   list: () => Promise<Array<{ id: string; cwd: string; status: TerminalStatus; foregroundProcess: string; label: string; createdAt: number; cdpPort: number; metadata: Record<string, unknown> }>>
+  setMetadata: (id: string, key: string, value: unknown) => Promise<{ ok: boolean }>
+  listWorktrees: (cwd: string) => Promise<WorktreeInfo[]>
   onData: (callback: (id: string, data: string) => void) => () => void
   onExit: (callback: (id: string, exitCode: number) => void) => () => void
   onStatus: (callback: (id: string, info: TerminalStatusInfo) => void) => () => void
@@ -32,6 +41,8 @@ const terminalAPI: TerminalAPI = {
   kill: (id) => ipcRenderer.invoke('terminal:kill', { id }),
   getStatus: (id) => ipcRenderer.invoke('terminal:status', { id }),
   list: () => ipcRenderer.invoke('terminal:list'),
+  setMetadata: (id, key, value) => ipcRenderer.invoke('terminal:set-metadata', { id, key, value }),
+  listWorktrees: (cwd) => ipcRenderer.invoke('terminal:list-worktrees', { cwd }),
 
   onData: (callback) => {
     const handler = (_event: Electron.IpcRendererEvent, { id, data }: { id: string; data: string }) => {

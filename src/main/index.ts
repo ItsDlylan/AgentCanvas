@@ -1,6 +1,10 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
 import { join } from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
+
+const execFileAsync = promisify(execFile)
 import { TerminalManager } from './terminal-manager'
 import { BrowserManager } from './browser-manager'
 import { CdpProxy } from './cdp-proxy'
@@ -134,6 +138,43 @@ ipcMain.handle('terminal:list', () => {
   return terminalManager.listSessions()
 })
 
+ipcMain.handle('terminal:set-metadata', (_event, { id, key, value }: { id: string; key: string; value: unknown }) => {
+  terminalManager.setMetadata(id, key, value)
+  return { ok: true }
+})
+
+ipcMain.handle('terminal:list-worktrees', async (_event, { cwd }: { cwd: string }) => {
+  const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  try {
+    // Find the repo root first
+    const { stdout: root } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], { cwd, env: gitEnv })
+    const repoRoot = root.trim()
+
+    const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: repoRoot, env: gitEnv })
+    const worktrees: Array<{ path: string; branch: string; head: string; bare: boolean }> = []
+    let current: { path: string; branch: string; head: string; bare: boolean } | null = null
+
+    for (const line of stdout.split('\n')) {
+      if (line.startsWith('worktree ')) {
+        if (current) worktrees.push(current)
+        current = { path: line.slice(9), branch: '', head: '', bare: false }
+      } else if (line.startsWith('HEAD ') && current) {
+        current.head = line.slice(5)
+      } else if (line.startsWith('branch ') && current) {
+        current.branch = line.slice(7).replace('refs/heads/', '')
+      } else if (line === 'bare' && current) {
+        current.bare = true
+      }
+    }
+    if (current) worktrees.push(current)
+
+    // Exclude bare repos and the main working tree (always first, path matches repo root)
+    return worktrees.filter(w => !w.bare && w.path !== repoRoot)
+  } catch {
+    return []
+  }
+})
+
 // ── Browser IPC Handlers ─────────────────────────────────
 
 ipcMain.handle('browser:create', (_event, { id, url }) => {
@@ -244,6 +285,15 @@ ipcMain.on('terminal-tiles:save-layout', (event, layout: Array<{
 
 ipcMain.handle('terminal-tiles:load', () => {
   const data = loadTerminals()
+
+  // Override CWD with worktree path when a worktree is assigned
+  for (const t of data.terminals) {
+    const wt = t.metadata?.worktree as { path?: string } | undefined
+    if (wt?.path && existsSync(wt.path)) {
+      t.cwd = wt.path
+    }
+  }
+
   const valid = data.terminals.filter(t => {
     try {
       return existsSync(t.cwd)
