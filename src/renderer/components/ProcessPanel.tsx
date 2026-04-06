@@ -32,7 +32,7 @@ interface ProcessPanelProps {
 
 interface GroupChild {
   node: Node
-  type: 'terminal' | 'browser' | 'notes'
+  type: 'terminal' | 'browser' | 'notes' | 'diffViewer'
   sessionId: string
 }
 
@@ -56,6 +56,7 @@ function computeGroups(
   terminals: Node[],
   browsers: Node[],
   notes: Node[],
+  diffViewers: Node[],
   statuses: Map<string, TerminalStatusInfo>,
   edges: Edge[]
 ): GroupingResult {
@@ -65,16 +66,17 @@ function computeGroups(
 
   // Build a lookup from node.id -> node for all non-terminal tiles
   const nodeById = new Map<string, Node>()
-  const nodeTypeById = new Map<string, 'terminal' | 'browser' | 'notes'>()
+  const nodeTypeById = new Map<string, 'terminal' | 'browser' | 'notes' | 'diffViewer'>()
   for (const n of terminals) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'terminal') }
   for (const n of browsers) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'browser') }
   for (const n of notes) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'notes') }
+  for (const n of diffViewers) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'diffViewer') }
 
   // Map parent sessionId -> children
   const childrenMap = new Map<string, GroupChild[]>()
   const childSessionIds = new Set<string>()
 
-  function addChild(parentSessionId: string, node: Node, type: 'terminal' | 'browser' | 'notes', sessionId: string) {
+  function addChild(parentSessionId: string, node: Node, type: 'terminal' | 'browser' | 'notes' | 'diffViewer', sessionId: string) {
     if (childSessionIds.has(sessionId)) return // already grouped
     const list = childrenMap.get(parentSessionId) || []
     list.push({ node, type, sessionId })
@@ -111,6 +113,16 @@ function computeGroups(
     const linkedId = data.linkedTerminalId as string | undefined
     if (linkedId && terminalSessionIds.has(linkedId)) {
       addChild(linkedId, node, 'notes', sessionId)
+    }
+  }
+
+  // Linked diff viewers (via data.linkedTerminalId)
+  for (const node of diffViewers) {
+    const data = node.data as Record<string, unknown>
+    const sessionId = data.sessionId as string
+    const linkedId = data.linkedTerminalId as string | undefined
+    if (linkedId && terminalSessionIds.has(linkedId)) {
+      addChild(linkedId, node, 'diffViewer', sessionId)
     }
   }
 
@@ -515,6 +527,53 @@ function NoteEntry({ node, focusedId, jumpHints, onFocus, onCloseNote, onDeleteN
   )
 }
 
+interface DiffViewerEntryProps {
+  node: Node
+  focusedId: string | null
+  jumpHints: Map<string, string>
+  onFocus: (sessionId: string) => void
+  onKill: (sessionId: string) => void
+  compact?: boolean
+}
+
+function DiffViewerEntry({ node, focusedId, jumpHints, onFocus, onKill, compact }: DiffViewerEntryProps) {
+  const data = node.data as Record<string, unknown>
+  const sessionId = data.sessionId as string
+  const label = (data.label as string) || 'Diff Viewer'
+  const isFocused = focusedId === sessionId
+
+  return (
+    <button
+      onClick={() => onFocus(sessionId)}
+      className={`group flex w-full items-start gap-2.5 rounded-md px-2.5 ${compact ? 'py-1.5' : 'py-2'} text-left transition-colors ${
+        isFocused
+          ? 'bg-blue-500/10 ring-1 ring-blue-500/20'
+          : 'hover:bg-zinc-800'
+      }`}
+    >
+      <span
+        className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${isFocused ? 'bg-blue-400' : 'bg-purple-400'}`}
+      />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex items-center gap-1.5">
+          <span
+            className={`truncate text-xs font-medium ${
+              isFocused ? 'text-blue-300' : 'text-zinc-300'
+            }`}
+          >
+            {label}
+          </span>
+          <span className="shrink-0 text-[10px] text-purple-400/70">
+            Diff
+          </span>
+        </div>
+      </div>
+      <JumpBadge hint={jumpHints.get(sessionId)} />
+      <CloseButton onClick={(e) => { e.stopPropagation(); onKill(sessionId) }} />
+    </button>
+  )
+}
+
 // ── Group components ────────────────────────────────────
 
 interface GroupChildEntryProps {
@@ -576,6 +635,16 @@ function GroupChildEntry({
             onFocus={onFocus}
             onCloseNote={onCloseNote}
             onDeleteNote={onDeleteNote}
+            compact
+          />
+        )}
+        {child.type === 'diffViewer' && (
+          <DiffViewerEntry
+            node={child.node}
+            focusedId={focusedId}
+            jumpHints={jumpHints}
+            onFocus={onFocus}
+            onKill={onKill}
             compact
           />
         )}
@@ -778,6 +847,7 @@ function ProcessPanelComponent({
   const terminals = nodes.filter((n) => n.type === 'terminal')
   const allBrowsers = nodes.filter((n) => n.type === 'browser')
   const notes = nodes.filter((n) => n.type === 'notes')
+  const diffViewers = nodes.filter((n) => n.type === 'diffViewer')
   const browsers = allBrowsers.filter((n) => {
     const sid = (n.data as Record<string, unknown>).sessionId as string
     return tileWorkspaceMap.get(sid) === activeWorkspaceId
@@ -805,8 +875,8 @@ function ProcessPanelComponent({
 
   // Compute tile groups
   const grouping = useMemo(
-    () => computeGroups(terminals, browsers, notes, statuses, edges),
-    [terminals, browsers, notes, statuses, edges]
+    () => computeGroups(terminals, browsers, notes, diffViewers, statuses, edges),
+    [terminals, browsers, notes, diffViewers, statuses, edges]
   )
 
   useEffect(() => {

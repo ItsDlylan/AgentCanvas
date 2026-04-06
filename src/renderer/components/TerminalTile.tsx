@@ -31,7 +31,8 @@ function shortenPath(path: string): string {
 function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
   const { sessionId, label, cwd: initialCwd, metadata: initialMetadata } = data as unknown as TerminalNodeData
-  const { focusedId, setFocusedId, killTerminal, killHighlight } = useFocusedTerminal()
+  const { focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer } = useFocusedTerminal()
+  const showingDiff = hasDiffViewer(sessionId)
   const { settings } = useSettings()
   const isPanning = useIsPanning()
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
@@ -170,12 +171,23 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
             </span>
           )}
         </div>
-        <button
-          className="titlebar-no-drag rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
-          onClick={() => killTerminal(sessionId)}
-        >
-          Kill
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className={`titlebar-no-drag rounded px-1.5 py-0.5 text-xs ${
+              showingDiff ? 'bg-purple-500/20 text-purple-400' : 'text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300'
+            }`}
+            onClick={() => toggleDiffViewer(sessionId)}
+            title="Toggle diff viewer"
+          >
+            Diff
+          </button>
+          <button
+            className="titlebar-no-drag rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+            onClick={() => killTerminal(sessionId)}
+          >
+            Kill
+          </button>
+        </div>
       </div>
 
       {/* Terminal body */}
@@ -192,6 +204,15 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
 
       <Handle type="target" position={Position.Left} className="!bg-zinc-600" />
       <Handle type="source" position={Position.Right} className="!bg-zinc-600" />
+      {/* Hidden handle for diff viewer connection — never user-connectable */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="diff-source"
+        isConnectableStart={false}
+        isConnectableEnd={false}
+        className="!opacity-0 !w-0 !h-0 !min-w-0 !min-h-0 !border-0"
+      />
     </div>
   )
 }

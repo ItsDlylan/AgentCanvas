@@ -10,6 +10,7 @@ import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
+import { DiffService } from './diff-service'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -23,6 +24,7 @@ const terminalManager = new TerminalManager()
 const browserManager = new BrowserManager()
 const cdpProxy = new CdpProxy()
 const canvasApi = new CanvasApi()
+const diffService = new DiffService()
 let mainWindow: BrowserWindow | null = null
 let canvasApiPort = 0
 
@@ -276,6 +278,12 @@ ipcMain.handle('note:delete', (_event, { noteId }) => {
 
 ipcMain.handle('note:list', () => {
   return listNotes()
+})
+
+// ── Diff IPC Handler ─────────────────────────────────────
+
+ipcMain.handle('diff:compute', (_event, { cwd }: { cwd: string }) => {
+  return diffService.computeDiff(cwd)
 })
 
 // ── Performance Monitor IPC ──────────────────────────────

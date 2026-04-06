@@ -24,6 +24,7 @@ import { v4 as uuid } from 'uuid'
 import { TerminalTile } from './TerminalTile'
 import { BrowserTile } from './BrowserTile'
 import { NotesTile } from './NotesTile'
+import { DiffViewerTile } from './DiffViewerTile'
 import { ProcessPanel } from './ProcessPanel'
 import { WorkspacePanel } from './WorkspacePanel'
 import { OffscreenIndicators } from './OffscreenIndicators'
@@ -42,13 +43,15 @@ import { SettingsPage } from './SettingsPage'
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
   browser: BrowserTile as unknown as NodeTypes['browser'],
-  notes: NotesTile as unknown as NodeTypes['notes']
+  notes: NotesTile as unknown as NodeTypes['notes'],
+  diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer']
 }
 
 const MINIMAP_NODE_COLORS: Record<string, string> = {
   terminal: '#22c55e',
   browser:  '#3b82f6',
   notes:    '#f59e0b',
+  diffViewer: '#a855f7',
 }
 
 function minimapNodeColor(node: Node): string {
@@ -127,11 +130,11 @@ function CanvasMiniMap({ position, panelOpen, workspacePanelOpen }: {
 }
 
 function defaultTileWidth(type: string | undefined): number {
-  return type === 'browser' ? 800 : type === 'notes' ? 400 : 640
+  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : 640
 }
 
 function defaultTileHeight(type: string | undefined): number {
-  return type === 'browser' ? 600 : type === 'notes' ? 400 : 400
+  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : 400
 }
 
 let tileCount = 0
@@ -317,9 +320,16 @@ export default function Canvas() {
               data: { ...n.data, onClose: closeNote, onDelete: deleteNote }
             }
           }
+          // Inject close callback into diff viewer data
+          if (n.type === 'diffViewer') {
+            return {
+              ...n,
+              data: { ...n.data, onClose: (sid: string) => removeTileFromCanvas(sid) }
+            }
+          }
           return n
         }),
-    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote]
+    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote, removeTileFromCanvas]
   )
 
   const visibleNodeIds = useMemo(
@@ -377,6 +387,9 @@ export default function Canvas() {
 
   const onConnect: OnConnect = useCallback(
     (params) => {
+      // Block manual connections to/from diff handles
+      if (params.sourceHandle === 'diff-source' || params.targetHandle === 'diff-target') return
+
       setAllEdges((eds) => addEdge(params, eds))
 
       const sourceNode = allNodesRef.current.find((n) => n.id === params.source)
@@ -650,9 +663,14 @@ export default function Canvas() {
   // ── Global terminal:exit listener (cleans up tiles even when hidden) ──
   useEffect(() => {
     const unsub = window.terminal.onExit((id) => {
-      setAllNodes((nds) =>
-        nds.filter((n) => (n.data as Record<string, unknown>).sessionId !== id)
-      )
+      setAllNodes((nds) => {
+        // Also remove any linked diff viewer for this terminal
+        const diffViewerIds = nds
+          .filter((n) => n.type === 'diffViewer' && (n.data as Record<string, unknown>).linkedTerminalId === id)
+          .map((n) => (n.data as Record<string, unknown>).sessionId as string)
+        const removeIds = new Set([id, ...diffViewerIds])
+        return nds.filter((n) => !removeIds.has((n.data as Record<string, unknown>).sessionId as string))
+      })
       setTileWorkspaceMap((prev) => {
         const next = new Map(prev)
         next.delete(id)
@@ -675,12 +693,96 @@ export default function Canvas() {
       } else if (node?.type === 'notes') {
         // For notes in killTerminal (e.g. workspace removal), delete the file
         window.note.delete(sessionId)
+      } else if (node?.type === 'diffViewer') {
+        // Diff viewers just get removed from canvas
       } else {
         window.terminal.kill(sessionId)
+        // Also remove any linked diff viewer
+        const linkedDiff = allNodesRef.current.find(
+          (n) => n.type === 'diffViewer' && (n.data as Record<string, unknown>).linkedTerminalId === sessionId
+        )
+        if (linkedDiff) {
+          removeTileFromCanvas((linkedDiff.data as Record<string, unknown>).sessionId as string)
+        }
       }
       removeTileFromCanvas(sessionId)
     },
     [removeTileFromCanvas]
+  )
+
+  // ── Diff viewer toggle ──
+
+  const toggleDiffViewer = useCallback(
+    (terminalSessionId: string) => {
+      const existing = allNodesRef.current.find(
+        (n) => n.type === 'diffViewer' && (n.data as Record<string, unknown>).linkedTerminalId === terminalSessionId
+      )
+
+      if (existing) {
+        removeTileFromCanvas((existing.data as Record<string, unknown>).sessionId as string)
+        return
+      }
+
+      const terminalNode = allNodesRef.current.find(
+        (n) => (n.data as Record<string, unknown>).sessionId === terminalSessionId
+      )
+      if (!terminalNode) return
+
+      tileCount++
+      const sessionId = uuid()
+      const diffW = 700
+      const diffH = 500
+      const termH = (terminalNode.measured?.height ?? (terminalNode.style?.height as number) ?? 400)
+      const pos = {
+        x: terminalNode.position.x,
+        y: terminalNode.position.y + termH + (settings.canvas.tileGap || 40)
+      }
+
+      const newNode: Node = {
+        id: sessionId,
+        type: 'diffViewer',
+        position: pos,
+        style: { width: diffW, height: diffH },
+        data: {
+          sessionId,
+          label: `Diff Viewer`,
+          linkedTerminalId: terminalSessionId,
+          cwd: (terminalNode.data as Record<string, unknown>).cwd || '',
+          onClose: (sid: string) => removeTileFromCanvas(sid)
+        },
+        dragHandle: '.diff-viewer-tile-header'
+      }
+
+      setAllNodes((nds) => [...nds, newNode])
+      setTileWorkspaceMap((prev) =>
+        new Map(prev).set(sessionId, tileWorkspaceMapRef.current.get(terminalSessionId) ?? activeWorkspaceIdRef.current)
+      )
+
+      // Create auto-edge with diff-specific handle IDs and purple dashed styling
+      const newEdge: Edge = {
+        id: `diff-edge-${terminalSessionId}-${sessionId}`,
+        source: terminalSessionId,
+        target: sessionId,
+        sourceHandle: 'diff-source',
+        targetHandle: 'diff-target',
+        animated: true,
+        style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '6 3' }
+      }
+      setAllEdges((eds) => [...eds, newEdge])
+
+      setFocusedId(sessionId)
+      setCenter(pos.x + diffW / 2, pos.y + diffH / 2, { zoom: 1, duration: 400 })
+    },
+    [removeTileFromCanvas, setCenter, settings.canvas.tileGap]
+  )
+
+  const hasDiffViewer = useCallback(
+    (terminalSessionId: string) => {
+      return allNodes.some(
+        (n) => n.type === 'diffViewer' && (n.data as Record<string, unknown>).linkedTerminalId === terminalSessionId
+      )
+    },
+    [allNodes]
   )
 
   const addBrowserAt = useCallback(
@@ -1155,8 +1257,8 @@ export default function Canvas() {
   // ── Context + render ──
 
   const focusCtx = useMemo(
-    () => ({ focusedId, setFocusedId, killTerminal, killHighlight }),
-    [focusedId, killTerminal, killHighlight]
+    () => ({ focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer }),
+    [focusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer]
   )
 
   const activeWorkspace = useMemo(
@@ -1240,7 +1342,8 @@ export default function Canvas() {
       return tileWorkspaceMap.get(sid) === activeWorkspaceId
     })
     const notes = visibleNodes.filter((n) => n.type === 'notes')
-    const ordered = [...terminals, ...browsers, ...notes]
+    const diffs = visibleNodes.filter((n) => n.type === 'diffViewer')
+    const ordered = [...terminals, ...browsers, ...notes, ...diffs]
     const map = new Map<string, string>()
     ordered.forEach((n, i) => {
       if (i >= JUMP_KEYS.length) return
@@ -1433,6 +1536,9 @@ export default function Canvas() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            isValidConnection={(connection) =>
+              connection.sourceHandle !== 'diff-source' && connection.targetHandle !== 'diff-target'
+            }
             onPaneClick={onPaneClick}
             onDoubleClick={onDoubleClick}
             onContextMenu={onContextMenu}

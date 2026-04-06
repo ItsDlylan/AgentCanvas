@@ -253,6 +253,18 @@ const terminalTilesAPI: TerminalTilesAPI = {
 
 contextBridge.exposeInMainWorld('terminalTiles', terminalTilesAPI)
 
+// ── Diff API ────────────────────────────────────────────
+
+export interface DiffAPI {
+  compute: (cwd: string) => Promise<import('../main/diff-service').DiffResult>
+}
+
+const diffAPI: DiffAPI = {
+  compute: (cwd) => ipcRenderer.invoke('diff:compute', { cwd })
+}
+
+contextBridge.exposeInMainWorld('diff', diffAPI)
+
 // Debug APIs
 contextBridge.exposeInMainWorld('debug', {
   profile: (durationMs = 3000) => ipcRenderer.invoke('debug:profile', durationMs),

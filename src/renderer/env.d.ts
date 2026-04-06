@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { TerminalAPI, BrowserAPI, WorkspaceAPI, NoteAPI, SettingsAPI, TerminalTilesAPI } from '../preload/index'
+import type { TerminalAPI, BrowserAPI, WorkspaceAPI, NoteAPI, SettingsAPI, TerminalTilesAPI, DiffAPI } from '../preload/index'
 
 declare global {
   interface Window {
@@ -10,6 +10,7 @@ declare global {
     note: NoteAPI
     settings: SettingsAPI
     terminalTiles: TerminalTilesAPI
+    diff: DiffAPI
   }
 
   namespace JSX {
