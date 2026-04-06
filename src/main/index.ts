@@ -9,6 +9,7 @@ import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabl
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
+import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -62,7 +63,7 @@ function createWindow(): void {
 
 // ── IPC Handlers ──────────────────────────────────────────
 
-ipcMain.handle('terminal:create', async (_event, { id, label, cwd }) => {
+ipcMain.handle('terminal:create', async (_event, { id, label, cwd, metadata }) => {
   // Reconnect: session already exists (component remounted after workspace switch)
   const existingSession = terminalManager.getSession(id)
   if (existingSession) {
@@ -87,6 +88,21 @@ ipcMain.handle('terminal:create', async (_event, { id, label, cwd }) => {
     extraEnv.AGENT_CANVAS_API = `http://127.0.0.1:${canvasApiPort}`
   }
   const cdpPort = await terminalManager.create(id, label, cwd, 80, 24, extraEnv, currentSettings.general.shell)
+
+  // Restore metadata if provided (e.g., worktree info from persisted session)
+  if (metadata) {
+    for (const [key, value] of Object.entries(metadata)) {
+      terminalManager.setMetadata(id, key, value)
+    }
+  }
+
+  // If there's persisted scrollback (from a previous app session), trigger
+  // the reconnect path so useTerminal replays it into xterm
+  if (scrollbackBuffers.has(id)) {
+    pausedSessions.add(id)
+    return { cdpPort, isReconnect: true }
+  }
+
   return { cdpPort }
 })
 
@@ -183,6 +199,65 @@ ipcMain.handle('workspace:pickDirectory', async () => {
   })
   if (result.canceled || result.filePaths.length === 0) return null
   return result.filePaths[0]
+})
+
+// ── Terminal Tiles Persistence ───────────────────────────
+import { existsSync } from 'fs'
+
+ipcMain.on('terminal-tiles:save-layout', (event, layout: Array<{
+  sessionId: string
+  position: { x: number; y: number }
+  width: number
+  height: number
+  workspaceId: string
+}>) => {
+  const sessions = terminalManager.listSessions()
+  const sessionMap = new Map(sessions.map(s => [s.id, s]))
+
+  const terminals: PersistedTerminal[] = layout
+    .map(tile => {
+      const session = sessionMap.get(tile.sessionId)
+      if (!session) return null
+      // Merge any pending data into the scrollback for this session
+      const pending = dataBuffers.get(tile.sessionId) || ''
+      const scrollback = (scrollbackBuffers.get(tile.sessionId) || '') + pending
+      return {
+        sessionId: tile.sessionId,
+        label: session.label,
+        cwd: session.cwd,
+        position: tile.position,
+        width: tile.width,
+        height: tile.height,
+        workspaceId: tile.workspaceId,
+        metadata: session.metadata,
+        createdAt: session.createdAt,
+        scrollback: scrollback || undefined
+      }
+    })
+    .filter((t): t is PersistedTerminal => t !== null)
+
+  saveTerminals({ version: 1, terminals })
+  event.returnValue = true
+})
+
+ipcMain.handle('terminal-tiles:load', () => {
+  const data = loadTerminals()
+  const valid = data.terminals.filter(t => {
+    try {
+      return existsSync(t.cwd)
+    } catch {
+      return false
+    }
+  })
+
+  // Pre-populate scrollback buffers so the reconnect path replays them
+  for (const t of valid) {
+    if (t.scrollback) {
+      scrollbackBuffers.set(t.sessionId, t.scrollback)
+    }
+  }
+
+  return valid
 })
 
 // ── Note IPC Handlers ───────────────────────────────────

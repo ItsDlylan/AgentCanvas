@@ -10,7 +10,7 @@ export interface TerminalStatusInfo {
 }
 
 export interface TerminalAPI {
-  create: (id: string, label: string, cwd?: string) => Promise<{ cdpPort: number; isReconnect?: boolean }>
+  create: (id: string, label: string, cwd?: string, metadata?: Record<string, unknown>) => Promise<{ cdpPort: number; isReconnect?: boolean }>
   resume: (id: string) => Promise<{ scrollback: string }>
   write: (id: string, data: string) => Promise<void>
   resize: (id: string, cols: number, rows: number) => Promise<void>
@@ -25,7 +25,7 @@ export interface TerminalAPI {
 }
 
 const terminalAPI: TerminalAPI = {
-  create: (id, label, cwd) => ipcRenderer.invoke('terminal:create', { id, label, cwd }),
+  create: (id, label, cwd, metadata) => ipcRenderer.invoke('terminal:create', { id, label, cwd, metadata }),
   resume: (id) => ipcRenderer.invoke('terminal:resume', { id }),
   write: (id, data) => ipcRenderer.invoke('terminal:write', { id, data }),
   resize: (id, cols, rows) => ipcRenderer.invoke('terminal:resize', { id, cols, rows }),
@@ -218,6 +218,40 @@ const settingsAPI: SettingsAPI = {
 }
 
 contextBridge.exposeInMainWorld('settings', settingsAPI)
+
+// ── Terminal Tiles Persistence API ────────────────────────
+
+export interface TerminalTileLayout {
+  sessionId: string
+  position: { x: number; y: number }
+  width: number
+  height: number
+  workspaceId: string
+}
+
+export interface PersistedTerminalInfo {
+  sessionId: string
+  label: string
+  cwd: string
+  position: { x: number; y: number }
+  width: number
+  height: number
+  workspaceId: string
+  metadata: Record<string, unknown>
+  createdAt: number
+}
+
+export interface TerminalTilesAPI {
+  saveLayout: (layout: TerminalTileLayout[]) => void
+  load: () => Promise<PersistedTerminalInfo[]>
+}
+
+const terminalTilesAPI: TerminalTilesAPI = {
+  saveLayout: (layout) => ipcRenderer.sendSync('terminal-tiles:save-layout', layout),
+  load: () => ipcRenderer.invoke('terminal-tiles:load')
+}
+
+contextBridge.exposeInMainWorld('terminalTiles', terminalTilesAPI)
 
 // Debug APIs
 contextBridge.exposeInMainWorld('debug', {

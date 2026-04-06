@@ -549,6 +549,93 @@ export default function Canvas() {
     })
   }, [])
 
+  // ── Load persisted terminal tiles on mount ──
+  useEffect(() => {
+    window.terminalTiles.load().then((persisted) => {
+      if (!persisted || persisted.length === 0) return
+
+      setAllNodes((nds) => {
+        const existingIds = new Set(nds.map((n) => n.id))
+        const newNodes: Node[] = []
+        const wsMapEntries: [string, string][] = []
+
+        for (const pt of persisted) {
+          if (existingIds.has(pt.sessionId)) continue
+          tileCount++
+          newNodes.push({
+            id: pt.sessionId,
+            type: 'terminal',
+            position: pt.position,
+            style: { width: pt.width, height: pt.height },
+            data: {
+              sessionId: pt.sessionId,
+              label: pt.label,
+              cwd: pt.cwd,
+              metadata: pt.metadata
+            },
+            dragHandle: '.terminal-tile-header'
+          })
+          wsMapEntries.push([pt.sessionId, pt.workspaceId])
+        }
+
+        if (newNodes.length > 0) {
+          setTileWorkspaceMap((prev) => {
+            const next = new Map(prev)
+            for (const [sid, wsId] of wsMapEntries) next.set(sid, wsId)
+            return next
+          })
+        }
+
+        return newNodes.length > 0 ? [...nds, ...newNodes] : nds
+      })
+
+      // Reconstruct note→terminal edges now that terminal nodes exist
+      window.note.list().then((noteFiles) => {
+        const edgesToRestore: Edge[] = []
+        const edgeIds = new Set<string>()
+        for (const nf of noteFiles.filter((n) => !n.meta.isSoftDeleted)) {
+          if (nf.meta.linkedTerminalId) {
+            const edgeId = `edge-${nf.meta.linkedTerminalId}-${nf.meta.noteId}`
+            if (!edgeIds.has(edgeId)) {
+              edgesToRestore.push({
+                id: edgeId,
+                source: nf.meta.linkedTerminalId,
+                target: nf.meta.noteId,
+                animated: true,
+                style: { stroke: '#22c55e', strokeWidth: 2 }
+              })
+              edgeIds.add(edgeId)
+            }
+          }
+        }
+        if (edgesToRestore.length > 0) {
+          setAllEdges((eds) => {
+            const existing = new Set(eds.map((e) => e.id))
+            const newEdges = edgesToRestore.filter((e) => !existing.has(e.id))
+            return newEdges.length > 0 ? [...eds, ...newEdges] : eds
+          })
+        }
+      })
+    })
+  }, [])
+
+  // ── Save terminal tile layout on window close ──
+  useEffect(() => {
+    const handler = () => {
+      const terminalNodes = allNodesRef.current.filter((n) => n.type === 'terminal')
+      const layout = terminalNodes.map((n) => ({
+        sessionId: (n.data as { sessionId: string }).sessionId,
+        position: n.position,
+        width: (n.style?.width as number) ?? 640,
+        height: (n.style?.height as number) ?? 400,
+        workspaceId: tileWorkspaceMapRef.current.get((n.data as { sessionId: string }).sessionId) ?? 'default'
+      }))
+      window.terminalTiles.saveLayout(layout)
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [])
+
   // ── Save workspaces when they change ──
   const workspacesLoaded = useRef(false)
   useEffect(() => {

@@ -12,6 +12,7 @@ export interface TerminalNodeData {
   sessionId: string
   label: string
   cwd?: string
+  metadata?: Record<string, unknown>
 }
 
 const STATUS_CONFIG: Record<TerminalStatus, { dot: string; text: string; label: string }> = {
@@ -29,7 +30,7 @@ function shortenPath(path: string): string {
 
 function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
-  const { sessionId, label, cwd: initialCwd } = data as unknown as TerminalNodeData
+  const { sessionId, label, cwd: initialCwd, metadata: initialMetadata } = data as unknown as TerminalNodeData
   const { focusedId, setFocusedId, killTerminal, killHighlight } = useFocusedTerminal()
   const { settings } = useSettings()
   const isPanning = useIsPanning()
@@ -53,7 +54,7 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
     scrollback: settings.terminal.scrollback
   }
 
-  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, appearance, hotkeys: settings.hotkeys, onExit: killTerminal })
+  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, metadata: initialMetadata, appearance, hotkeys: settings.hotkeys, onExit: killTerminal })
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)
