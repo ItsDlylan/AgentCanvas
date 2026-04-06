@@ -27,6 +27,17 @@ export interface BrowserSettings {
   defaultDevicePreset: string
 }
 
+export type BackgroundMode =
+  | 'dots'
+  | 'matrix'
+  | 'starfield'
+  | 'circuit'
+  | 'topographic'
+  | 'ocean'
+  | 'constellation'
+  | 'fireflies'
+  | 'snow'
+
 export interface CanvasSettings {
   tileGap: number
   defaultZoom: number
@@ -34,6 +45,7 @@ export interface CanvasSettings {
   maxZoom: number
   backgroundDotGap: number
   backgroundDotSize: number
+  backgroundMode: BackgroundMode
   panSpeed: number
   minimapEnabled: boolean
   minimapPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
@@ -107,6 +119,7 @@ export const DEFAULT_SETTINGS: Settings = {
     maxZoom: 1.5,
     backgroundDotGap: 20,
     backgroundDotSize: 1,
+    backgroundMode: 'dots',
     panSpeed: 0.5,
     minimapEnabled: true,
     minimapPosition: 'bottom-right'

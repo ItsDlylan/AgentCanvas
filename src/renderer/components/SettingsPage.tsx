@@ -406,23 +406,44 @@ function CanvasSection({ settings, update }: { settings: Settings; update: (patc
             step={0.1}
           />
         </SettingRow>
-        <SettingRow label="Background Dot Gap" description="Spacing of canvas background dots">
-          <NumberInput
-            value={settings.canvas.backgroundDotGap}
-            onChange={(v) => update({ canvas: { ...settings.canvas, backgroundDotGap: v } })}
-            min={5}
-            max={50}
+        <SettingRow label="Background Mode" description="Visual style of the canvas background">
+          <SelectInput
+            value={settings.canvas.backgroundMode}
+            onChange={(v) => update({ canvas: { ...settings.canvas, backgroundMode: v as any } })}
+            options={[
+              { value: 'dots', label: 'Dots (Default)' },
+              { value: 'matrix', label: 'Matrix Rain' },
+              { value: 'starfield', label: 'Starfield' },
+              { value: 'circuit', label: 'Circuit Board' },
+              { value: 'topographic', label: 'Topographic' },
+              { value: 'ocean', label: 'Ocean Waves' },
+              { value: 'constellation', label: 'Constellation' },
+              { value: 'fireflies', label: 'Fireflies' },
+              { value: 'snow', label: 'Snowfall' }
+            ]}
           />
         </SettingRow>
-        <SettingRow label="Background Dot Size">
-          <NumberInput
-            value={settings.canvas.backgroundDotSize}
-            onChange={(v) => update({ canvas: { ...settings.canvas, backgroundDotSize: v } })}
-            min={0.5}
-            max={5}
-            step={0.5}
-          />
-        </SettingRow>
+        {settings.canvas.backgroundMode === 'dots' && (
+          <>
+            <SettingRow label="Background Dot Gap" description="Spacing of canvas background dots">
+              <NumberInput
+                value={settings.canvas.backgroundDotGap}
+                onChange={(v) => update({ canvas: { ...settings.canvas, backgroundDotGap: v } })}
+                min={5}
+                max={50}
+              />
+            </SettingRow>
+            <SettingRow label="Background Dot Size">
+              <NumberInput
+                value={settings.canvas.backgroundDotSize}
+                onChange={(v) => update({ canvas: { ...settings.canvas, backgroundDotSize: v } })}
+                min={0.5}
+                max={5}
+                step={0.5}
+              />
+            </SettingRow>
+          </>
+        )}
         <SettingRow label="Pan Speed" description="Scroll-to-pan speed multiplier (default 0.5)">
           <NumberInput
             value={settings.canvas.panSpeed}

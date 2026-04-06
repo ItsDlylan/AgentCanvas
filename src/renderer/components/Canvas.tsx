@@ -28,6 +28,7 @@ import { DiffViewerTile } from './DiffViewerTile'
 import { ProcessPanel } from './ProcessPanel'
 import { WorkspacePanel } from './WorkspacePanel'
 import { OffscreenIndicators } from './OffscreenIndicators'
+import { CanvasBackground } from './CanvasBackground'
 import { FocusedTerminalContext } from '@/hooks/useFocusedTerminal'
 import { PanDetector } from './PanDetector'
 import { navigateBrowser } from '@/hooks/useBrowserNavigation'
@@ -1604,7 +1605,11 @@ export default function Canvas() {
             deleteKeyCode="Delete"
             className="bg-zinc-950"
           >
-            <Background variant={BackgroundVariant.Dots} gap={settings.canvas.backgroundDotGap} size={settings.canvas.backgroundDotSize} color="#27272a" />
+            {settings.canvas.backgroundMode === 'dots' ? (
+              <Background variant={BackgroundVariant.Dots} gap={settings.canvas.backgroundDotGap} size={settings.canvas.backgroundDotSize} color="#27272a" />
+            ) : (
+              <CanvasBackground mode={settings.canvas.backgroundMode} />
+            )}
             <Controls
               showInteractive={false}
               className="!rounded-lg !border-zinc-700 !bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!bg-zinc-800 [&>button]:!fill-zinc-400 [&>button:hover]:!bg-zinc-700"
