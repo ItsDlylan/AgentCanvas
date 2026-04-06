@@ -264,6 +264,30 @@ const terminalTilesAPI: TerminalTilesAPI = {
 
 contextBridge.exposeInMainWorld('terminalTiles', terminalTilesAPI)
 
+// ── Edge Persistence API ─────────────────────────────────
+
+export interface PersistedEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string | null
+  targetHandle?: string | null
+  animated?: boolean
+  style?: Record<string, unknown>
+}
+
+export interface EdgeAPI {
+  save: (edges: PersistedEdge[]) => void
+  load: () => Promise<PersistedEdge[]>
+}
+
+const edgeAPI: EdgeAPI = {
+  save: (edges) => ipcRenderer.sendSync('edges:save', edges),
+  load: () => ipcRenderer.invoke('edges:load')
+}
+
+contextBridge.exposeInMainWorld('edges', edgeAPI)
+
 // ── Diff API ────────────────────────────────────────────
 
 export interface DiffAPI {

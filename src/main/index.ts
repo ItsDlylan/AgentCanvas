@@ -14,6 +14,7 @@ import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
+import { loadEdges, saveEdges } from './edge-store'
 import { DiffService } from './diff-service'
 
 // GPU compositing flags for smooth panning
@@ -310,6 +311,17 @@ ipcMain.handle('terminal-tiles:load', () => {
   }
 
   return valid
+})
+
+// ── Edge Persistence ─────────────────────────────────────
+
+ipcMain.on('edges:save', (event, edges) => {
+  saveEdges({ version: 1, edges })
+  event.returnValue = true
+})
+
+ipcMain.handle('edges:load', () => {
+  return loadEdges().edges
 })
 
 // ── Note IPC Handlers ───────────────────────────────────

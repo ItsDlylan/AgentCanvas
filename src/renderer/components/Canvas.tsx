@@ -234,6 +234,7 @@ export default function Canvas() {
   // ── All nodes/edges (across all workspaces) ──
   const [allNodes, setAllNodes] = useState<Node[]>([])
   const [allEdges, setAllEdges] = useState<Edge[]>([])
+  const [nodesLoadedFlags, setNodesLoadedFlags] = useState({ notes: false, terminals: false })
 
   // ── Workspace state ──
   const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WORKSPACE])
@@ -248,6 +249,9 @@ export default function Canvas() {
 
   const allNodesRef = useRef(allNodes)
   allNodesRef.current = allNodes
+
+  const allEdgesRef = useRef(allEdges)
+  allEdgesRef.current = allEdges
 
   const tileWorkspaceMapRef = useRef(tileWorkspaceMap)
   tileWorkspaceMapRef.current = tileWorkspaceMap
@@ -474,6 +478,9 @@ export default function Canvas() {
         setWorkspaces(data.workspaces)
         setActiveWorkspaceId(data.activeWorkspaceId)
       }
+      // Enable the save effect only after the load has populated state,
+      // preventing StrictMode double-invoke from saving defaults to disk
+      workspacesLoaded.current = true
     })
   }, [])
 
@@ -559,6 +566,7 @@ export default function Canvas() {
           return newEdges.length > 0 ? [...eds, ...newEdges] : eds
         })
       }
+      setNodesLoadedFlags((prev) => ({ ...prev, notes: true }))
     })
   }, [])
 
@@ -629,8 +637,36 @@ export default function Canvas() {
           })
         }
       })
+      setNodesLoadedFlags((prev) => ({ ...prev, terminals: true }))
     })
   }, [])
+
+  // ── Load persisted edges once all nodes are ready ──
+  useEffect(() => {
+    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals) return
+
+    window.edges.load().then((persistedEdges) => {
+      if (!persistedEdges || persistedEdges.length === 0) return
+
+      // Filter orphaned edges whose source or target no longer exists
+      const currentNodeIds = new Set(allNodesRef.current.map((n) => n.id))
+      const validEdges = persistedEdges
+        .filter((e) => currentNodeIds.has(e.source) && currentNodeIds.has(e.target))
+        .map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle ?? undefined,
+          targetHandle: e.targetHandle ?? undefined,
+          animated: e.animated ?? false,
+          style: e.style as React.CSSProperties | undefined
+        }))
+
+      if (validEdges.length > 0) {
+        setAllEdges(validEdges)
+      }
+    })
+  }, [nodesLoadedFlags])
 
   // ── Save terminal tile layout on window close ──
   useEffect(() => {
@@ -644,6 +680,18 @@ export default function Canvas() {
         workspaceId: tileWorkspaceMapRef.current.get((n.data as { sessionId: string }).sessionId) ?? 'default'
       }))
       window.terminalTiles.saveLayout(layout)
+
+      // Save all edges
+      const edgesToSave = allEdgesRef.current.map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        sourceHandle: e.sourceHandle,
+        targetHandle: e.targetHandle,
+        animated: e.animated,
+        style: e.style
+      }))
+      window.edges.save(edgesToSave)
     }
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
@@ -652,11 +700,9 @@ export default function Canvas() {
   // ── Save workspaces when they change ──
   const workspacesLoaded = useRef(false)
   useEffect(() => {
-    // Skip the initial render before load completes
-    if (!workspacesLoaded.current) {
-      workspacesLoaded.current = true
-      return
-    }
+    // Only save after the initial load has populated state (guards against
+    // StrictMode double-invoke saving defaults before the async load resolves)
+    if (!workspacesLoaded.current) return
     window.workspace.save(workspaces, activeWorkspaceId)
   }, [workspaces, activeWorkspaceId])
 
