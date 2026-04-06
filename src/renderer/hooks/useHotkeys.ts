@@ -3,6 +3,15 @@ import type { HotkeyAction, HotkeySettings } from '@/types/settings'
 
 const isMac = navigator.platform.includes('Mac')
 
+// Map shifted characters back to their unshifted physical key equivalents.
+// When Shift is held, event.key reports the shifted character (e.g. | instead of \).
+// This lets us match bindings defined with the unshifted key name.
+const SHIFTED_KEY_MAP: Record<string, string> = {
+  '|': '\\', '~': '`', '!': '1', '@': '2', '#': '3', '$': '4', '%': '5',
+  '^': '6', '&': '7', '*': '8', '(': '9', ')': '0', '_': '-', '+': '=',
+  '{': '[', '}': ']', ':': ';', '"': "'", '<': ',', '>': '.', '?': '/'
+}
+
 // ── Matching ────────────────────────────────────────────
 
 /**
@@ -23,8 +32,10 @@ export function matchesHotkey(event: KeyboardEvent, binding: string): boolean {
   const wantShift = modifiers.has('shift')
   const wantAlt = modifiers.has('alt')
 
-  // Check key match
-  if (event.key.toLowerCase() !== key) return false
+  // Check key match — also try the unshifted equivalent for shifted punctuation
+  const eventKey = event.key.toLowerCase()
+  const unshiftedKey = SHIFTED_KEY_MAP[event.key]?.toLowerCase()
+  if (eventKey !== key && unshiftedKey !== key) return false
 
   // Check exact modifier match (no extra modifiers)
   if (event.ctrlKey !== wantCtrl) return false
@@ -81,9 +92,11 @@ export function captureHotkey(event: KeyboardEvent): string | null {
   if (event.altKey) parts.push('Alt')
   if (event.shiftKey) parts.push('Shift')
 
-  // Normalize key name
+  // Normalize key name — map shifted punctuation back to unshifted equivalent
   let normalizedKey = key
-  if (key === ' ') normalizedKey = 'Space'
+  if (event.shiftKey && SHIFTED_KEY_MAP[key]) {
+    normalizedKey = SHIFTED_KEY_MAP[key]
+  } else if (key === ' ') normalizedKey = 'Space'
   else if (key.length === 1) normalizedKey = key.toUpperCase()
   else normalizedKey = key.charAt(0).toUpperCase() + key.slice(1)
 
