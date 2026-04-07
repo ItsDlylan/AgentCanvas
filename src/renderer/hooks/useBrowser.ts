@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
-import { registerNavigator } from './useBrowserNavigation'
+import { registerNavigator, registerReloader } from './useBrowserNavigation'
 import type { DevicePreset } from '@/constants/devicePresets'
 
 // Track last known URL per session for reconnect after workspace switch
@@ -59,10 +59,14 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
     }
   }, [sessionId])
 
-  // Register navigate callback so Canvas.tsx can navigate this tile externally
+  // Register navigate/reload callbacks so Canvas.tsx can control this tile externally
   useEffect(() => {
     return registerNavigator(sessionId, navigate)
   }, [sessionId, navigate])
+
+  useEffect(() => {
+    return registerReloader(sessionId, reload)
+  }, [sessionId, reload])
 
   // Callback ref — attaches DOM listeners when webview mounts
   const setWebviewRef = useCallback(

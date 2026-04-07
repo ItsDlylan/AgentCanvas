@@ -31,7 +31,7 @@ import { OffscreenIndicators } from './OffscreenIndicators'
 import { CanvasBackground } from './CanvasBackground'
 import { FocusedTerminalContext } from '@/hooks/useFocusedTerminal'
 import { PanDetector } from './PanDetector'
-import { navigateBrowser } from '@/hooks/useBrowserNavigation'
+import { navigateBrowser, reloadBrowser } from '@/hooks/useBrowserNavigation'
 import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug'
 import { PerformanceOverlay } from './PerformanceOverlay'
 import { BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
@@ -940,6 +940,21 @@ export default function Canvas() {
     })
     return unsub
   }, [addBrowserForTerminal])
+
+  // Handle Cmd+R / Ctrl+R / F5 — globalShortcut in the main process intercepts
+  // the key at the OS level and sends IPC here. Reload the focused browser tile.
+  useEffect(() => {
+    const unsub = window.browser.onRefreshFocused(() => {
+      if (!focusedId) return
+      const node = allNodesRef.current.find(
+        (n) => (n.data as Record<string, unknown>).sessionId === focusedId
+      )
+      if (node?.type === 'browser') {
+        reloadBrowser(focusedId)
+      }
+    })
+    return unsub
+  }, [focusedId])
 
   // Handle agentic browser resize via API
   useEffect(() => {

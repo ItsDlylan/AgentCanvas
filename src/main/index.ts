@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog, Menu, globalShortcut } from 'electron'
 import { join } from 'path'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -538,6 +538,29 @@ app.whenReady().then(async () => {
     }
   })
 
+  // Custom application menu — removes default Cmd+R reload accelerator so it
+  // doesn't bypass before-input-event and reload the Electron shell.
+  const isMac = process.platform === 'darwin'
+  const template: Electron.MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    { role: 'editMenu' as const },
+    {
+      label: 'View',
+      submenu: [
+        // Deliberately omit { role: 'reload' } and { role: 'forceReload' }
+        { role: 'toggleDevTools' as const },
+        { type: 'separator' as const },
+        { role: 'resetZoom' as const },
+        { role: 'zoomIn' as const },
+        { role: 'zoomOut' as const },
+        { type: 'separator' as const },
+        { role: 'togglefullscreen' as const }
+      ]
+    },
+    { role: 'windowMenu' as const }
+  ]
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+
   // Ensure ~/AgentCanvas/tmp/ exists for note storage
   ensureNoteDir()
 
@@ -545,10 +568,56 @@ app.whenReady().then(async () => {
   canvasApiPort = await canvasApi.start()
 
   app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
+    window.webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return
+
+      // Cmd+R / Ctrl+R (but NOT Cmd+Shift+R — leave hard-refresh for dev)
+      const isRefresh =
+        (input.code === 'KeyR' && (input.control || input.meta) && !input.shift) ||
+        (input.code === 'F5' && !input.control && !input.meta && !input.shift)
+      if (isRefresh) {
+        event.preventDefault()
+        mainWindow?.webContents.send('browser:refresh-focused')
+        return
+      }
+
+      // F12 DevTools toggle (dev only) — replaces optimizer.watchWindowShortcuts
+      if (is.dev && input.code === 'F12') {
+        const wc = window.webContents
+        if (wc.isDevToolsOpened()) wc.closeDevTools()
+        else wc.openDevTools({ mode: 'undocked' })
+        event.preventDefault()
+      }
+    })
   })
 
   createWindow()
+
+  // Register Cmd+R / F5 as global shortcuts while the window is focused.
+  // globalShortcut fires at the OS level — before NSMenu accelerators and
+  // before Chromium's input pipeline — so it reliably prevents the Electron
+  // shell from reloading.
+  const registerRefreshShortcuts = (): void => {
+    if (!globalShortcut.isRegistered('CommandOrControl+R')) {
+      globalShortcut.register('CommandOrControl+R', () => {
+        mainWindow?.webContents.send('browser:refresh-focused')
+      })
+    }
+    if (!globalShortcut.isRegistered('F5')) {
+      globalShortcut.register('F5', () => {
+        mainWindow?.webContents.send('browser:refresh-focused')
+      })
+    }
+  }
+  const unregisterRefreshShortcuts = (): void => {
+    globalShortcut.unregister('CommandOrControl+R')
+    globalShortcut.unregister('F5')
+  }
+
+  mainWindow!.on('focus', registerRefreshShortcuts)
+  mainWindow!.on('blur', unregisterRefreshShortcuts)
+  // Window already has focus right after creation
+  registerRefreshShortcuts()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -556,6 +625,7 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', () => {
+  globalShortcut.unregisterAll()
   terminalManager.destroyAll()
   browserManager.destroyAll()
   cdpProxy.destroyAll()

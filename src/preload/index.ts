@@ -112,6 +112,7 @@ export interface BrowserAPI {
   destroy: (id: string) => Promise<void>
   list: () => Promise<Array<BrowserStatusInfo & { id: string; createdAt: number }>>
   onStatus: (callback: (id: string, info: BrowserStatusInfo) => void) => () => void
+  onRefreshFocused: (callback: () => void) => () => void
   attachCdp: (sessionId: string, webContentsId: number, linkedTerminalId?: string) => Promise<{ port?: number; error?: string }>
   detachCdp: (sessionId: string) => Promise<void>
   sendCdpCommand: (sessionId: string, method: string, params: Record<string, unknown>) => Promise<unknown>
@@ -132,6 +133,12 @@ const browserAPI: BrowserAPI = {
     }
     ipcRenderer.on('browser:status', handler)
     return () => ipcRenderer.removeListener('browser:status', handler)
+  },
+
+  onRefreshFocused: (callback) => {
+    const handler = () => callback()
+    ipcRenderer.on('browser:refresh-focused', handler)
+    return () => ipcRenderer.removeListener('browser:refresh-focused', handler)
   },
 
   attachCdp: (sessionId, webContentsId, linkedTerminalId?) =>
