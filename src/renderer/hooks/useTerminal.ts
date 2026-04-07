@@ -41,6 +41,7 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const mountedRef = useRef(false)
+  const autoScrollRef = useRef(true)
 
   const fit = useCallback(() => {
     if (!fitAddonRef.current || !containerRef.current) return
@@ -48,6 +49,9 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
       fitAddonRef.current.fit()
       const term = terminalRef.current
       if (term) {
+        if (autoScrollRef.current) {
+          requestAnimationFrame(() => term.scrollToBottom())
+        }
         window.terminal.resize(sessionId, term.cols, term.rows)
       }
     } catch {
@@ -164,6 +168,31 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
       window.terminal.write(sessionId, data)
     })
 
+    // Auto-scroll tracking: wheel events are the only reliable user-initiated
+    // scroll signal. Listen on container (guaranteed to exist) rather than
+    // .xterm-viewport (may not be found via querySelector).
+    let scrollRafId = 0
+    const onContainerWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        // Scrolling up — disable immediately before any rAF can snap back
+        autoScrollRef.current = false
+      } else if (e.deltaY > 0) {
+        // Scrolling down — re-enable when user reaches the bottom
+        requestAnimationFrame(() => {
+          autoScrollRef.current = term.buffer.active.viewportY >= term.buffer.active.baseY
+        })
+      }
+    }
+    container.addEventListener('wheel', onContainerWheel, { passive: true })
+
+    const scheduleScroll = () => {
+      if (scrollRafId) return
+      scrollRafId = requestAnimationFrame(() => {
+        scrollRafId = 0
+        if (autoScrollRef.current) term.scrollToBottom()
+      })
+    }
+
     // Subscribe to PTY output — queue during replay, write directly when live
     let live = false
     const dataQueue: string[] = []
@@ -171,7 +200,19 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
     unsubData = window.terminal.onData((id, data) => {
       if (id !== sessionId) return
       if (live) {
-        term.write(data)
+        if (autoScrollRef.current) {
+          term.write(data)
+          scheduleScroll()
+        } else {
+          // User has scrolled up — preserve their viewport position across
+          // writes that might trigger xterm's internal auto-scroll.
+          const pos = term.buffer.active.viewportY
+          term.write(data, () => {
+            if (!autoScrollRef.current && term.buffer.active.viewportY !== pos) {
+              term.scrollToLine(pos)
+            }
+          })
+        }
       } else {
         dataQueue.push(data)
       }
@@ -213,6 +254,8 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
 
     return () => {
       cancelled = true
+      if (scrollRafId) cancelAnimationFrame(scrollRafId)
+      container.removeEventListener('wheel', onContainerWheel)
       for (const type of mouseFixEvents) {
         container.removeEventListener(type, fixMouseCoords, { capture: true })
       }
