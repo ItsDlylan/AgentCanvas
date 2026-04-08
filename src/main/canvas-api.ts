@@ -9,6 +9,7 @@ import { EventEmitter } from 'events'
  * Endpoints:
  *   POST /api/browser/open   { url, terminalId? }  → spawn a browser tile
  *   POST /api/browser/close  { sessionId }          → close a browser tile
+ *   POST /api/tile/rename    { sessionId, label }   → rename any tile
  *   GET  /api/status                                 → list all tiles
  *
  * Injected into every terminal as AGENT_CANVAS_API=http://127.0.0.1:<port>
@@ -146,6 +147,25 @@ export class CanvasApi extends EventEmitter {
           return
         }
         this.emit('terminal-metadata', { terminalId, key, value }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/tile/rename') {
+      this.readBody(req).then((body) => {
+        const { sessionId, label } = body as { sessionId?: string; label?: string }
+        if (!sessionId || !label) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'sessionId and label are required' }))
+          return
+        }
+        this.emit('tile-rename', { sessionId, label }, (result: unknown) => {
           res.writeHead(200)
           res.end(JSON.stringify(result))
         })

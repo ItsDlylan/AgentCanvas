@@ -9,6 +9,7 @@ interface FocusedTerminalContextValue {
   hasDiffViewer: (id: string) => boolean
   toggleDevTools: (id: string) => void
   hasDevTools: (id: string) => boolean
+  renameTile: (sessionId: string, newLabel: string) => void
 }
 
 export const FocusedTerminalContext = createContext<FocusedTerminalContextValue>({
@@ -19,7 +20,8 @@ export const FocusedTerminalContext = createContext<FocusedTerminalContextValue>
   toggleDiffViewer: () => {},
   hasDiffViewer: () => false,
   toggleDevTools: () => {},
-  hasDevTools: () => false
+  hasDevTools: () => false,
+  renameTile: () => {}
 })
 
 export function useFocusedTerminal() {

@@ -3,6 +3,7 @@ import { NodeProps, Handle, Position, NodeResizer } from '@xyflow/react'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import { useIsPanning } from '@/hooks/usePanState'
 import { getCdpPort } from '@/hooks/useBrowserNavigation'
+import { EditableLabel } from './EditableLabel'
 
 export interface DevToolsNodeData {
   sessionId: string
@@ -13,7 +14,7 @@ export interface DevToolsNodeData {
 
 function DevToolsTileComponent({ data, width, height }: NodeProps) {
   const { sessionId, label, linkedBrowserId, onClose } = data as unknown as DevToolsNodeData
-  const { focusedId, setFocusedId } = useFocusedTerminal()
+  const { focusedId, setFocusedId, renameTile } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -76,9 +77,11 @@ function DevToolsTileComponent({ data, width, height }: NodeProps) {
       <div className={`devtools-tile-header ${isFocused ? 'border-b-orange-500/30' : ''}`}>
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 shrink-0 rounded-full ${isFocused ? 'bg-orange-400' : 'bg-orange-500/60'}`} />
-          <span className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}>
-            {label}
-          </span>
+          <EditableLabel
+            label={label}
+            onRename={(newLabel) => renameTile(sessionId, newLabel)}
+            className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}
+          />
         </div>
         <button
           className="titlebar-no-drag rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"

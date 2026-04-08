@@ -7,6 +7,7 @@ import { useTerminalStatus } from '@/hooks/useTerminalStatus'
 import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
 import { useDiff, type DiffFileChange } from '@/hooks/useDiff'
 import '@git-diff-view/react/styles/diff-view.css'
+import { EditableLabel } from './EditableLabel'
 
 export interface DiffViewerNodeData {
   sessionId: string
@@ -55,7 +56,7 @@ function DiffViewerTileComponent({ data, width, height }: NodeProps) {
     onClose
   } = data as unknown as DiffViewerNodeData
 
-  const { focusedId, setFocusedId } = useFocusedTerminal()
+  const { focusedId, setFocusedId, renameTile } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
   const resizingRef = useRef(false)
@@ -157,9 +158,11 @@ function DiffViewerTileComponent({ data, width, height }: NodeProps) {
       <div className={`diff-viewer-tile-header ${isFocused ? 'border-b-purple-500/30' : ''}`}>
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 shrink-0 rounded-full ${isFocused ? 'bg-purple-400' : 'bg-purple-500/60'}`} />
-          <span className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}>
-            {label}
-          </span>
+          <EditableLabel
+            label={label}
+            onRename={(newLabel) => renameTile(sessionId, newLabel)}
+            className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}
+          />
           {diffData?.branch && (
             <span className="rounded bg-purple-500/15 px-1.5 py-0.5 text-[10px] text-purple-400">
               {diffData.branch}

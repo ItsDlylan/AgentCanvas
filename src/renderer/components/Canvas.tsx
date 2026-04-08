@@ -1073,6 +1073,27 @@ export default function Canvas() {
     return unsub
   }, [])
 
+  // Handle tile rename via API
+  useEffect(() => {
+    const unsub = window.terminal.onTileRename((sessionId, label) => {
+      setAllNodes(nds => nds.map(n => {
+        const data = n.data as Record<string, unknown>
+        if (data.sessionId === sessionId) {
+          return { ...n, data: { ...data, label } }
+        }
+        return n
+      }))
+      // Persist note labels when renamed via API
+      const node = allNodesRef.current.find(
+        n => (n.data as Record<string, unknown>).sessionId === sessionId
+      )
+      if (node?.type === 'notes') {
+        window.note.save(sessionId, { label })
+      }
+    })
+    return unsub
+  }, [])
+
   const focusTerminal = useCallback(
     (sessionId: string) => {
       setFocusedId(sessionId)
@@ -1419,11 +1440,31 @@ export default function Canvas() {
     }
   }, [focusedId, killHighlight])
 
+  // ── Tile rename ──
+
+  const renameTile = useCallback((sessionId: string, newLabel: string) => {
+    setAllNodes(nds => nds.map(n => {
+      const data = n.data as Record<string, unknown>
+      if (data.sessionId === sessionId) {
+        return { ...n, data: { ...data, label: newLabel } }
+      }
+      return n
+    }))
+    const node = allNodesRef.current.find(
+      n => (n.data as Record<string, unknown>).sessionId === sessionId
+    )
+    if (node?.type === 'terminal') {
+      window.terminal.rename(sessionId, newLabel)
+    } else if (node?.type === 'notes') {
+      window.note.save(sessionId, { label: newLabel })
+    }
+  }, [])
+
   // ── Context + render ──
 
   const focusCtx = useMemo(
-    () => ({ focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools }),
-    [focusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools]
+    () => ({ focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools, renameTile }),
+    [focusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools, renameTile]
   )
 
   const activeWorkspace = useMemo(

@@ -6,6 +6,7 @@ import { useIsPanning } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { useSettings } from '@/hooks/useSettings'
 import { DEVICE_PRESETS, BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
+import { EditableLabel } from './EditableLabel'
 
 export interface BrowserNodeData {
   sessionId: string
@@ -24,7 +25,7 @@ const CHROME_WIDTH = BROWSER_CHROME_WIDTH
 function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
   registerRender('BrowserTile')
   const { sessionId, label, initialUrl, linkedTerminalId, reservationId, initialPreset, isBackground, devToolsIsFocused } = data as unknown as BrowserNodeData
-  const { focusedId, setFocusedId, killTerminal, killHighlight, toggleDevTools } = useFocusedTerminal()
+  const { focusedId, setFocusedId, killTerminal, killHighlight, toggleDevTools, renameTile } = useFocusedTerminal()
   const { settings } = useSettings()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
@@ -166,13 +167,16 @@ function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
                 state.loading ? 'bg-blue-400 animate-pulse' : 'bg-green-500'
               }`}
             />
-            <span
-              className={`text-xs font-medium truncate ${
-                isFocused ? 'text-zinc-200' : 'text-zinc-400'
-              }`}
-            >
-              {state.title || label}
-            </span>
+            <EditableLabel
+              label={label}
+              onRename={(newLabel) => renameTile(sessionId, newLabel)}
+              className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}
+            />
+            {state.title && state.title !== label && (
+              <span className="text-[10px] text-zinc-600 truncate" title={state.title}>
+                {state.title}
+              </span>
+            )}
             {viewportW != null && viewportH != null && (
               <span className="text-[10px] text-zinc-500">{viewportW}x{viewportH}</span>
             )}

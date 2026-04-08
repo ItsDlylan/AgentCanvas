@@ -5,6 +5,7 @@ import { useNotes } from '@/hooks/useNotes'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
+import { EditableLabel } from './EditableLabel'
 
 export interface NotesNodeData {
   sessionId: string
@@ -18,7 +19,7 @@ export interface NotesNodeData {
 function NotesTileComponent({ data, width, height }: NodeProps) {
   registerRender('NotesTile')
   const { sessionId, label, onClose, onDelete } = data as unknown as NotesNodeData
-  const { focusedId, setFocusedId, killHighlight } = useFocusedTerminal()
+  const { focusedId, setFocusedId, killHighlight, renameTile } = useFocusedTerminal()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
   const bodyElRef = useRef<HTMLDivElement | null>(null)
@@ -78,9 +79,11 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
       <div className={`notes-tile-header ${isFocused ? 'border-b-blue-500/30' : ''}`}>
         <div className="flex items-center gap-2">
           <span className={`h-2 w-2 shrink-0 rounded-full ${isFocused ? 'bg-blue-400' : 'bg-amber-400'}`} />
-          <span className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}>
-            {label}
-          </span>
+          <EditableLabel
+            label={label}
+            onRename={(newLabel) => renameTile(sessionId, newLabel)}
+            className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}
+          />
           <span className="text-[10px] text-amber-400/70">Note</span>
         </div>
         <div className="flex items-center gap-1">

@@ -147,6 +147,10 @@ ipcMain.handle('terminal:set-metadata', (_event, { id, key, value }: { id: strin
   return { ok: true }
 })
 
+ipcMain.handle('terminal:rename', (_event, { id, label }: { id: string; label: string }) => {
+  return terminalManager.rename(id, label)
+})
+
 ipcMain.handle('terminal:list-worktrees', async (_event, { cwd }: { cwd: string }) => {
   const gitEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
   try {
@@ -517,6 +521,17 @@ canvasApi.on('browser-close', (info: { sessionId: string }, reply: (result: unkn
 canvasApi.on('terminal-metadata', (info: { terminalId: string; key: string; value: unknown }, reply: (result: unknown) => void) => {
   const ok = terminalManager.setMetadata(info.terminalId, info.key, info.value)
   reply(ok ? { ok: true } : { ok: false, error: 'Terminal not found' })
+})
+
+canvasApi.on('tile-rename', (info: { sessionId: string; label: string }, reply: (result: unknown) => void) => {
+  // Update terminal session label if it's a terminal
+  terminalManager.rename(info.sessionId, info.label)
+  // Forward to renderer to update React node state
+  mainWindow?.webContents.send('canvas:tile-rename', {
+    sessionId: info.sessionId,
+    label: info.label
+  })
+  reply({ ok: true })
 })
 
 canvasApi.on('status-request', (reply: (data: unknown) => void) => {

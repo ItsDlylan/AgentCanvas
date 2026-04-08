@@ -7,6 +7,7 @@ import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { useSettings } from '@/hooks/useSettings'
 import { WorktreePicker } from './WorktreePicker'
+import { EditableLabel } from './EditableLabel'
 import type { TerminalStatus } from '@/hooks/useTerminalStatus'
 
 export interface TerminalNodeData {
@@ -32,7 +33,7 @@ function shortenPath(path: string): string {
 function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
   const { sessionId, label, cwd: initialCwd, metadata: initialMetadata } = data as unknown as TerminalNodeData
-  const { focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer } = useFocusedTerminal()
+  const { focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, renameTile } = useFocusedTerminal()
   const showingDiff = hasDiffViewer(sessionId)
   const { settings } = useSettings()
   const isPanning = useIsPanning()
@@ -153,9 +154,11 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-2">
             <span className={`h-2 w-2 shrink-0 rounded-full ${isFocused ? 'bg-blue-400' : cfg.dot}`} />
-            <span className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}>
-              {label}
-            </span>
+            <EditableLabel
+              label={label}
+              onRename={(newLabel) => renameTile(sessionId, newLabel)}
+              className={`text-xs font-medium ${isFocused ? 'text-zinc-200' : 'text-zinc-400'}`}
+            />
             <span className={`text-[10px] ${cfg.text}`}>{cfg.label}</span>
           </div>
           {cwd && (

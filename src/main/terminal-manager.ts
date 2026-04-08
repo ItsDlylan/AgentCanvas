@@ -339,6 +339,13 @@ export class TerminalManager extends EventEmitter {
     }))
   }
 
+  rename(id: string, label: string): boolean {
+    const session = this.sessions.get(id)
+    if (!session) return false
+    session.label = label
+    return true
+  }
+
   setMetadata(id: string, key: string, value: unknown): boolean {
     const session = this.sessions.get(id)
     if (!session) return false
