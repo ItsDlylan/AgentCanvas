@@ -184,10 +184,11 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px;
-  color: #e4e4e7;
-  font-size: 14px;
-  line-height: 1.6;
+  padding: 8px 10px;
+  color: #d4d4d8;
+  font-size: 13px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 }
 
 .notes-tile-body .tiptap {
@@ -196,44 +197,137 @@
 }
 
 .notes-tile-body .tiptap p {
-  margin: 0.25em 0;
+  margin: 0.15em 0;
 }
 
 .notes-tile-body .tiptap h1 {
-  font-size: 1.5em;
+  font-size: 1.3em;
   font-weight: 700;
-  margin: 0.5em 0 0.25em;
+  margin: 0.75em 0 0.2em;
+  color: #e4e4e7;
 }
 
 .notes-tile-body .tiptap h2 {
-  font-size: 1.25em;
+  font-size: 1.15em;
   font-weight: 600;
-  margin: 0.5em 0 0.25em;
+  margin: 0.6em 0 0.2em;
+  color: #e4e4e7;
 }
 
+/* Bullet & ordered lists */
 .notes-tile-body .tiptap ul,
 .notes-tile-body .tiptap ol {
-  padding-left: 1.5em;
-  margin: 0.25em 0;
+  padding-left: 1.4em;
+  margin: 0.2em 0;
 }
 
+.notes-tile-body .tiptap ul {
+  list-style: none;
+}
+
+.notes-tile-body .tiptap ul > li::before {
+  content: '•';
+  color: #52525b;
+  font-weight: 700;
+  display: inline-block;
+  width: 1em;
+  margin-left: -1em;
+}
+
+.notes-tile-body .tiptap ol {
+  list-style: none;
+  counter-reset: ol-counter;
+}
+
+.notes-tile-body .tiptap ol > li {
+  counter-increment: ol-counter;
+}
+
+.notes-tile-body .tiptap ol > li::before {
+  content: counter(ol-counter) '.';
+  color: #52525b;
+  font-size: 0.85em;
+  font-weight: 600;
+  display: inline-block;
+  width: 1.4em;
+  margin-left: -1.4em;
+}
+
+.notes-tile-body .tiptap li {
+  padding: 1px 0;
+}
+
+/* Task list */
 .notes-tile-body .tiptap ul[data-type="taskList"] {
   list-style: none;
   padding-left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .notes-tile-body .tiptap ul[data-type="taskList"] li {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  padding: 3px 6px;
+  border-radius: 4px;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li::before {
+  content: none;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li:hover {
+  background: #18181b;
 }
 
 .notes-tile-body .tiptap ul[data-type="taskList"] li > label {
-  margin-top: 3px;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
 }
 
 .notes-tile-body .tiptap ul[data-type="taskList"] li > label input[type="checkbox"] {
-  accent-color: #3b82f6;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid #3f3f46;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li > label input[type="checkbox"]:hover {
+  border-color: #3b82f6;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li > label input[type="checkbox"]:active {
+  transform: scale(0.9);
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li > label input[type="checkbox"]:checked {
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li > label input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li[data-checked="true"] > div {
+  color: #52525b;
 }
 
 .notes-tile-body .tiptap ul[data-type="taskList"] li > div {
@@ -261,7 +355,38 @@
   border-radius: 3px;
   padding: 0.1em 0.3em;
   font-size: 0.9em;
-  font-family: monospace;
+}
+
+.notes-tile-body .tiptap pre {
+  background: #0a0a0b;
+  border: 1px solid #27272a;
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin: 0.4em 0;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.notes-tile-body .tiptap pre code {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  font-size: inherit;
+  color: #a1a1aa;
+}
+
+.notes-tile-body .tiptap blockquote {
+  border-left: 2px solid #3f3f46;
+  padding-left: 10px;
+  margin: 0.3em 0;
+  color: #a1a1aa;
+}
+
+.notes-tile-body .tiptap hr {
+  border: none;
+  border-top: 1px solid #27272a;
+  margin: 0.5em 0;
 }
 
 /* Keep default cursor on the canvas pane */

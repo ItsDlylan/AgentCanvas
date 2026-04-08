@@ -217,13 +217,15 @@ export interface NoteAPI {
   save: (noteId: string, meta: Partial<NoteMeta>, content?: Record<string, unknown>) => Promise<void>
   delete: (noteId: string) => Promise<void>
   list: () => Promise<NoteFile[]>
+  export: (noteId: string, format: 'markdown' | 'json') => Promise<boolean>
 }
 
 const noteAPI: NoteAPI = {
   load: (noteId) => ipcRenderer.invoke('note:load', { noteId }),
   save: (noteId, meta, content) => ipcRenderer.invoke('note:save', { noteId, meta, content }),
   delete: (noteId) => ipcRenderer.invoke('note:delete', { noteId }),
-  list: () => ipcRenderer.invoke('note:list')
+  list: () => ipcRenderer.invoke('note:list'),
+  export: (noteId, format) => ipcRenderer.invoke('note:export', { noteId, format })
 }
 
 contextBridge.exposeInMainWorld('note', noteAPI)

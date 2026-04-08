@@ -12,6 +12,7 @@ import { CanvasApi } from './canvas-api'
 import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
+import { jsonToMarkdown } from './note-converter'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
 import { loadEdges, saveEdges } from './edge-store'
@@ -254,7 +255,7 @@ ipcMain.handle('workspace:pickDirectory', async () => {
 })
 
 // ── Terminal Tiles Persistence ───────────────────────────
-import { existsSync } from 'fs'
+import { existsSync, writeFileSync } from 'fs'
 
 ipcMain.on('terminal-tiles:save-layout', (event, layout: Array<{
   sessionId: string
@@ -397,6 +398,35 @@ ipcMain.handle('note:delete', (_event, { noteId }) => {
 ipcMain.handle('note:list', () => {
   return listNotes()
 })
+
+ipcMain.handle(
+  'note:export',
+  async (_event, { noteId, format }: { noteId: string; format: 'markdown' | 'json' }) => {
+    if (!mainWindow) return false
+    const note = loadNote(noteId)
+    if (!note) return false
+
+    const ext = format === 'markdown' ? 'md' : 'json'
+    const filterName = format === 'markdown' ? 'Markdown' : 'JSON'
+    const defaultName = `${note.meta.label || 'note'}.${ext}`
+
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export Note',
+      defaultPath: defaultName,
+      filters: [{ name: filterName, extensions: [ext] }]
+    })
+
+    if (result.canceled || !result.filePath) return false
+
+    const output =
+      format === 'markdown'
+        ? jsonToMarkdown(note.content)
+        : JSON.stringify(note.content, null, 2)
+
+    writeFileSync(result.filePath, output, 'utf-8')
+    return true
+  }
+)
 
 // ── Diff IPC Handler ─────────────────────────────────────
 
