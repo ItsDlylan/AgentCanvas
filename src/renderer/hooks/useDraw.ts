@@ -16,6 +16,9 @@ export function useDraw({ drawId }: { drawId: string }) {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const drawIdRef = useRef(drawId)
   drawIdRef.current = drawId
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const cameraRef = useRef(state.camera)
 
   // Undo/redo
   const historyRef = useRef<DrawingState[]>([])
@@ -160,10 +163,11 @@ export function useDraw({ drawId }: { drawId: string }) {
   }, [selectedIds, updateState])
 
   const updateCamera = useCallback((camera: Camera) => {
-    setState((prev) => ({ ...prev, camera }))
-    // Don't push to history for camera changes — just save
-    scheduleSave({ ...state, camera })
-  }, [scheduleSave, state])
+    // Only persist — don't trigger React re-render.
+    // The DrawCanvas applies camera transforms imperatively.
+    cameraRef.current = camera
+    scheduleSave({ ...stateRef.current, camera })
+  }, [scheduleSave])
 
   const clearCanvas = useCallback(() => {
     updateState(() => createEmptyDrawingState())

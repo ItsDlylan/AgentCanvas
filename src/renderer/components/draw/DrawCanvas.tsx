@@ -3,7 +3,7 @@
  * Handles rendering all shapes, arrows, freehand, grid, and interaction.
  */
 import { useCallback, useRef, useEffect, useState } from 'react'
-import { Stage, Layer, Rect, Line, Shape as KonvaShape } from 'react-konva'
+import { Stage, Layer, Rect, Line } from 'react-konva'
 import type Konva from 'konva'
 import type { DrawingState, Shape, Arrow, FreehandStroke, Camera } from '@/lib/draw-types'
 import { RoughShapeComponent } from './shapes/RoughShape'
@@ -47,13 +47,45 @@ export function DrawCanvas({
   redo
 }: DrawCanvasProps) {
   const stageRef = useRef<Konva.Stage>(null)
+  const middleDragRef = useRef<{ startX: number; startY: number; camX: number; camY: number } | null>(null)
   const [gridSnap, setGridSnap] = useState(false)
-  const [camera, setCamera] = useState<Camera>(state.camera)
 
-  // Sync camera from loaded state
+  // Camera lives in a ref to avoid re-rendering all shapes on pan/zoom.
+  // Only the Stage transform + CSS grid background need updating.
+  const cameraRef = useRef<Camera>(state.camera)
+  const gridElRef = useRef<HTMLDivElement>(null)
+  const zoomElRef = useRef<HTMLDivElement>(null)
+
+  /** Imperatively update Stage transform + CSS grid — no React re-render */
+  const applyCamera = useCallback((cam: Camera) => {
+    const stage = stageRef.current
+    if (stage) {
+      stage.position({ x: cam.x, y: cam.y })
+      stage.scale({ x: cam.zoom, y: cam.zoom })
+      stage.batchDraw()
+    }
+    const gridEl = gridElRef.current
+    if (gridEl) {
+      const sz = GRID_SIZE * cam.zoom
+      if (cam.zoom >= 0.3) {
+        const color = cam.zoom > 0.6 ? '#27272a' : '#1c1c20'
+        gridEl.style.backgroundImage = `radial-gradient(circle, ${color} 1px, transparent 1px)`
+        gridEl.style.backgroundSize = `${sz}px ${sz}px`
+        gridEl.style.backgroundPosition = `${cam.x % sz}px ${cam.y % sz}px`
+      } else {
+        gridEl.style.backgroundImage = 'none'
+      }
+    }
+    const zoomEl = zoomElRef.current
+    if (zoomEl) {
+      zoomEl.textContent = `${Math.round(cam.zoom * 100)}%`
+    }
+  }, [])
+
+  // Apply camera on initial mount only
   useEffect(() => {
-    setCamera(state.camera)
-  }, [state.camera])
+    applyCamera(cameraRef.current)
+  }, [applyCamera])
 
   const tools = useDrawTools({
     addShape,
@@ -62,38 +94,53 @@ export function DrawCanvas({
     updateShape,
     setSelectedIds,
     shapes: state.shapes,
-    camera,
+    camera: cameraRef.current,
     gridSnap
   })
 
-  // Zoom handler
+  // Wheel handler — pinch/ctrl+scroll to zoom, plain scroll to pan
   const onWheel = useCallback((e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault()
     const stage = stageRef.current
     if (!stage) return
 
-    const oldZoom = camera.zoom
     const pointer = stage.getPointerPosition()
     if (!pointer) return
 
-    const direction = e.evt.deltaY > 0 ? -1 : 1
-    const factor = 1.08
-    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, direction > 0 ? oldZoom * factor : oldZoom / factor))
+    const cam = cameraRef.current
 
-    const mousePointTo = {
-      x: (pointer.x - camera.x) / oldZoom,
-      y: (pointer.y - camera.y) / oldZoom
+    // Pinch zoom (ctrl/meta + scroll) or trackpad pinch
+    if (e.evt.ctrlKey || e.evt.metaKey) {
+      const oldZoom = cam.zoom
+      const direction = e.evt.deltaY > 0 ? -1 : 1
+      const factor = 1.08
+      const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, direction > 0 ? oldZoom * factor : oldZoom / factor))
+
+      const mousePointTo = {
+        x: (pointer.x - cam.x) / oldZoom,
+        y: (pointer.y - cam.y) / oldZoom
+      }
+
+      const newCamera: Camera = {
+        x: pointer.x - mousePointTo.x * newZoom,
+        y: pointer.y - mousePointTo.y * newZoom,
+        zoom: newZoom
+      }
+      cameraRef.current = newCamera
+      applyCamera(newCamera)
+      updateCamera(newCamera)
+    } else {
+      // Plain scroll → pan
+      const newCamera: Camera = {
+        x: cam.x - e.evt.deltaX,
+        y: cam.y - e.evt.deltaY,
+        zoom: cam.zoom
+      }
+      cameraRef.current = newCamera
+      applyCamera(newCamera)
+      updateCamera(newCamera)
     }
-
-    const newCamera: Camera = {
-      x: pointer.x - mousePointTo.x * newZoom,
-      y: pointer.y - mousePointTo.y * newZoom,
-      zoom: newZoom
-    }
-
-    setCamera(newCamera)
-    updateCamera(newCamera)
-  }, [camera, updateCamera])
+  }, [applyCamera, updateCamera])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -142,43 +189,55 @@ export function DrawCanvas({
   }, [setSelectedIds, tools.activeTool])
 
   return (
-    <div className="relative w-full h-full">
+    <div ref={gridElRef} className="relative w-full h-full bg-[#09090b]">
       <Stage
         ref={stageRef}
         width={width}
         height={height}
-        x={camera.x}
-        y={camera.y}
-        scaleX={camera.zoom}
-        scaleY={camera.zoom}
-        draggable={tools.activeTool === 'select'}
+        draggable={false}
         onWheel={onWheel}
         onClick={handleStageClick}
         onMouseDown={(e) => {
-          if (tools.activeTool !== 'select' || e.target !== e.target.getStage()) {
-            tools.onPointerDown(stageRef.current!, e)
+          // Middle mouse button (1) → start drag-to-pan
+          if (e.evt.button === 1) {
+            e.evt.preventDefault()
+            const cam = cameraRef.current
+            middleDragRef.current = { startX: e.evt.clientX, startY: e.evt.clientY, camX: cam.x, camY: cam.y }
+            return
+          }
+          // Left click → tool action (or deselect on empty stage in select mode)
+          if (e.evt.button === 0) {
+            if (tools.activeTool !== 'select' || e.target !== e.target.getStage()) {
+              tools.onPointerDown(stageRef.current!, e)
+            }
           }
         }}
-        onMouseMove={(e) => tools.onPointerMove(stageRef.current!, e)}
-        onMouseUp={(e) => tools.onPointerUp(stageRef.current!, e)}
-        onDragEnd={(e) => {
-          if (e.target === stageRef.current) {
+        onMouseMove={(e) => {
+          // Middle-drag panning
+          if (middleDragRef.current) {
+            const dx = e.evt.clientX - middleDragRef.current.startX
+            const dy = e.evt.clientY - middleDragRef.current.startY
             const newCamera: Camera = {
-              x: e.target.x(),
-              y: e.target.y(),
-              zoom: camera.zoom
+              x: middleDragRef.current.camX + dx,
+              y: middleDragRef.current.camY + dy,
+              zoom: cameraRef.current.zoom
             }
-            setCamera(newCamera)
-            updateCamera(newCamera)
+            cameraRef.current = newCamera
+            applyCamera(newCamera)
+            return
           }
+          tools.onPointerMove(stageRef.current!, e)
+        }}
+        onMouseUp={(e) => {
+          if (middleDragRef.current) {
+            updateCamera(cameraRef.current)
+            middleDragRef.current = null
+            return
+          }
+          tools.onPointerUp(stageRef.current!, e)
         }}
         style={{ cursor: tools.activeTool === 'select' ? 'default' : 'crosshair' }}
       >
-        {/* Grid layer */}
-        <Layer listening={false}>
-          <GridPattern width={width} height={height} camera={camera} />
-        </Layer>
-
         {/* Shapes layer */}
         <Layer>
           {state.shapes.map((shape) => (
@@ -273,47 +332,13 @@ export function DrawCanvas({
       />
 
       {/* Zoom display */}
-      <div className="absolute bottom-2 right-2 rounded bg-zinc-800/80 px-2 py-1 text-[10px] text-zinc-500 pointer-events-none">
-        {Math.round(camera.zoom * 100)}%
+      <div ref={zoomElRef} className="absolute bottom-2 right-2 rounded bg-zinc-800/80 px-2 py-1 text-[10px] text-zinc-500 pointer-events-none">
+        {Math.round(cameraRef.current.zoom * 100)}%
       </div>
     </div>
   )
 }
 
-/** Grid pattern for the canvas background */
-function GridPattern({ width, height, camera }: { width: number; height: number; camera: Camera }) {
-  return (
-    <KonvaShape
-      sceneFunc={(ctx) => {
-        const c = ctx._context
-        const zoom = camera.zoom
-        const gridSize = GRID_SIZE
-
-        // Only show grid when zoomed in enough
-        if (zoom < 0.3) return
-
-        const startX = Math.floor(-camera.x / zoom / gridSize) * gridSize
-        const startY = Math.floor(-camera.y / zoom / gridSize) * gridSize
-        const endX = startX + width / zoom + gridSize * 2
-        const endY = startY + height / zoom + gridSize * 2
-
-        c.beginPath()
-        c.strokeStyle = zoom > 0.6 ? '#1a1a1f' : '#141418'
-        c.lineWidth = 0.5
-
-        for (let x = startX; x <= endX; x += gridSize) {
-          c.moveTo(x, startY)
-          c.lineTo(x, endY)
-        }
-        for (let y = startY; y <= endY; y += gridSize) {
-          c.moveTo(startX, y)
-          c.lineTo(endX, y)
-        }
-        c.stroke()
-      }}
-    />
-  )
-}
 
 /** Toolbar overlay positioned inside the canvas */
 function DrawToolbarOverlay({
