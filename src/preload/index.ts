@@ -286,6 +286,44 @@ const terminalTilesAPI: TerminalTilesAPI = {
 
 contextBridge.exposeInMainWorld('terminalTiles', terminalTilesAPI)
 
+// ── Browser Tiles Persistence API ────────────────────────
+
+export interface BrowserTileLayout {
+  sessionId: string
+  label: string
+  position: { x: number; y: number }
+  width: number
+  height: number
+  workspaceId: string
+  linkedTerminalId?: string
+  initialPreset?: { name: string; width: number; height: number; mobile: boolean; dpr: number }
+}
+
+export interface PersistedBrowserInfo {
+  sessionId: string
+  label: string
+  url: string
+  position: { x: number; y: number }
+  width: number
+  height: number
+  workspaceId: string
+  linkedTerminalId?: string
+  initialPreset?: { name: string; width: number; height: number; mobile: boolean; dpr: number }
+  createdAt: number
+}
+
+export interface BrowserTilesAPI {
+  saveLayout: (layout: BrowserTileLayout[]) => void
+  load: () => Promise<PersistedBrowserInfo[]>
+}
+
+const browserTilesAPI: BrowserTilesAPI = {
+  saveLayout: (layout) => ipcRenderer.sendSync('browser-tiles:save-layout', layout),
+  load: () => ipcRenderer.invoke('browser-tiles:load')
+}
+
+contextBridge.exposeInMainWorld('browserTiles', browserTilesAPI)
+
 // ── Edge Persistence API ─────────────────────────────────
 
 export interface PersistedEdge {

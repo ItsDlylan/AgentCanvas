@@ -238,7 +238,7 @@ export default function Canvas() {
   // ── All nodes/edges (across all workspaces) ──
   const [allNodes, setAllNodes] = useState<Node[]>([])
   const [allEdges, setAllEdges] = useState<Edge[]>([])
-  const [nodesLoadedFlags, setNodesLoadedFlags] = useState({ notes: false, terminals: false })
+  const [nodesLoadedFlags, setNodesLoadedFlags] = useState({ notes: false, terminals: false, browsers: false })
 
   // ── Workspace state ──
   const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WORKSPACE])
@@ -668,9 +668,57 @@ export default function Canvas() {
     })
   }, [])
 
+  // ── Load persisted browser tiles on mount ──
+  useEffect(() => {
+    window.browserTiles.load().then((persisted) => {
+      if (!persisted || persisted.length === 0) {
+        setNodesLoadedFlags((prev) => ({ ...prev, browsers: true }))
+        return
+      }
+
+      setAllNodes((nds) => {
+        const existingIds = new Set(nds.map((n) => n.id))
+        const newNodes: Node[] = []
+        const wsMapEntries: [string, string][] = []
+
+        for (const pb of persisted) {
+          if (existingIds.has(pb.sessionId)) continue
+          tileCount++
+          newNodes.push({
+            id: pb.sessionId,
+            type: 'browser',
+            position: pb.position,
+            style: { width: pb.width, height: pb.height },
+            data: {
+              sessionId: pb.sessionId,
+              label: pb.label,
+              initialUrl: pb.url,
+              linkedTerminalId: pb.linkedTerminalId,
+              initialPreset: pb.initialPreset
+            },
+            dragHandle: '.browser-tile-header'
+          })
+          wsMapEntries.push([pb.sessionId, pb.workspaceId])
+        }
+
+        if (newNodes.length > 0) {
+          setTileWorkspaceMap((prev) => {
+            const next = new Map(prev)
+            for (const [sid, wsId] of wsMapEntries) next.set(sid, wsId)
+            return next
+          })
+        }
+
+        return newNodes.length > 0 ? [...nds, ...newNodes] : nds
+      })
+
+      setNodesLoadedFlags((prev) => ({ ...prev, browsers: true }))
+    })
+  }, [])
+
   // ── Load persisted edges once all nodes are ready ──
   useEffect(() => {
-    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals) return
+    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals || !nodesLoadedFlags.browsers) return
 
     window.edges.load().then((persistedEdges) => {
       if (!persistedEdges || persistedEdges.length === 0) return
@@ -707,6 +755,30 @@ export default function Canvas() {
         workspaceId: tileWorkspaceMapRef.current.get((n.data as { sessionId: string }).sessionId) ?? 'default'
       }))
       window.terminalTiles.saveLayout(layout)
+
+      // Save browser tile layout
+      const browserNodes = allNodesRef.current.filter(
+        (n) => n.type === 'browser' && !(n.data as { isBackground?: boolean }).isBackground
+      )
+      const browserLayout = browserNodes.map((n) => {
+        const d = n.data as {
+          sessionId: string
+          label: string
+          linkedTerminalId?: string
+          initialPreset?: { name: string; width: number; height: number; mobile: boolean; dpr: number }
+        }
+        return {
+          sessionId: d.sessionId,
+          label: d.label,
+          position: n.position,
+          width: (n.style?.width as number) ?? 800,
+          height: (n.style?.height as number) ?? 600,
+          workspaceId: tileWorkspaceMapRef.current.get(d.sessionId) ?? 'default',
+          linkedTerminalId: d.linkedTerminalId,
+          initialPreset: d.initialPreset
+        }
+      })
+      window.browserTiles.saveLayout(browserLayout)
 
       // Save all edges
       const edgesToSave = allEdgesRef.current.map((e) => ({

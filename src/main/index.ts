@@ -15,6 +15,7 @@ import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
 import { loadEdges, saveEdges } from './edge-store'
+import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-store'
 import { DiffService } from './diff-service'
 
 // GPU compositing flags for smooth panning
@@ -318,6 +319,54 @@ ipcMain.handle('terminal-tiles:load', () => {
   }
 
   return valid
+})
+
+// ── Browser Tiles Persistence ────────────────────────────
+
+ipcMain.on('browser-tiles:save-layout', (event, layout: Array<{
+  sessionId: string
+  label: string
+  position: { x: number; y: number }
+  width: number
+  height: number
+  workspaceId: string
+  linkedTerminalId?: string
+  initialPreset?: { name: string; width: number; height: number; mobile: boolean; dpr: number }
+}>) => {
+  const browsers: PersistedBrowser[] = layout
+    .map(tile => {
+      const session = browserManager.getSession(tile.sessionId)
+      if (!session) return null
+      return {
+        sessionId: tile.sessionId,
+        label: tile.label,
+        url: session.url,
+        position: tile.position,
+        width: tile.width,
+        height: tile.height,
+        workspaceId: tile.workspaceId,
+        linkedTerminalId: tile.linkedTerminalId,
+        initialPreset: tile.initialPreset,
+        createdAt: session.createdAt
+      }
+    })
+    .filter((b): b is PersistedBrowser => b !== null)
+
+  saveBrowsers({ version: 1, browsers })
+  event.returnValue = true
+})
+
+ipcMain.handle('browser-tiles:load', () => {
+  const data = loadBrowsers()
+  const terminalData = loadTerminals()
+  const validTerminalIds = new Set(terminalData.terminals.map(t => t.sessionId))
+
+  return data.browsers.map(b => ({
+    ...b,
+    linkedTerminalId: b.linkedTerminalId && validTerminalIds.has(b.linkedTerminalId)
+      ? b.linkedTerminalId
+      : undefined
+  }))
 })
 
 // ── Edge Persistence ─────────────────────────────────────
