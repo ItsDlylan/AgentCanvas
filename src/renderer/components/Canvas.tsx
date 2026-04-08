@@ -26,6 +26,9 @@ import { BrowserTile } from './BrowserTile'
 import { NotesTile } from './NotesTile'
 import { DiffViewerTile } from './DiffViewerTile'
 import { DevToolsTile } from './DevToolsTile'
+import { DrawTile } from './draw/DrawTile'
+import { parseMermaid } from '@/lib/mermaid-parser'
+import { layoutMermaidGraph } from '@/lib/mermaid-layout'
 import { ProcessPanel } from './ProcessPanel'
 import { WorkspacePanel } from './WorkspacePanel'
 import { OffscreenIndicators } from './OffscreenIndicators'
@@ -47,7 +50,8 @@ const nodeTypes: NodeTypes = {
   browser: BrowserTile as unknown as NodeTypes['browser'],
   notes: NotesTile as unknown as NodeTypes['notes'],
   diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer'],
-  devTools: DevToolsTile as unknown as NodeTypes['devTools']
+  devTools: DevToolsTile as unknown as NodeTypes['devTools'],
+  draw: DrawTile as unknown as NodeTypes['draw']
 }
 
 const MINIMAP_NODE_COLORS: Record<string, string> = {
@@ -56,6 +60,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   notes:    '#f59e0b',
   diffViewer: '#a855f7',
   devTools:   '#f97316',
+  draw:       '#ec4899',
 }
 
 function minimapNodeColor(node: Node): string {
@@ -134,11 +139,11 @@ function CanvasMiniMap({ position, panelOpen, workspacePanelOpen }: {
 }
 
 function defaultTileWidth(type: string | undefined): number {
-  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : type === 'devTools' ? 900 : 640
+  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : type === 'devTools' ? 900 : type === 'draw' ? 800 : 640
 }
 
 function defaultTileHeight(type: string | undefined): number {
-  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : type === 'devTools' ? 500 : 400
+  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : type === 'devTools' ? 500 : type === 'draw' ? 600 : 400
 }
 
 let tileCount = 0
@@ -238,7 +243,7 @@ export default function Canvas() {
   // ── All nodes/edges (across all workspaces) ──
   const [allNodes, setAllNodes] = useState<Node[]>([])
   const [allEdges, setAllEdges] = useState<Edge[]>([])
-  const [nodesLoadedFlags, setNodesLoadedFlags] = useState({ notes: false, terminals: false, browsers: false })
+  const [nodesLoadedFlags, setNodesLoadedFlags] = useState({ notes: false, terminals: false, browsers: false, draws: false })
 
   // ── Workspace state ──
   const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WORKSPACE])
@@ -279,6 +284,22 @@ export default function Canvas() {
     })
     setFocusedId((prev) => (prev === sessionId ? null : prev))
   }, [])
+
+  const closeDraw = useCallback(
+    (sessionId: string) => {
+      window.draw.save(sessionId, { isSoftDeleted: true })
+      removeTileFromCanvas(sessionId)
+    },
+    [removeTileFromCanvas]
+  )
+
+  const deleteDraw = useCallback(
+    (sessionId: string) => {
+      window.draw.delete(sessionId)
+      removeTileFromCanvas(sessionId)
+    },
+    [removeTileFromCanvas]
+  )
 
   const closeNote = useCallback(
     (sessionId: string) => {
@@ -344,6 +365,13 @@ export default function Canvas() {
               data: { ...n.data, onClose: closeNote, onDelete: deleteNote }
             }
           }
+          // Inject close/delete callbacks into draw data
+          if (n.type === 'draw') {
+            return {
+              ...n,
+              data: { ...n.data, onClose: closeDraw, onDelete: deleteDraw }
+            }
+          }
           // Inject close callback into diff viewer data
           if (n.type === 'diffViewer') {
             return {
@@ -360,7 +388,7 @@ export default function Canvas() {
           }
           return n
         }),
-    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote, removeTileFromCanvas, focusedDevToolsLinkedBrowser]
+    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote, closeDraw, deleteDraw, removeTileFromCanvas, focusedDevToolsLinkedBrowser]
   )
 
   const visibleNodeIds = useMemo(
@@ -390,15 +418,25 @@ export default function Canvas() {
           notesSaveTimerRef.current = setTimeout(() => {
             notesSaveTimerRef.current = null
             for (const n of updated) {
-              if (n.type !== 'notes') continue
-              const sid = (n.data as Record<string, unknown>).sessionId as string
-              const w = (n.style?.width as number) ?? 400
-              const h = (n.style?.height as number) ?? 400
-              window.note.save(sid, {
-                position: n.position,
-                width: n.measured?.width ?? w,
-                height: n.measured?.height ?? h
-              })
+              if (n.type === 'notes') {
+                const sid = (n.data as Record<string, unknown>).sessionId as string
+                const w = (n.style?.width as number) ?? 400
+                const h = (n.style?.height as number) ?? 400
+                window.note.save(sid, {
+                  position: n.position,
+                  width: n.measured?.width ?? w,
+                  height: n.measured?.height ?? h
+                })
+              } else if (n.type === 'draw') {
+                const sid = (n.data as Record<string, unknown>).sessionId as string
+                const w = (n.style?.width as number) ?? 800
+                const h = (n.style?.height as number) ?? 600
+                window.draw.save(sid, {
+                  position: n.position,
+                  width: n.measured?.width ?? w,
+                  height: n.measured?.height ?? h
+                })
+              }
             }
           }, 500)
         }
@@ -716,9 +754,83 @@ export default function Canvas() {
     })
   }, [])
 
+  // ── Load persisted draw tiles on mount ──
+  useEffect(() => {
+    window.draw.list().then((drawFiles) => {
+      const drawsToRestore = drawFiles.filter((df) => !df.meta.isSoftDeleted)
+      if (drawsToRestore.length === 0) {
+        setNodesLoadedFlags((prev) => ({ ...prev, draws: true }))
+        return
+      }
+
+      setAllNodes((nds) => {
+        const existingIds = new Set(nds.map((n) => n.id))
+        const newNodes: Node[] = []
+        const wsMapEntries: [string, string][] = []
+
+        for (const df of drawsToRestore) {
+          const { drawId, label, workspaceId, position, width, height } = df.meta
+          if (existingIds.has(drawId)) continue
+          tileCount++
+          newNodes.push({
+            id: drawId,
+            type: 'draw',
+            position,
+            style: { width, height },
+            data: {
+              sessionId: drawId,
+              label,
+              linkedTerminalId: df.meta.linkedTerminalId
+            },
+            dragHandle: '.draw-tile-header'
+          })
+          wsMapEntries.push([drawId, workspaceId])
+        }
+
+        if (newNodes.length > 0) {
+          setTileWorkspaceMap((prev) => {
+            const next = new Map(prev)
+            for (const [sid, wsId] of wsMapEntries) next.set(sid, wsId)
+            return next
+          })
+        }
+
+        return newNodes.length > 0 ? [...nds, ...newNodes] : nds
+      })
+
+      // Reconstruct edges from draw metadata
+      const edgesToRestore: Edge[] = []
+      const edgeIds = new Set<string>()
+      for (const df of drawsToRestore) {
+        if (df.meta.linkedTerminalId) {
+          const edgeId = `edge-${df.meta.linkedTerminalId}-${df.meta.drawId}`
+          if (!edgeIds.has(edgeId)) {
+            edgesToRestore.push({
+              id: edgeId,
+              source: df.meta.linkedTerminalId,
+              target: df.meta.drawId,
+              animated: true,
+              style: { stroke: '#ec4899', strokeWidth: 2 }
+            })
+            edgeIds.add(edgeId)
+          }
+        }
+      }
+      if (edgesToRestore.length > 0) {
+        setAllEdges((eds) => {
+          const existing = new Set(eds.map((e) => e.id))
+          const newEdges = edgesToRestore.filter((e) => !existing.has(e.id))
+          return newEdges.length > 0 ? [...eds, ...newEdges] : eds
+        })
+      }
+
+      setNodesLoadedFlags((prev) => ({ ...prev, draws: true }))
+    })
+  }, [])
+
   // ── Load persisted edges once all nodes are ready ──
   useEffect(() => {
-    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals || !nodesLoadedFlags.browsers) return
+    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals || !nodesLoadedFlags.browsers || !nodesLoadedFlags.draws) return
 
     window.edges.load().then((persistedEdges) => {
       if (!persistedEdges || persistedEdges.length === 0) return
@@ -845,6 +957,8 @@ export default function Canvas() {
       } else if (node?.type === 'notes') {
         // For notes in killTerminal (e.g. workspace removal), delete the file
         window.note.delete(sessionId)
+      } else if (node?.type === 'draw') {
+        window.draw.delete(sessionId)
       } else if (node?.type === 'diffViewer') {
         // Diff viewers just get removed from canvas
       } else {
@@ -1267,6 +1381,97 @@ export default function Canvas() {
 
   const addNote = useCallback(() => addNoteAt(undefined), [addNoteAt])
 
+  const addDrawAt = useCallback(
+    (position?: { x: number; y: number }, linkedTerminalId?: string) => {
+      tileCount++
+      const sessionId = uuid()
+      const visible = visibleNodes
+      const pos = position ?? findOpenPosition(visible, 800, 600, 2, settings.canvas.tileGap)
+      const label = `Draw ${tileCount}`
+      const wsId = activeWorkspaceIdRef.current
+      const newNode: Node = {
+        id: sessionId,
+        type: 'draw',
+        position: pos,
+        style: { width: 800, height: 600 },
+        data: {
+          sessionId,
+          label,
+          linkedTerminalId,
+          onClose: closeDraw,
+          onDelete: deleteDraw
+        },
+        dragHandle: '.draw-tile-header'
+      }
+      setAllNodes((nds) => [...nds, newNode])
+      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, wsId))
+      setFocusedId(sessionId)
+      setCenter(pos.x + 400, pos.y + 300, { zoom: 1, duration: 400 })
+
+      window.draw.save(sessionId, {
+        drawId: sessionId,
+        label,
+        workspaceId: wsId,
+        isSoftDeleted: false,
+        position: pos,
+        width: 800,
+        height: 600,
+        linkedTerminalId,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      })
+
+      // Auto-create edge if linked to a terminal
+      if (linkedTerminalId) {
+        const newEdge: Edge = {
+          id: `edge-${linkedTerminalId}-${sessionId}`,
+          source: linkedTerminalId,
+          target: sessionId,
+          animated: true,
+          style: { stroke: '#ec4899', strokeWidth: 2 }
+        }
+        setAllEdges((eds) => [...eds, newEdge])
+      }
+
+      return sessionId
+    },
+    [visibleNodes, setCenter, closeDraw, deleteDraw, settings.canvas.tileGap]
+  )
+
+  const addDraw = useCallback(() => addDrawAt(undefined), [addDrawAt])
+
+  // ── Agent-driven draw tile creation ──
+  useEffect(() => {
+    const unsub = window.draw.onDrawOpen((info) => {
+      addDrawAt(undefined, info.terminalId)
+    })
+    return unsub
+  }, [addDrawAt])
+
+  // ── Agent-driven draw tile update (Mermaid or raw elements) ──
+  useEffect(() => {
+    const unsub = window.draw.onDrawUpdate((info) => {
+      const doUpdate = async (elements: unknown[]) => {
+        if (info.mode !== 'replace') {
+          const existing = await window.draw.load(info.sessionId)
+          if (existing?.elements?.length) {
+            elements = [...existing.elements, ...elements]
+          }
+        }
+        window.draw.save(info.sessionId, {}, elements, {})
+      }
+
+      if (info.mermaid) {
+        const graph = parseMermaid(info.mermaid)
+        const { shapes, arrows } = layoutMermaidGraph(graph, 50, 50)
+        doUpdate([...shapes, ...arrows] as unknown[])
+      } else if (info.elements) {
+        doUpdate(info.elements)
+      }
+    })
+    return unsub
+  }, [])
+
   // ── Template spawning ──
   const spawnTemplate = useCallback(
     (template: WorkspaceTemplate, origin?: { x: number; y: number }) => {
@@ -1290,10 +1495,12 @@ export default function Canvas() {
           addBrowserAt(pos)
         } else if (tile.type === 'notes') {
           addNoteAt(pos)
+        } else if (tile.type === 'draw') {
+          addDrawAt(pos)
         }
       }
     },
-    [settings.canvas.tileGap, visibleNodes, addTerminalAt, addBrowserAt, addNoteAt]
+    [settings.canvas.tileGap, visibleNodes, addTerminalAt, addBrowserAt, addNoteAt, addDrawAt]
   )
 
   // ── Right-click context menu ──
@@ -1529,6 +1736,8 @@ export default function Canvas() {
       window.terminal.rename(sessionId, newLabel)
     } else if (node?.type === 'notes') {
       window.note.save(sessionId, { label: newLabel })
+    } else if (node?.type === 'draw') {
+      window.draw.save(sessionId, { label: newLabel })
     }
   }, [])
 
@@ -1580,6 +1789,7 @@ export default function Canvas() {
       newTerminal: () => addTerminal(),
       newBrowser: () => addBrowser(),
       newNote: addNote,
+      newDraw: addDraw,
       openSettings: () => setSettingsOpen(true),
       cycleFocusForward: () => cycleFocus(1),
       cycleFocusBackward: () => cycleFocus(-1),
@@ -1621,7 +1831,8 @@ export default function Canvas() {
     })
     const notes = visibleNodes.filter((n) => n.type === 'notes')
     const diffs = visibleNodes.filter((n) => n.type === 'diffViewer')
-    const ordered = [...terminals, ...browsers, ...notes, ...diffs]
+    const draws = visibleNodes.filter((n) => n.type === 'draw')
+    const ordered = [...terminals, ...browsers, ...notes, ...draws, ...diffs]
     const map = new Map<string, string>()
     ordered.forEach((n, i) => {
       if (i >= JUMP_KEYS.length) return
@@ -1889,6 +2100,9 @@ export default function Canvas() {
             onAddTerminal={addTerminal}
             onAddBrowser={addBrowser}
             onAddNote={addNote}
+            onAddDraw={addDraw}
+            onCloseDraw={closeDraw}
+            onDeleteDraw={deleteDraw}
             onSpawnTemplate={spawnTemplate}
             open={panelOpen}
             onToggle={togglePanel}
@@ -1936,6 +2150,17 @@ export default function Canvas() {
               >
                 <span className="h-2 w-2 rounded-full bg-amber-400" />
                 Note
+              </button>
+              <button
+                onClick={() => {
+                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 800, 600, settings.canvas.tileGap)
+                  addDrawAt(safePos)
+                  setContextMenu(null)
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+              >
+                <span className="h-2 w-2 rounded-full bg-pink-500" />
+                Draw
               </button>
               {settings.templates.length > 0 && (
                 <>

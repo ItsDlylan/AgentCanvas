@@ -12,6 +12,7 @@ import { CanvasApi } from './canvas-api'
 import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
+import { ensureDrawDir, loadDraw, saveDraw, deleteDraw, listDraws } from './draw-store'
 import { jsonToMarkdown } from './note-converter'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
@@ -428,6 +429,24 @@ ipcMain.handle(
   }
 )
 
+// ── Draw IPC Handlers ───────────────────────────────────
+
+ipcMain.handle('draw:load', (_event, { drawId }) => {
+  return loadDraw(drawId)
+})
+
+ipcMain.handle('draw:save', (_event, { drawId, meta, elements, appState }) => {
+  saveDraw(drawId, meta, elements, appState)
+})
+
+ipcMain.handle('draw:delete', (_event, { drawId }) => {
+  deleteDraw(drawId)
+})
+
+ipcMain.handle('draw:list', () => {
+  return listDraws()
+})
+
 // ── Diff IPC Handler ─────────────────────────────────────
 
 ipcMain.handle('diff:compute', (_event, { cwd }: { cwd: string }) => {
@@ -613,6 +632,21 @@ canvasApi.on('tile-rename', (info: { sessionId: string; label: string }, reply: 
   reply({ ok: true })
 })
 
+canvasApi.on('draw-open', (info: { terminalId?: string; label?: string }, reply: (result: unknown) => void) => {
+  mainWindow?.webContents.send('canvas:draw-open', info)
+  reply({ ok: true })
+})
+
+canvasApi.on('draw-update', (info: { sessionId: string; mermaid?: string; elements?: unknown[]; mode?: string }, reply: (result: unknown) => void) => {
+  mainWindow?.webContents.send('canvas:draw-update', info)
+  reply({ ok: true })
+})
+
+canvasApi.on('draw-close', (info: { sessionId: string }, reply: (result: unknown) => void) => {
+  mainWindow?.webContents.send('canvas:draw-close', { sessionId: info.sessionId })
+  reply({ ok: true })
+})
+
 canvasApi.on('status-request', (reply: (data: unknown) => void) => {
   const terminals = terminalManager.listSessions()
   const browsers = browserManager.listSessions()
@@ -658,8 +692,9 @@ app.whenReady().then(async () => {
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 
-  // Ensure ~/AgentCanvas/tmp/ exists for note storage
+  // Ensure ~/AgentCanvas/tmp/ exists for note/draw storage
   ensureNoteDir()
+  ensureDrawDir()
 
   // Start the local control API before creating the window/terminals
   canvasApiPort = await canvasApi.start()

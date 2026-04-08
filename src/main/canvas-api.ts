@@ -176,6 +176,58 @@ export class CanvasApi extends EventEmitter {
       return
     }
 
+    if (req.method === 'POST' && url === '/api/draw/open') {
+      this.readBody(req).then((body) => {
+        const { terminalId, label } = body as { terminalId?: string; label?: string }
+        this.emit('draw-open', { terminalId, label }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/draw/update') {
+      this.readBody(req).then((body) => {
+        const { sessionId, mermaid, elements, mode } = body as { sessionId?: string; mermaid?: string; elements?: unknown[]; mode?: string }
+        if (!sessionId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        this.emit('draw-update', { sessionId, mermaid, elements, mode }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/draw/close') {
+      this.readBody(req).then((body) => {
+        const { sessionId } = body as { sessionId?: string }
+        if (!sessionId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'sessionId is required' }))
+          return
+        }
+        this.emit('draw-close', { sessionId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
     res.writeHead(404)
     res.end(JSON.stringify({ error: 'Not found' }))
   }

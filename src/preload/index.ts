@@ -350,6 +350,79 @@ const edgeAPI: EdgeAPI = {
 
 contextBridge.exposeInMainWorld('edges', edgeAPI)
 
+// ── Draw API ─────────────────────────────────────────────
+
+export interface DrawMeta {
+  drawId: string
+  label: string
+  workspaceId: string
+  isSoftDeleted: boolean
+  position: { x: number; y: number }
+  width: number
+  height: number
+  linkedTerminalId?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface DrawFile {
+  meta: DrawMeta
+  elements: unknown[]
+  appState: Record<string, unknown>
+}
+
+export interface DrawAPI {
+  load: (drawId: string) => Promise<DrawFile | null>
+  save: (drawId: string, meta: Partial<DrawMeta>, elements?: unknown[], appState?: Record<string, unknown>) => Promise<void>
+  delete: (drawId: string) => Promise<void>
+  list: () => Promise<DrawFile[]>
+  onSceneUpdate: (callback: (drawId: string, elements: unknown[], appState?: Record<string, unknown>) => void) => () => void
+  onDrawOpen: (callback: (info: { terminalId?: string; label?: string }) => void) => () => void
+  onDrawUpdate: (callback: (info: { sessionId: string; mermaid?: string; elements?: unknown[]; mode?: string }) => void) => () => void
+}
+
+const drawAPI: DrawAPI = {
+  load: (drawId) => ipcRenderer.invoke('draw:load', { drawId }),
+  save: (drawId, meta, elements, appState) => ipcRenderer.invoke('draw:save', { drawId, meta, elements, appState }),
+  delete: (drawId) => ipcRenderer.invoke('draw:delete', { drawId }),
+  list: () => ipcRenderer.invoke('draw:list'),
+
+  onSceneUpdate: (callback) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      { drawId, elements, appState }: { drawId: string; elements: unknown[]; appState?: Record<string, unknown> }
+    ) => {
+      callback(drawId, elements, appState)
+    }
+    ipcRenderer.on('draw:scene-update', handler)
+    return () => ipcRenderer.removeListener('draw:scene-update', handler)
+  },
+
+  onDrawOpen: (callback) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      info: { terminalId?: string; label?: string }
+    ) => {
+      callback(info)
+    }
+    ipcRenderer.on('canvas:draw-open', handler)
+    return () => ipcRenderer.removeListener('canvas:draw-open', handler)
+  },
+
+  onDrawUpdate: (callback) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      info: { sessionId: string; mermaid?: string; elements?: unknown[]; mode?: string }
+    ) => {
+      callback(info)
+    }
+    ipcRenderer.on('canvas:draw-update', handler)
+    return () => ipcRenderer.removeListener('canvas:draw-update', handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('draw', drawAPI)
+
 // ── Diff API ────────────────────────────────────────────
 
 export interface DiffAPI {

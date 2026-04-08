@@ -52,7 +52,7 @@ export interface CanvasSettings {
 }
 
 export interface TemplateTile {
-  type: 'terminal' | 'browser' | 'notes'
+  type: 'terminal' | 'browser' | 'notes' | 'draw'
   relativePosition: { x: number; y: number }
   width: number
   height: number
@@ -73,6 +73,7 @@ export type HotkeyAction =
   | 'newTerminal'
   | 'newBrowser'
   | 'newNote'
+  | 'newDraw'
   | 'openSettings'
   | 'cycleFocusForward'
   | 'cycleFocusBackward'
@@ -131,6 +132,7 @@ export const DEFAULT_SETTINGS: Settings = {
     newTerminal: 'Mod+T',
     newBrowser: 'Mod+B',
     newNote: 'Mod+N',
+    newDraw: 'Mod+Shift+D',
     openSettings: 'Mod+,',
     cycleFocusForward: 'Ctrl+Tab',
     cycleFocusBackward: 'Ctrl+Shift+Tab',

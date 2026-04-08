@@ -19,6 +19,9 @@ interface ProcessPanelProps {
   onAddTerminal: (width?: number, height?: number) => void
   onAddBrowser: (preset?: DevicePreset) => void
   onAddNote: () => void
+  onAddDraw: () => void
+  onCloseDraw: (sessionId: string) => void
+  onDeleteDraw: (sessionId: string) => void
   onSpawnTemplate: (template: WorkspaceTemplate) => void
   open: boolean
   onToggle: () => void
@@ -32,7 +35,7 @@ interface ProcessPanelProps {
 
 interface GroupChild {
   node: Node
-  type: 'terminal' | 'browser' | 'notes' | 'diffViewer'
+  type: 'terminal' | 'browser' | 'notes' | 'diffViewer' | 'draw'
   sessionId: string
 }
 
@@ -48,6 +51,7 @@ interface GroupingResult {
   ungroupedTerminals: Node[]
   ungroupedBrowsers: Node[]
   ungroupedNotes: Node[]
+  ungroupedDraws: Node[]
 }
 
 // ── Grouping logic ──────────────────────────────────────
@@ -57,6 +61,7 @@ function computeGroups(
   browsers: Node[],
   notes: Node[],
   diffViewers: Node[],
+  draws: Node[],
   statuses: Map<string, TerminalStatusInfo>,
   edges: Edge[]
 ): GroupingResult {
@@ -66,11 +71,12 @@ function computeGroups(
 
   // Build a lookup from node.id -> node for all non-terminal tiles
   const nodeById = new Map<string, Node>()
-  const nodeTypeById = new Map<string, 'terminal' | 'browser' | 'notes' | 'diffViewer'>()
+  const nodeTypeById = new Map<string, 'terminal' | 'browser' | 'notes' | 'diffViewer' | 'draw'>()
   for (const n of terminals) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'terminal') }
   for (const n of browsers) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'browser') }
   for (const n of notes) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'notes') }
   for (const n of diffViewers) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'diffViewer') }
+  for (const n of draws) { nodeById.set(n.id, n); nodeTypeById.set(n.id, 'draw') }
 
   // Map parent sessionId -> children
   const childrenMap = new Map<string, GroupChild[]>()
@@ -273,7 +279,12 @@ function computeGroups(
     return !groupedNoteIds.has(sid) && !childNoteIds.has(sid)
   })
 
-  return { groups, ungroupedTerminals, ungroupedBrowsers, ungroupedNotes }
+  const ungroupedDraws = draws.filter((n) => {
+    const sid = (n.data as Record<string, unknown>).sessionId as string
+    return !childSessionIds.has(sid)
+  })
+
+  return { groups, ungroupedTerminals, ungroupedBrowsers, ungroupedNotes, ungroupedDraws }
 }
 
 // ── Shared components ───────────────────────────────────
@@ -835,6 +846,9 @@ function ProcessPanelComponent({
   onAddTerminal,
   onAddBrowser,
   onAddNote,
+  onAddDraw,
+  onCloseDraw,
+  onDeleteDraw,
   onSpawnTemplate,
   open,
   onToggle,
@@ -848,6 +862,7 @@ function ProcessPanelComponent({
   const allBrowsers = nodes.filter((n) => n.type === 'browser')
   const notes = nodes.filter((n) => n.type === 'notes')
   const diffViewers = nodes.filter((n) => n.type === 'diffViewer')
+  const draws = nodes.filter((n) => n.type === 'draw')
   const browsers = allBrowsers.filter((n) => {
     const sid = (n.data as Record<string, unknown>).sessionId as string
     return tileWorkspaceMap.get(sid) === activeWorkspaceId
@@ -875,8 +890,8 @@ function ProcessPanelComponent({
 
   // Compute tile groups
   const grouping = useMemo(
-    () => computeGroups(terminals, browsers, notes, diffViewers, statuses, edges),
-    [terminals, browsers, notes, diffViewers, statuses, edges]
+    () => computeGroups(terminals, browsers, notes, diffViewers, draws, statuses, edges),
+    [terminals, browsers, notes, diffViewers, draws, statuses, edges]
   )
 
   useEffect(() => {
@@ -1000,6 +1015,50 @@ function ProcessPanelComponent({
                   onDeleteNote={onDeleteNote}
                 />
               ))}
+
+              {/* Ungrouped draws */}
+              {grouping.ungroupedDraws.map((node) => {
+                const data = node.data as Record<string, unknown>
+                const sessionId = data.sessionId as string
+                const label = (data.label as string) || 'Draw'
+                const isFocused = focusedId === sessionId
+                return (
+                  <button
+                    key={node.id}
+                    onClick={() => onFocus(sessionId)}
+                    className={`group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors ${
+                      isFocused ? 'bg-pink-500/10 text-pink-300' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${isFocused ? 'bg-pink-400' : 'bg-zinc-600'}`} />
+                    <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                      <span className="truncate text-xs">{label}</span>
+                      <span className="shrink-0 text-[10px] text-pink-400/70">Draw</span>
+                    </div>
+                    <JumpBadge hint={jumpHints.get(sessionId)} />
+                    <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onCloseDraw(sessionId) }}
+                        className="rounded p-0.5 text-zinc-600 hover:bg-zinc-700 hover:text-zinc-300"
+                        title="Close (keep file)"
+                      >
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); onDeleteDraw(sessionId) }}
+                        className="rounded p-0.5 text-zinc-600 hover:bg-zinc-700 hover:text-red-400"
+                        title="Delete permanently"
+                      >
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
 
             {/* Background browsers from other workspaces */}
@@ -1128,6 +1187,17 @@ function ProcessPanelComponent({
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
             Note
+          </button>
+
+          {/* Draw button */}
+          <button
+            onClick={() => onAddDraw()}
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-zinc-800 py-2 text-xs font-medium text-pink-400 transition-colors hover:bg-zinc-700 hover:text-pink-300"
+          >
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Draw
           </button>
 
           {/* Template button */}
