@@ -7,6 +7,8 @@ interface FocusedTerminalContextValue {
   killHighlight: boolean
   toggleDiffViewer: (id: string) => void
   hasDiffViewer: (id: string) => boolean
+  toggleDevTools: (id: string) => void
+  hasDevTools: (id: string) => boolean
 }
 
 export const FocusedTerminalContext = createContext<FocusedTerminalContextValue>({
@@ -15,7 +17,9 @@ export const FocusedTerminalContext = createContext<FocusedTerminalContextValue>
   killTerminal: () => {},
   killHighlight: false,
   toggleDiffViewer: () => {},
-  hasDiffViewer: () => false
+  hasDiffViewer: () => false,
+  toggleDevTools: () => {},
+  hasDevTools: () => false
 })
 
 export function useFocusedTerminal() {

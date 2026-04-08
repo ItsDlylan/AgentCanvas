@@ -60,6 +60,9 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
+  // DevTools tile: intercept webview attachment to call setDevToolsWebContents
+  // BEFORE the guest navigates (required by Electron API).
+
   // Dev server in development, file:// in production
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL)

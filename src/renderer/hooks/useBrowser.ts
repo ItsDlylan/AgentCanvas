@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
-import { registerNavigator, registerReloader } from './useBrowserNavigation'
+import { registerNavigator, registerReloader, registerWebContentsId, registerCdpPort } from './useBrowserNavigation'
 import type { DevicePreset } from '@/constants/devicePresets'
 
 // Track last known URL per session for reconnect after workspace switch
@@ -118,11 +118,14 @@ export function useBrowser({ sessionId, initialUrl = 'https://www.google.com', l
       el.addEventListener('dom-ready', () => {
         const wcId = (el as unknown as { getWebContentsId(): number }).getWebContentsId()
         if (wcId) {
+          // Store wcId so DevToolsTile can look it up
+          registerWebContentsId(sessionId, wcId)
           // Use reservationId to find the pre-reserved CDP server, fall back to linkedTerminalId
           const cdpId = reservationId || linkedTerminalId
           window.browser.attachCdp(sessionId, wcId, cdpId).then((result) => {
             if (result.port) {
               console.log(`[CDP] Debugger wired for ${sessionId} on port ${result.port}`)
+              registerCdpPort(sessionId, result.port)
               setState((prev) => ({ ...prev, cdpPort: result.port }))
             }
             // Apply initial device preset (mobile/dpr emulation) if specified at spawn time

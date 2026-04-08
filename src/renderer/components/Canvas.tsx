@@ -25,6 +25,7 @@ import { TerminalTile } from './TerminalTile'
 import { BrowserTile } from './BrowserTile'
 import { NotesTile } from './NotesTile'
 import { DiffViewerTile } from './DiffViewerTile'
+import { DevToolsTile } from './DevToolsTile'
 import { ProcessPanel } from './ProcessPanel'
 import { WorkspacePanel } from './WorkspacePanel'
 import { OffscreenIndicators } from './OffscreenIndicators'
@@ -45,7 +46,8 @@ const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
   browser: BrowserTile as unknown as NodeTypes['browser'],
   notes: NotesTile as unknown as NodeTypes['notes'],
-  diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer']
+  diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer'],
+  devTools: DevToolsTile as unknown as NodeTypes['devTools']
 }
 
 const MINIMAP_NODE_COLORS: Record<string, string> = {
@@ -53,6 +55,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   browser:  '#3b82f6',
   notes:    '#f59e0b',
   diffViewer: '#a855f7',
+  devTools:   '#f97316',
 }
 
 function minimapNodeColor(node: Node): string {
@@ -131,11 +134,11 @@ function CanvasMiniMap({ position, panelOpen, workspacePanelOpen }: {
 }
 
 function defaultTileWidth(type: string | undefined): number {
-  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : 640
+  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : type === 'devTools' ? 900 : 640
 }
 
 function defaultTileHeight(type: string | undefined): number {
-  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : 400
+  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : type === 'devTools' ? 500 : 400
 }
 
 let tileCount = 0
@@ -298,6 +301,15 @@ export default function Canvas() {
   // ── Compute visible nodes/edges for active workspace ──
   // Browser nodes from ALL workspaces stay mounted so their webview + CDP connection
   // persists across workspace switches (agents can keep controlling them).
+  // When a DevTools tile is focused, flag its linked browser so pointer events stay enabled.
+  const focusedDevToolsLinkedBrowser = useMemo(() => {
+    if (!focusedId) return null
+    const focusedNode = allNodes.find(
+      (n) => n.type === 'devTools' && (n.data as Record<string, unknown>).sessionId === focusedId
+    )
+    return focusedNode ? (focusedNode.data as Record<string, unknown>).linkedBrowserId as string : null
+  }, [focusedId, allNodes])
+
   const visibleNodes = useMemo(
     () =>
       allNodes
@@ -318,6 +330,13 @@ export default function Canvas() {
               data: { ...n.data, isBackground: true }
             }
           }
+          // Keep browser webview interactive when its DevTools tile is focused (for inspector)
+          if (n.type === 'browser' && focusedDevToolsLinkedBrowser === sid) {
+            return {
+              ...n,
+              data: { ...n.data, devToolsIsFocused: true }
+            }
+          }
           // Inject close/delete callbacks into notes data
           if (n.type === 'notes') {
             return {
@@ -332,9 +351,16 @@ export default function Canvas() {
               data: { ...n.data, onClose: (sid: string) => removeTileFromCanvas(sid) }
             }
           }
+          // Inject close callback into devtools data
+          if (n.type === 'devTools') {
+            return {
+              ...n,
+              data: { ...n.data, onClose: (sid: string) => removeTileFromCanvas(sid) }
+            }
+          }
           return n
         }),
-    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote, removeTileFromCanvas]
+    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote, removeTileFromCanvas, focusedDevToolsLinkedBrowser]
   )
 
   const visibleNodeIds = useMemo(
@@ -737,6 +763,13 @@ export default function Canvas() {
       )
       if (node?.type === 'browser') {
         window.browser.destroy(sessionId)
+        // Also remove any linked DevTools tile
+        const linkedDevTools = allNodesRef.current.find(
+          (n) => n.type === 'devTools' && (n.data as Record<string, unknown>).linkedBrowserId === sessionId
+        )
+        if (linkedDevTools) {
+          removeTileFromCanvas((linkedDevTools.data as Record<string, unknown>).sessionId as string)
+        }
       } else if (node?.type === 'notes') {
         // For notes in killTerminal (e.g. workspace removal), delete the file
         window.note.delete(sessionId)
@@ -827,6 +860,76 @@ export default function Canvas() {
     (terminalSessionId: string) => {
       return allNodes.some(
         (n) => n.type === 'diffViewer' && (n.data as Record<string, unknown>).linkedTerminalId === terminalSessionId
+      )
+    },
+    [allNodes]
+  )
+
+  const toggleDevTools = useCallback(
+    (browserSessionId: string) => {
+      const existing = allNodesRef.current.find(
+        (n) => n.type === 'devTools' && (n.data as Record<string, unknown>).linkedBrowserId === browserSessionId
+      )
+      if (existing) {
+        removeTileFromCanvas((existing.data as Record<string, unknown>).sessionId as string)
+        return
+      }
+
+      const browserNode = allNodesRef.current.find(
+        (n) => (n.data as Record<string, unknown>).sessionId === browserSessionId
+      )
+      if (!browserNode) return
+
+      tileCount++
+      const sessionId = uuid()
+      const dtW = 900
+      const dtH = 500
+      const browserW = (browserNode.measured?.width ?? (browserNode.style?.width as number) ?? 800)
+      const pos = {
+        x: browserNode.position.x + browserW + (settings.canvas.tileGap || 40),
+        y: browserNode.position.y
+      }
+
+      const newNode: Node = {
+        id: sessionId,
+        type: 'devTools',
+        position: pos,
+        style: { width: dtW, height: dtH },
+        data: {
+          sessionId,
+          label: 'DevTools',
+          linkedBrowserId: browserSessionId,
+          onClose: (sid: string) => removeTileFromCanvas(sid)
+        },
+        dragHandle: '.devtools-tile-header'
+      }
+
+      setAllNodes((nds) => [...nds, newNode])
+      setTileWorkspaceMap((prev) =>
+        new Map(prev).set(sessionId, tileWorkspaceMapRef.current.get(browserSessionId) ?? activeWorkspaceIdRef.current)
+      )
+
+      const newEdge: Edge = {
+        id: `devtools-edge-${browserSessionId}-${sessionId}`,
+        source: browserSessionId,
+        target: sessionId,
+        sourceHandle: 'devtools-source',
+        targetHandle: 'devtools-target',
+        animated: true,
+        style: { stroke: '#f97316', strokeWidth: 2, strokeDasharray: '6 3' }
+      }
+      setAllEdges((eds) => [...eds, newEdge])
+
+      setFocusedId(sessionId)
+      setCenter(pos.x + dtW / 2, pos.y + dtH / 2, { zoom: 1, duration: 400 })
+    },
+    [removeTileFromCanvas, setCenter, settings.canvas.tileGap]
+  )
+
+  const hasDevTools = useCallback(
+    (browserSessionId: string) => {
+      return allNodes.some(
+        (n) => n.type === 'devTools' && (n.data as Record<string, unknown>).linkedBrowserId === browserSessionId
       )
     },
     [allNodes]
@@ -1319,8 +1422,8 @@ export default function Canvas() {
   // ── Context + render ──
 
   const focusCtx = useMemo(
-    () => ({ focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer }),
-    [focusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer]
+    () => ({ focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools }),
+    [focusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools]
   )
 
   const activeWorkspace = useMemo(

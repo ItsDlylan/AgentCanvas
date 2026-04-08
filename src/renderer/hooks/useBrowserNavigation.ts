@@ -1,9 +1,11 @@
 /**
  * Module-level pub/sub for triggering navigation and reload in existing browser tiles.
  * useBrowser registers callbacks; Canvas.tsx calls navigateBrowser / reloadBrowser.
+ * Also stores webContentsIds so DevToolsTile can look up the browser's guest process.
  */
 const navigators = new Map<string, (url: string) => void>()
 const reloaders = new Map<string, () => void>()
+const webContentsIds = new Map<string, number>()
 
 export function registerNavigator(sessionId: string, navigate: (url: string) => void): () => void {
   navigators.set(sessionId, navigate)
@@ -31,4 +33,24 @@ export function reloadBrowser(sessionId: string): boolean {
     return true
   }
   return false
+}
+
+export function registerWebContentsId(sessionId: string, wcId: number): () => void {
+  webContentsIds.set(sessionId, wcId)
+  return () => webContentsIds.delete(sessionId)
+}
+
+export function getWebContentsId(sessionId: string): number | undefined {
+  return webContentsIds.get(sessionId)
+}
+
+const cdpPorts = new Map<string, number>()
+
+export function registerCdpPort(sessionId: string, port: number): () => void {
+  cdpPorts.set(sessionId, port)
+  return () => cdpPorts.delete(sessionId)
+}
+
+export function getCdpPort(sessionId: string): number | undefined {
+  return cdpPorts.get(sessionId)
 }
