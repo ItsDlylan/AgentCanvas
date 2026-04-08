@@ -14,6 +14,16 @@ interface RoughShapeProps {
   onDragEnd: (id: string, x: number, y: number) => void
 }
 
+/** Stable numeric seed from shape ID so RoughJS draws identically on every frame */
+function seedFromId(id: string): number {
+  let hash = 0
+  for (let i = 0; i < id.length; i++) {
+    hash = ((hash << 5) - hash) + id.charCodeAt(i)
+    hash |= 0
+  }
+  return Math.abs(hash)
+}
+
 function drawRoughShape(
   ctx: CanvasRenderingContext2D,
   type: ShapeType,
@@ -22,7 +32,9 @@ function drawRoughShape(
   shape: Shape
 ) {
   const rc = rough.canvas({ getContext: () => ctx } as unknown as HTMLCanvasElement)
+  const seed = seedFromId(shape.id)
   const opts = {
+    seed,
     stroke: shape.stroke,
     fill: shape.fill === 'transparent' ? undefined : shape.fill,
     fillStyle: 'hachure' as const,

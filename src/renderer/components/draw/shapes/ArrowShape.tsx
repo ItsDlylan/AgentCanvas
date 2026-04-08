@@ -65,7 +65,13 @@ export function ArrowShapeComponent({ arrow, shapes, isSelected, onSelect }: Arr
       <KonvaShape
         sceneFunc={(ctx) => {
           const rc = rough.canvas({ getContext: () => ctx._context } as unknown as HTMLCanvasElement)
+          let seed = 0
+          for (let i = 0; i < arrow.id.length; i++) {
+            seed = ((seed << 5) - seed) + arrow.id.charCodeAt(i)
+            seed |= 0
+          }
           rc.line(start.x, start.y, end.x, end.y, {
+            seed: Math.abs(seed),
             stroke: isSelected ? '#3b82f6' : arrow.stroke,
             strokeWidth: arrow.strokeWidth,
             roughness: arrow.roughness
