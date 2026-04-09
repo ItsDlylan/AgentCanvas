@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, dialog, Menu, globalShortcut } from 'electron'
 import { join } from 'path'
-import { execFile } from 'child_process'
+import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
@@ -236,6 +236,42 @@ ipcMain.handle('settings:save', (_event, { settings }: { settings: Settings }) =
   mainWindow?.webContents.send('settings:changed', settings)
 })
 ipcMain.handle('settings:defaults', () => DEFAULT_SETTINGS)
+
+// ── IDE IPC ──
+
+// Map setting values to macOS app names for `open -a`
+const IDE_APP_NAMES: Record<string, string> = {
+  cursor: 'Cursor',
+  code: 'Visual Studio Code',
+  zed: 'Zed',
+  subl: 'Sublime Text',
+  idea: 'IntelliJ IDEA',
+  webstorm: 'WebStorm',
+  nova: 'Nova',
+  fleet: 'Fleet'
+}
+
+ipcMain.handle('ide:open', async (_event, { path }: { path: string }) => {
+  const currentSettings = loadSettings()
+  const ideCommand = currentSettings.general.ideCommand
+  if (!ideCommand) {
+    return { error: 'no-ide-configured' }
+  }
+
+  const appName = IDE_APP_NAMES[ideCommand]
+  const args = appName ? ['-a', appName, path] : [path]
+  const bin = appName ? '/usr/bin/open' : ideCommand
+
+  const child = spawn(bin, args, {
+    detached: true,
+    stdio: 'ignore'
+  })
+  return new Promise<{ ok?: boolean; error?: string }>((resolve) => {
+    child.on('error', (err) => resolve({ error: err.message }))
+    child.unref()
+    setImmediate(() => resolve({ ok: true }))
+  })
+})
 
 ipcMain.handle('workspace:load', () => {
   return loadWorkspaces()

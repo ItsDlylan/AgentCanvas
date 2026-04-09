@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 export interface GeneralSettings {
   shell: string
   defaultCwd: string | null
+  ideCommand: string | null
 }
 
 export interface AppearanceSettings {
@@ -78,6 +79,7 @@ export type HotkeyAction =
   | 'cycleFocusForward'
   | 'cycleFocusBackward'
   | 'killFocused'
+  | 'openInIde'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -96,7 +98,8 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   general: {
     shell: process.env.SHELL || '/bin/zsh',
-    defaultCwd: null
+    defaultCwd: null,
+    ideCommand: null
   },
   appearance: {
     terminalFontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
@@ -136,7 +139,8 @@ export const DEFAULT_SETTINGS: Settings = {
     openSettings: 'Mod+,',
     cycleFocusForward: 'Ctrl+Tab',
     cycleFocusBackward: 'Ctrl+Shift+Tab',
-    killFocused: 'Mod+D'
+    killFocused: 'Mod+D',
+    openInIde: 'Mod+Shift+O'
   },
   templates: [
     {

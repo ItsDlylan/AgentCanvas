@@ -7,7 +7,7 @@ export type { Settings, AppearanceSettings, TerminalSettings, BrowserSettings, C
 // ── Fallback defaults (used before async load completes) ─
 
 const FALLBACK: Settings = {
-  general: { shell: '/bin/zsh', defaultCwd: null },
+  general: { shell: '/bin/zsh', defaultCwd: null, ideCommand: null },
   appearance: {
     terminalFontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
     terminalFontSize: 13,
@@ -28,7 +28,8 @@ const FALLBACK: Settings = {
     openSettings: 'Mod+,',
     cycleFocusForward: 'Ctrl+Tab',
     cycleFocusBackward: 'Ctrl+Shift+Tab',
-    killFocused: 'Mod+D'
+    killFocused: 'Mod+D',
+    openInIde: 'Mod+Shift+O'
   },
   templates: []
 }

@@ -5,6 +5,7 @@
 export interface GeneralSettings {
   shell: string
   defaultCwd: string | null
+  ideCommand: string | null
 }
 
 export interface AppearanceSettings {
@@ -75,6 +76,7 @@ export type HotkeyAction =
   | 'cycleFocusForward'
   | 'cycleFocusBackward'
   | 'killFocused'
+  | 'openInIde'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 

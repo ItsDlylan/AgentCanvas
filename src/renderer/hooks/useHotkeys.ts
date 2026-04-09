@@ -116,7 +116,8 @@ export const DEFAULT_HOTKEYS: HotkeySettings = {
   openSettings: 'Mod+,',
   cycleFocusForward: 'Ctrl+Tab',
   cycleFocusBackward: 'Ctrl+Shift+Tab',
-  killFocused: 'Mod+D'
+  killFocused: 'Mod+D',
+  openInIde: 'Mod+Shift+O'
 }
 
 // ── Hook ────────────────────────────────────────────────

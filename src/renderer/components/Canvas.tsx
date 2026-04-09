@@ -1803,6 +1803,16 @@ export default function Canvas() {
         } else {
           killTerminal(focusedId)
         }
+      },
+      openInIde: async () => {
+        if (!focusedId) return
+        const status = await window.terminal.getStatus(focusedId)
+        if (!status) return
+        const worktree = status.metadata?.worktree as { path?: string } | undefined
+        const targetPath = worktree?.path || status.cwd
+        if (targetPath) {
+          window.ide.open(targetPath)
+        }
       }
     }),
     [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, addTerminal, addBrowser, addNote, cycleFocus, focusedId, closeNote, killTerminal]

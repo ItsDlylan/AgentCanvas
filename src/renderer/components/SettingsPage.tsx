@@ -154,6 +154,19 @@ function SectionDivider() {
   return <div className="border-b border-zinc-800" />
 }
 
+// ── Known IDEs ───────────────────────────────────────────
+
+const KNOWN_IDES = [
+  { value: 'code', label: 'VS Code' },
+  { value: 'cursor', label: 'Cursor' },
+  { value: 'zed', label: 'Zed' },
+  { value: 'subl', label: 'Sublime Text' },
+  { value: 'idea', label: 'IntelliJ IDEA' },
+  { value: 'webstorm', label: 'WebStorm' },
+  { value: 'nova', label: 'Nova' },
+  { value: 'fleet', label: 'Fleet' }
+]
+
 // ── Category sections ────────────────────────────────────
 
 function GeneralSection({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }) {
@@ -184,6 +197,41 @@ function GeneralSection({ settings, update }: { settings: Settings; update: (pat
             >
               Browse
             </button>
+          </div>
+        </SettingRow>
+        <SettingRow label="Preferred IDE" description="CLI command to open your code editor (used by IDE button on terminals)">
+          <div className="flex items-center gap-2">
+            <SelectInput
+              value={
+                !settings.general.ideCommand
+                  ? ''
+                  : KNOWN_IDES.some((ide) => ide.value === settings.general.ideCommand)
+                    ? settings.general.ideCommand
+                    : 'custom'
+              }
+              onChange={(v) => {
+                if (v === 'custom') {
+                  update({ general: { ...settings.general, ideCommand: '' } })
+                } else if (v === '') {
+                  update({ general: { ...settings.general, ideCommand: null } })
+                } else {
+                  update({ general: { ...settings.general, ideCommand: v } })
+                }
+              }}
+              options={[
+                { value: '', label: 'None' },
+                ...KNOWN_IDES,
+                { value: 'custom', label: 'Custom...' }
+              ]}
+            />
+            {settings.general.ideCommand !== null &&
+              !KNOWN_IDES.some((ide) => ide.value === settings.general.ideCommand) && (
+                <TextInput
+                  value={settings.general.ideCommand ?? ''}
+                  onChange={(v) => update({ general: { ...settings.general, ideCommand: v || null } })}
+                  placeholder="e.g. my-editor"
+                />
+              )}
           </div>
         </SettingRow>
       </div>
@@ -496,7 +544,8 @@ const HOTKEY_ACTION_META: Record<HotkeyAction, { label: string; description: str
   openSettings: { label: 'Open Settings', description: 'Open the settings page' },
   cycleFocusForward: { label: 'Next Tile', description: 'Cycle focus to the next tile' },
   cycleFocusBackward: { label: 'Previous Tile', description: 'Cycle focus to the previous tile' },
-  killFocused: { label: 'Kill Focused Tile', description: 'Close the currently focused tile' }
+  killFocused: { label: 'Kill Focused Tile', description: 'Close the currently focused tile' },
+  openInIde: { label: 'Open in IDE', description: 'Open the focused terminal\'s directory in your IDE' }
 }
 
 function HotkeyInput({

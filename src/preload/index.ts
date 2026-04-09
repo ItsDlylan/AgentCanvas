@@ -254,6 +254,18 @@ const settingsAPI: SettingsAPI = {
 
 contextBridge.exposeInMainWorld('settings', settingsAPI)
 
+// ── IDE API ──────────────────────────────────────────────
+
+export interface IdeAPI {
+  open: (path: string) => Promise<{ ok?: boolean; error?: string }>
+}
+
+const ideAPI: IdeAPI = {
+  open: (path) => ipcRenderer.invoke('ide:open', { path })
+}
+
+contextBridge.exposeInMainWorld('ide', ideAPI)
+
 // ── Terminal Tiles Persistence API ────────────────────────
 
 export interface TerminalTileLayout {

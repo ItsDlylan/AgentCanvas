@@ -63,6 +63,13 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
     setFocusedId(sessionId)
   }, [setFocusedId, sessionId])
 
+  const openInIde = useCallback(async () => {
+    const worktree = statusInfo?.metadata?.worktree as { path?: string } | undefined
+    const targetPath = worktree?.path || cwd
+    if (!targetPath) return
+    await window.ide.open(targetPath)
+  }, [statusInfo, cwd])
+
   const onResizeStart = useCallback(() => {
     resizingRef.current = true
     setIsResizing(true)
@@ -181,6 +188,13 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
             cwd={cwd}
             currentWorktree={statusInfo?.metadata?.worktree as { branch?: string; path?: string } | undefined}
           />
+          <button
+            className="titlebar-no-drag rounded px-1.5 py-0.5 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+            onClick={openInIde}
+            title={settings.general.ideCommand ? `Open in ${settings.general.ideCommand}` : 'No IDE configured — set in Settings > General'}
+          >
+            IDE
+          </button>
           <button
             className={`titlebar-no-drag rounded px-1.5 py-0.5 text-xs ${
               showingDiff ? 'bg-purple-500/20 text-purple-400' : 'text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300'
