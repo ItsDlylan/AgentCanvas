@@ -332,7 +332,7 @@ export function DrawCanvas({
       />
 
       {/* Zoom display */}
-      <div ref={zoomElRef} className="absolute bottom-2 right-2 rounded bg-zinc-800/80 px-2 py-1 text-[10px] text-zinc-500 pointer-events-none">
+      <div ref={zoomElRef} className="absolute bottom-3 left-3 rounded bg-zinc-800/80 px-2 py-1 text-[10px] text-zinc-500 pointer-events-none">
         {Math.round(cameraRef.current.zoom * 100)}%
       </div>
     </div>
@@ -340,7 +340,7 @@ export function DrawCanvas({
 }
 
 
-/** Toolbar overlay positioned inside the canvas */
+/** Horizontal bottom toolbar with icons */
 function DrawToolbarOverlay({
   activeTool,
   setActiveTool,
@@ -360,80 +360,134 @@ function DrawToolbarOverlay({
   gridSnap: boolean
   setGridSnap: (v: boolean) => void
 }) {
-  const tools: { key: import('@/lib/draw-types').DrawTool; label: string; shortcut: string }[] = [
-    { key: 'select', label: 'Select', shortcut: 'V' },
-    { key: 'rectangle', label: 'Rect', shortcut: 'R' },
-    { key: 'diamond', label: 'Diamond', shortcut: 'D' },
-    { key: 'ellipse', label: 'Ellipse', shortcut: 'O' },
-    { key: 'cylinder', label: 'Cylinder', shortcut: '' },
-    { key: 'roundedRect', label: 'Rounded', shortcut: '' },
-    { key: 'dbTable', label: 'DB Table', shortcut: '' },
-    { key: 'text', label: 'Text', shortcut: 'T' },
-    { key: 'arrow', label: 'Arrow', shortcut: 'A' },
-    { key: 'freehand', label: 'Draw', shortcut: 'F' }
-  ]
-
   const colors = ['transparent', '#e4e4e7', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#a855f7', '#ec4899']
 
   return (
-    <div className="absolute left-2 top-2 flex flex-col gap-1 rounded-md border border-zinc-700 bg-zinc-800/95 p-1.5 shadow-lg">
-      {tools.map((t) => (
-        <button
-          key={t.key}
-          onClick={() => setActiveTool(t.key)}
-          title={`${t.label}${t.shortcut ? ` (${t.shortcut})` : ''}`}
-          className={`rounded px-2 py-1 text-[10px] font-medium transition-colors ${
-            activeTool === t.key
-              ? 'bg-blue-500/20 text-blue-400'
-              : 'text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
-          }`}
-        >
-          {t.label}
-        </button>
-      ))}
+    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-0.5 rounded-lg border border-zinc-700 bg-zinc-800/95 px-1.5 py-1 shadow-lg backdrop-blur-sm">
+      {/* Tools */}
+      <ToolBtn active={activeTool === 'select'} onClick={() => setActiveTool('select')} title="Select (V)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+        </svg>
+      </ToolBtn>
 
-      <div className="my-1 h-px bg-zinc-700" />
+      <Separator />
+
+      <ToolBtn active={activeTool === 'rectangle'} onClick={() => setActiveTool('rectangle')} title="Rectangle (R)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <rect x="3" y="3" width="18" height="18" rx="1" />
+        </svg>
+      </ToolBtn>
+      <ToolBtn active={activeTool === 'roundedRect'} onClick={() => setActiveTool('roundedRect')} title="Rounded Rect">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <rect x="3" y="3" width="18" height="18" rx="5" />
+        </svg>
+      </ToolBtn>
+      <ToolBtn active={activeTool === 'diamond'} onClick={() => setActiveTool('diamond')} title="Diamond (D)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <path d="M12 2l10 10-10 10L2 12z" />
+        </svg>
+      </ToolBtn>
+      <ToolBtn active={activeTool === 'ellipse'} onClick={() => setActiveTool('ellipse')} title="Ellipse (O)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <ellipse cx="12" cy="12" rx="10" ry="8" />
+        </svg>
+      </ToolBtn>
+      <ToolBtn active={activeTool === 'cylinder'} onClick={() => setActiveTool('cylinder')} title="Cylinder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <ellipse cx="12" cy="5" rx="8" ry="3" />
+          <path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
+        </svg>
+      </ToolBtn>
+      <ToolBtn active={activeTool === 'dbTable'} onClick={() => setActiveTool('dbTable')} title="DB Table">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M3 9h18M3 15h18" />
+        </svg>
+      </ToolBtn>
+
+      <Separator />
+
+      <ToolBtn active={activeTool === 'arrow'} onClick={() => setActiveTool('arrow')} title="Arrow (A)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5 19L19 5m0 0h-8m8 0v8" />
+        </svg>
+      </ToolBtn>
+      <ToolBtn active={activeTool === 'text'} onClick={() => setActiveTool('text')} title="Text (T)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 7V4h16v3M9 20h6M12 4v16" />
+        </svg>
+      </ToolBtn>
+      <ToolBtn active={activeTool === 'freehand'} onClick={() => setActiveTool('freehand')} title="Draw (F)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+        </svg>
+      </ToolBtn>
+
+      <Separator />
 
       {/* Stroke color */}
-      <div className="flex flex-wrap gap-0.5 px-0.5">
+      <div className="flex items-center gap-0.5 px-0.5">
         {colors.slice(1).map((c) => (
           <button
             key={`s-${c}`}
             onClick={() => setStrokeColor(c)}
-            className={`h-3.5 w-3.5 rounded-sm border ${strokeColor === c ? 'border-blue-400' : 'border-zinc-600'}`}
+            className={`h-4 w-4 rounded-full border-2 ${strokeColor === c ? 'border-blue-400 scale-110' : 'border-zinc-600 hover:border-zinc-400'}`}
             style={{ backgroundColor: c }}
             title={`Stroke: ${c}`}
           />
         ))}
       </div>
 
+      <Separator />
+
       {/* Fill color */}
-      <div className="flex flex-wrap gap-0.5 px-0.5">
+      <div className="flex items-center gap-0.5 px-0.5">
         {colors.map((c) => (
           <button
             key={`f-${c}`}
             onClick={() => setFillColor(c)}
-            className={`h-3.5 w-3.5 rounded-sm border ${fillColor === c ? 'border-blue-400' : 'border-zinc-600'}`}
+            className={`h-4 w-4 rounded-full border-2 ${fillColor === c ? 'border-blue-400 scale-110' : 'border-zinc-600 hover:border-zinc-400'}`}
             style={{ backgroundColor: c === 'transparent' ? '#09090b' : c }}
             title={`Fill: ${c === 'transparent' ? 'none' : c}`}
           >
-            {c === 'transparent' && <span className="text-[8px] text-zinc-500 leading-none block text-center">/</span>}
+            {c === 'transparent' && (
+              <svg viewBox="0 0 16 16" className="h-full w-full text-zinc-500">
+                <line x1="3" y1="13" x2="13" y2="3" stroke="currentColor" strokeWidth="1.5" />
+              </svg>
+            )}
           </button>
         ))}
       </div>
 
-      <div className="my-1 h-px bg-zinc-700" />
+      <Separator />
 
-      {/* Grid snap toggle */}
-      <button
-        onClick={() => setGridSnap(!gridSnap)}
-        className={`rounded px-2 py-1 text-[10px] font-medium ${
-          gridSnap ? 'bg-blue-500/20 text-blue-400' : 'text-zinc-400 hover:bg-zinc-700'
-        }`}
-        title="Grid snap (G)"
-      >
-        Grid
-      </button>
+      {/* Grid snap */}
+      <ToolBtn active={gridSnap} onClick={() => setGridSnap(!gridSnap)} title="Grid snap (G)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
+          <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z" />
+        </svg>
+      </ToolBtn>
     </div>
   )
+}
+
+function ToolBtn({ active, onClick, title, children }: { active: boolean; onClick: () => void; title: string; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+        active
+          ? 'bg-blue-500/20 text-blue-400'
+          : 'text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+function Separator() {
+  return <div className="mx-0.5 h-5 w-px bg-zinc-700" />
 }
