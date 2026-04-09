@@ -118,6 +118,7 @@ export class TerminalManager extends EventEmitter {
         LANG: 'en_US.UTF-8',
         LC_ALL: 'en_US.UTF-8',
         AGENT_BROWSER_CDP_PORT: String(cdpPort),
+        AGENT_BROWSER_CDP: `http://127.0.0.1:${cdpPort}`,
         AGENT_CANVAS_TERMINAL_ID: id,
         ...extraEnv
       } as Record<string, string>

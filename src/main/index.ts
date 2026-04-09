@@ -92,6 +92,10 @@ ipcMain.handle('terminal:create', async (_event, { id, label, cwd, metadata }) =
       scrollbackBuffers.set(id, buf)
       dataBuffers.delete(id)
     }
+    // Ensure CDP proxy is still listening on reconnect
+    try {
+      await cdpProxy.reserve(id, existingSession.cdpPort)
+    } catch { /* already reserved or port conflict — safe to ignore */ }
     return { cdpPort: existingSession.cdpPort, isReconnect: true }
   }
 
@@ -101,6 +105,14 @@ ipcMain.handle('terminal:create', async (_event, { id, label, cwd, metadata }) =
     extraEnv.AGENT_CANVAS_API = `http://127.0.0.1:${canvasApiPort}`
   }
   const cdpPort = await terminalManager.create(id, label, cwd, 80, 24, extraEnv, currentSettings.general.shell)
+
+  // Eagerly start CDP proxy server so agent-browser can connect immediately.
+  // Commands are queued until a browser tile attaches (Phase 2).
+  try {
+    await cdpProxy.reserve(id, cdpPort)
+  } catch (err) {
+    console.warn(`[CDP] Could not eagerly reserve port ${cdpPort} for terminal ${id}:`, err)
+  }
 
   // Restore metadata if provided (e.g., worktree info from persisted session)
   if (metadata) {
@@ -133,6 +145,7 @@ ipcMain.handle('terminal:resize', (_event, { id, cols, rows }) => {
 
 ipcMain.handle('terminal:kill', (_event, { id }) => {
   terminalManager.kill(id)
+  cdpProxy.detach(id)
 })
 
 ipcMain.handle('terminal:resume', (_event, { id }) => {
@@ -595,12 +608,26 @@ terminalManager.on('exit', (id: string, exitCode: number) => {
   scrollbackBuffers.delete(id)
   pausedSessions.delete(id)
   dataBuffers.delete(id)
+  cdpProxy.detach(id)
   mainWindow?.webContents.send('terminal:exit', { id, exitCode })
 })
 
 terminalManager.on('status', (id: string, info: { status: string; cwd: string; foregroundProcess: string; metadata?: Record<string, unknown> }) => {
   mainWindow?.webContents.send('terminal:status', { id, ...info })
   recordIpc('terminal:status')
+})
+
+// ── CDP Proxy Events ─────────────────────────────────────
+// Auto-spawn a browser tile when agent-browser connects to a terminal's
+// CDP proxy before any browser tile has been created via the Canvas API.
+cdpProxy.on('client-connected-pending', ({ sessionId }: { sessionId: string }) => {
+  const termSession = terminalManager.getSession(sessionId)
+  if (!termSession) return
+  mainWindow?.webContents.send('terminal:browser-request', {
+    terminalId: sessionId,
+    url: 'about:blank',
+    reservationId: sessionId
+  })
 })
 
 // ── Canvas API Events ────────────────────────────────────

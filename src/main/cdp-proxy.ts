@@ -86,6 +86,12 @@ export class CdpProxy extends EventEmitter {
     wsServer.on('connection', (ws: WebSocket) => {
       clients.add(ws)
 
+      // Notify listeners when a client connects while no browser tile is attached.
+      // This allows auto-spawning a browser tile on the canvas.
+      if (!session.debuggerReady && session.webContentsId === null) {
+        this.emit('client-connected-pending', { sessionId })
+      }
+
       ws.on('message', async (raw: Buffer | string) => {
         try {
           const msg = JSON.parse(raw.toString())
