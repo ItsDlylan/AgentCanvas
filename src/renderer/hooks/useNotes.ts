@@ -110,6 +110,23 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
     })
   }, [editor, noteId])
 
+  // Refresh content when Pomodoro syncs a task check back to this note
+  useEffect(() => {
+    if (!editor) return
+    const handler = (e: Event) => {
+      const { noteId: updatedId } = (e as CustomEvent).detail
+      if (updatedId === noteIdRef.current && !editor.isDestroyed) {
+        window.note.load(noteIdRef.current).then((noteFile) => {
+          if (noteFile?.content && !editor.isDestroyed) {
+            editor.commands.setContent(noteFile.content)
+          }
+        })
+      }
+    }
+    window.addEventListener('pomodoro:note-updated', handler)
+    return () => window.removeEventListener('pomodoro:note-updated', handler)
+  }, [editor])
+
   // Auto-save content on changes (metadata is saved separately by Canvas)
   useEffect(() => {
     if (!editor) return

@@ -77,6 +77,7 @@ export type HotkeyAction =
   | 'cycleFocusBackward'
   | 'killFocused'
   | 'openInIde'
+  | 'togglePomodoro'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 

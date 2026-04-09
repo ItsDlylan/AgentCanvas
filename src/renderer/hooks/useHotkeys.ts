@@ -117,7 +117,8 @@ export const DEFAULT_HOTKEYS: HotkeySettings = {
   cycleFocusForward: 'Ctrl+Tab',
   cycleFocusBackward: 'Ctrl+Shift+Tab',
   killFocused: 'Mod+D',
-  openInIde: 'Mod+Shift+O'
+  openInIde: 'Mod+Shift+O',
+  togglePomodoro: 'Mod+P'
 }
 
 // ── Hook ────────────────────────────────────────────────

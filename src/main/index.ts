@@ -17,6 +17,7 @@ import { jsonToMarkdown } from './note-converter'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
 import { loadEdges, saveEdges } from './edge-store'
+import { loadPomodoro, savePomodoro } from './pomodoro-store'
 import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-store'
 import { DiffService } from './diff-service'
 
@@ -285,6 +286,10 @@ ipcMain.handle('ide:open', async (_event, { path }: { path: string }) => {
     setImmediate(() => resolve({ ok: true }))
   })
 })
+
+// ── Pomodoro IPC ──────────────────────────────────────────
+ipcMain.handle('pomodoro:load', () => loadPomodoro())
+ipcMain.handle('pomodoro:save', (_event, { data }) => savePomodoro(data))
 
 ipcMain.handle('workspace:load', () => {
   return loadWorkspaces()

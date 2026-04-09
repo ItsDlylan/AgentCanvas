@@ -38,6 +38,8 @@ import { PanDetector } from './PanDetector'
 import { navigateBrowser, reloadBrowser } from '@/hooks/useBrowserNavigation'
 import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug'
 import { PerformanceOverlay } from './PerformanceOverlay'
+import { PomodoroWidget } from './PomodoroWidget'
+import { usePomodoro, PomodoroContext } from '@/hooks/usePomodoro'
 import { BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
 import { DEFAULT_WORKSPACE, type Workspace } from '@/types/workspace'
 import { useSettings, type WorkspaceTemplate } from '@/hooks/useSettings'
@@ -239,6 +241,9 @@ export default function Canvas() {
   const { enabled: perfEnabled, stats: perfStats } = usePerformanceDebug()
   const { settings, updateSettings } = useSettings()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const pomodoro = usePomodoro()
+  const [pomodoroExpanded, setPomodoroExpanded] = useState(false)
+  const togglePomodoro = useCallback(() => setPomodoroExpanded((o) => !o), [])
 
   // ── All nodes/edges (across all workspaces) ──
   const [allNodes, setAllNodes] = useState<Node[]>([])
@@ -1748,6 +1753,21 @@ export default function Canvas() {
     [focusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools, renameTile]
   )
 
+  const navigateToNote = useCallback(
+    (noteId: string) => {
+      const wsId = tileWorkspaceMap.get(noteId)
+      if (wsId) {
+        handleFocusProcess(wsId, noteId)
+      }
+    },
+    [tileWorkspaceMap, handleFocusProcess]
+  )
+
+  const pomodoroCtx = useMemo(
+    () => ({ addTask: pomodoro.addTask, tasks: pomodoro.tasks, navigateToNote }),
+    [pomodoro.addTask, pomodoro.tasks, navigateToNote]
+  )
+
   const activeWorkspace = useMemo(
     () => workspaces.find((w) => w.id === activeWorkspaceId) ?? DEFAULT_WORKSPACE,
     [workspaces, activeWorkspaceId]
@@ -1813,9 +1833,10 @@ export default function Canvas() {
         if (targetPath) {
           window.ide.open(targetPath)
         }
-      }
+      },
+      togglePomodoro
     }),
-    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, addTerminal, addBrowser, addNote, cycleFocus, focusedId, closeNote, killTerminal]
+    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, addTerminal, addBrowser, addNote, cycleFocus, focusedId, closeNote, killTerminal, togglePomodoro]
   )
 
   useHotkeys(settings.hotkeys, hotkeyActions)
@@ -1999,6 +2020,7 @@ export default function Canvas() {
   }, [wsJumpMode, wsJumpAssignments, handleSelectWorkspace])
 
   return (
+    <PomodoroContext.Provider value={pomodoroCtx}>
     <FocusedTerminalContext.Provider value={focusCtx}>
       <div className="flex h-screen w-screen flex-col">
         {perfEnabled && perfStats && <PerformanceOverlay stats={perfStats} />}
@@ -2014,6 +2036,7 @@ export default function Canvas() {
             )}
           </div>
           <div className="titlebar-no-drag flex items-center gap-2">
+            <PomodoroWidget pomodoro={pomodoro} expanded={pomodoroExpanded} onToggle={togglePomodoro} />
             <button
               onClick={() => setSettingsOpen(true)}
               className="rounded p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
@@ -2201,5 +2224,6 @@ export default function Canvas() {
         </div>
       </div>
     </FocusedTerminalContext.Provider>
+    </PomodoroContext.Provider>
   )
 }

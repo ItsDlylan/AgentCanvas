@@ -5,6 +5,7 @@ import type { Editor } from '@tiptap/react'
 import type { JSONContent } from '@tiptap/core'
 import { useNotes } from '@/hooks/useNotes'
 import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
+import { usePomodoroContext } from '@/hooks/usePomodoro'
 import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { EditableLabel } from './EditableLabel'
@@ -36,6 +37,29 @@ function getChecklistInfo(editor: Editor | null): { isChecklist: boolean; checke
   return { isChecklist: hasTaskList, checked, total }
 }
 
+function getTaskItems(editor: Editor | null): Array<{ text: string; checked: boolean }> {
+  if (!editor) return []
+  const json = editor.getJSON()
+  const tasks: Array<{ text: string; checked: boolean }> = []
+  for (const node of (json.content ?? []) as JSONContent[]) {
+    if (node.type === 'taskList') {
+      for (const item of node.content ?? []) {
+        if (item.type === 'taskItem') {
+          const text = (item.content ?? [])
+            .flatMap((p) => p.content ?? [])
+            .filter((n) => n.type === 'text')
+            .map((n) => n.text ?? '')
+            .join('')
+          if (text.trim()) {
+            tasks.push({ text: text.trim(), checked: !!item.attrs?.checked })
+          }
+        }
+      }
+    }
+  }
+  return tasks
+}
+
 export interface NotesNodeData {
   sessionId: string
   label: string
@@ -49,12 +73,15 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
   registerRender('NotesTile')
   const { sessionId, label, onClose, onDelete } = data as unknown as NotesNodeData
   const { focusedId, setFocusedId, killHighlight, renameTile } = useFocusedTerminal()
+  const { addTask: addPomodoroTask, tasks: pomodoroTasks } = usePomodoroContext()
   const isPanning = useIsPanning()
   const isFocused = focusedId === sessionId
   const bodyElRef = useRef<HTMLDivElement | null>(null)
   const [isResizing, setIsResizing] = useState(false)
   const [showToolbar, setShowToolbar] = useState(false)
   const [contentVersion, setContentVersion] = useState(0)
+  const [pomodoroPickerOpen, setPomodoroPickerOpen] = useState(false)
+  const pomodoroPickerRef = useRef<HTMLDivElement>(null)
 
   const { editor } = useNotes({ noteId: sessionId })
 
@@ -71,6 +98,38 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editor, contentVersion]
   )
+
+  const noteTaskItems = useMemo(
+    () => getTaskItems(editor),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor, contentVersion]
+  )
+
+  const uncheckedTasks = useMemo(
+    () => noteTaskItems.filter((t) => !t.checked),
+    [noteTaskItems]
+  )
+
+  // Track which tasks are already in Pomodoro (by text match)
+  const pomodoroTaskTexts = useMemo(
+    () => new Set(pomodoroTasks.map((t) => t.text)),
+    [pomodoroTasks]
+  )
+
+  // Close picker on click outside
+  useEffect(() => {
+    if (!pomodoroPickerOpen) return
+    const handler = (e: MouseEvent) => {
+      if (pomodoroPickerRef.current && !pomodoroPickerRef.current.contains(e.target as HTMLElement)) {
+        setPomodoroPickerOpen(false)
+      }
+    }
+    const timer = setTimeout(() => document.addEventListener('mousedown', handler), 0)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('mousedown', handler)
+    }
+  }, [pomodoroPickerOpen])
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)
@@ -238,6 +297,76 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
               </svg>
             </ToolbarButton>
+            {uncheckedTasks.length > 0 && (
+              <>
+                <span className="mx-1 h-4 w-px bg-zinc-700" />
+                <div className="relative" ref={pomodoroPickerRef}>
+                  <ToolbarButton
+                    active={pomodoroPickerOpen}
+                    onClick={() => setPomodoroPickerOpen((o) => !o)}
+                    title="Send tasks to Pomodoro"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                      <circle cx="12" cy="13" r="8" />
+                      <path strokeLinecap="round" d="M12 9v4l2 2" />
+                      <path strokeLinecap="round" d="M12 5V3" />
+                      <path strokeLinecap="round" d="M9.5 3.5l5-1" />
+                    </svg>
+                  </ToolbarButton>
+                  {pomodoroPickerOpen && (
+                    <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
+                      <div className="px-2 py-1 text-[10px] font-medium text-zinc-500">Add to Pomodoro</div>
+                      <div className="max-h-40 overflow-y-auto">
+                        {uncheckedTasks.map((task, i) => {
+                          const alreadyAdded = pomodoroTaskTexts.has(task.text)
+                          return (
+                            <button
+                              key={i}
+                              className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs transition-colors ${
+                                alreadyAdded
+                                  ? 'text-zinc-600 cursor-default'
+                                  : 'text-zinc-300 hover:bg-zinc-800'
+                              }`}
+                              onClick={() => {
+                                if (!alreadyAdded) addPomodoroTask(task.text, { noteId: sessionId, noteLabel: label })
+                              }}
+                              disabled={alreadyAdded}
+                            >
+                              {alreadyAdded ? (
+                                <svg className="h-3 w-3 shrink-0 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                                </svg>
+                              ) : (
+                                <svg className="h-3 w-3 shrink-0 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                                </svg>
+                              )}
+                              <span className="truncate">{task.text}</span>
+                            </button>
+                          )
+                        })}
+                      </div>
+                      {uncheckedTasks.length > 1 && !uncheckedTasks.every((t) => pomodoroTaskTexts.has(t.text)) && (
+                        <>
+                          <div className="my-1 h-px bg-zinc-800" />
+                          <button
+                            className="flex w-full items-center gap-2 px-2 py-1.5 text-xs text-blue-400 hover:bg-zinc-800"
+                            onClick={() => {
+                              for (const task of uncheckedTasks) {
+                                if (!pomodoroTaskTexts.has(task.text)) addPomodoroTask(task.text, { noteId: sessionId, noteLabel: label })
+                              }
+                              setPomodoroPickerOpen(false)
+                            }}
+                          >
+                            Add all ({uncheckedTasks.filter((t) => !pomodoroTaskTexts.has(t.text)).length})
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 

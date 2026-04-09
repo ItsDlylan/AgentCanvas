@@ -254,6 +254,20 @@ const settingsAPI: SettingsAPI = {
 
 contextBridge.exposeInMainWorld('settings', settingsAPI)
 
+// ── Pomodoro API ────────────────────────────────────────
+
+export interface PomodoroAPI {
+  load: () => Promise<import('../renderer/types/pomodoro').PomodoroData>
+  save: (data: import('../renderer/types/pomodoro').PomodoroData) => Promise<void>
+}
+
+const pomodoroAPI: PomodoroAPI = {
+  load: () => ipcRenderer.invoke('pomodoro:load'),
+  save: (data) => ipcRenderer.invoke('pomodoro:save', { data })
+}
+
+contextBridge.exposeInMainWorld('pomodoro', pomodoroAPI)
+
 // ── IDE API ──────────────────────────────────────────────
 
 export interface IdeAPI {
