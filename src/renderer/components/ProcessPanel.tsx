@@ -455,7 +455,7 @@ function BrowserEntry({
           </span>
         </div>
         {url && (
-          <span className="truncate text-[10px] text-zinc-600" title={url}>
+          <span className="truncate text-[10px] text-zinc-500" title={url}>
             {url.replace(/^https?:\/\//, '')}
           </span>
         )}

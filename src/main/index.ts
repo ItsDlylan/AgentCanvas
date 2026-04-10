@@ -657,6 +657,10 @@ terminalManager.on('status', (id: string, info: { status: string; cwd: string; f
   recordIpc('terminal:status')
 })
 
+browserManager.on('status', (id: string, info: Record<string, unknown>) => {
+  mainWindow?.webContents.send('browser:status', { id, ...info })
+})
+
 // ── CDP Proxy Events ─────────────────────────────────────
 // Auto-spawn a browser tile when agent-browser connects to a terminal's
 // CDP proxy before any browser tile has been created via the Canvas API.
