@@ -172,7 +172,7 @@ export const NotificationCenter = memo(function NotificationCenter({
           />
         </svg>
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white">
+          <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 tabular-nums text-white">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}

@@ -233,7 +233,7 @@ function WorkspacePanelComponent({
                             )}
                             {wsUnread > 0 && (
                               <span
-                                className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white"
+                                className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 tabular-nums text-white"
                                 title={`${wsUnread} unread notification${wsUnread === 1 ? '' : 's'}`}
                               >
                                 {wsUnread > 99 ? '99+' : wsUnread}
@@ -339,7 +339,7 @@ function WorkspacePanelComponent({
                             )}
                             {unread > 0 && (
                               <span
-                                className="ml-auto flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white"
+                                className="ml-auto flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 tabular-nums text-white"
                                 title={`${unread} unread notification${unread === 1 ? '' : 's'}`}
                               >
                                 {unread > 99 ? '99+' : unread}
@@ -387,7 +387,7 @@ function WorkspacePanelComponent({
                             </span>
                             {unread > 0 && (
                               <span
-                                className="ml-auto flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white"
+                                className="ml-auto flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-4 tabular-nums text-white"
                                 title={`${unread} unread notification${unread === 1 ? '' : 's'}`}
                               >
                                 {unread > 99 ? '99+' : unread}
