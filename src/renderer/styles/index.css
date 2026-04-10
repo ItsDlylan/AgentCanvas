@@ -27,16 +27,6 @@
   background-color: #09090b !important;
 }
 
-/* Promote viewport and nodes to GPU compositor layers */
-.react-flow__viewport {
-  will-change: transform;
-}
-
-.react-flow__node {
-  will-change: transform;
-  contain: layout style paint;
-}
-
 /* Terminal tile styling */
 .terminal-tile {
   border: 1px solid #27272a;
