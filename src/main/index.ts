@@ -106,7 +106,10 @@ ipcMain.handle('terminal:create', async (_event, { id, label, cwd, metadata }) =
   if (canvasApiPort) {
     extraEnv.AGENT_CANVAS_API = `http://127.0.0.1:${canvasApiPort}`
   }
-  const cdpPort = await terminalManager.create(id, label, cwd, 80, 24, extraEnv, currentSettings.general.shell)
+  // If no workspace path was provided, fall back to the user's defaultCwd setting.
+  // Terminal manager falls back to os.homedir() after that.
+  const effectiveCwd = cwd || currentSettings.general.defaultCwd || undefined
+  const cdpPort = await terminalManager.create(id, label, effectiveCwd, 80, 24, extraEnv, currentSettings.general.shell)
 
   // Eagerly start CDP proxy server so agent-browser can connect immediately.
   // Commands are queued until a browser tile attaches (Phase 2).
@@ -752,6 +755,33 @@ canvasApi.on('draw-update', (info: { sessionId: string; mermaid?: string; elemen
 canvasApi.on('draw-close', (info: { sessionId: string }, reply: (result: unknown) => void) => {
   mainWindow?.webContents.send('canvas:draw-close', { sessionId: info.sessionId })
   reply({ ok: true })
+})
+
+canvasApi.on('notify', (info: {
+  id: string; title?: string; body: string; level: string;
+  terminalId?: string; duration: number; sound: boolean; timestamp: number
+}, reply: (result: unknown) => void) => {
+  const notifySettings = loadSettings().notifications
+  if (notifySettings && !notifySettings.enabled) {
+    reply({ ok: true, id: info.id, suppressed: true })
+    return
+  }
+
+  mainWindow?.webContents.send('canvas:notify', info)
+
+  // Native OS notification when window is unfocused
+  if (mainWindow && !mainWindow.isFocused() && (!notifySettings || notifySettings.nativeWhenUnfocused)) {
+    const { Notification: ElectronNotification } = require('electron')
+    if (ElectronNotification.isSupported()) {
+      new ElectronNotification({
+        title: info.title || 'Agent Canvas',
+        body: info.body,
+        silent: true
+      }).show()
+    }
+  }
+
+  reply({ ok: true, id: info.id })
 })
 
 canvasApi.on('status-request', (reply: (data: unknown) => void) => {

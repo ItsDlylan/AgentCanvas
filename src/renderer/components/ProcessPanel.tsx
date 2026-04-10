@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useCallback, useMemo } from 'react'
 import type { Node, Edge } from '@xyflow/react'
 import { useAllTerminalStatuses, type TerminalStatus, type TerminalStatusInfo } from '@/hooks/useTerminalStatus'
 import { useAllBrowserStatuses } from '@/hooks/useBrowserStatus'
+import { useUnreadForTile } from '@/hooks/useNotifications'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { useSettings, type WorkspaceTemplate } from '@/hooks/useSettings'
 import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS, type DevicePreset } from '@/constants/devicePresets'
@@ -311,6 +312,19 @@ function shortenPath(path: string): string {
   return parts[0] + '/.../' + parts.slice(-2).join('/')
 }
 
+function UnreadBadge({ sessionId }: { sessionId: string }) {
+  const unread = useUnreadForTile(sessionId)
+  if (unread === 0) return null
+  return (
+    <span
+      className="ml-auto flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white"
+      title={`${unread} unread notification${unread === 1 ? '' : 's'}`}
+    >
+      {unread > 99 ? '99+' : unread}
+    </span>
+  )
+}
+
 function CloseButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
   return (
     <button
@@ -383,6 +397,7 @@ function TerminalEntry({ node, focusedId, statuses, jumpHints, onFocus, onKill, 
           </span>
         )}
       </div>
+      <UnreadBadge sessionId={sessionId} />
       <JumpBadge hint={jumpHints.get(sessionId)} />
       <CloseButton onClick={(e) => { e.stopPropagation(); onKill(sessionId) }} />
     </button>
@@ -465,6 +480,7 @@ function BrowserEntry({
           </span>
         )}
       </div>
+      <UnreadBadge sessionId={sessionId} />
       <JumpBadge hint={jumpHints.get(sessionId)} />
       <CloseButton onClick={(e) => { e.stopPropagation(); onKill(sessionId) }} />
     </button>

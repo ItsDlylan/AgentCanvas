@@ -1,8 +1,9 @@
-import { memo, useState, useCallback, useRef, useEffect } from 'react'
+import { memo, useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import type { Node } from '@xyflow/react'
 import type { Workspace } from '@/types/workspace'
 import { useAllTerminalStatuses, type TerminalStatus } from '@/hooks/useTerminalStatus'
 import { useAllBrowserStatuses } from '@/hooks/useBrowserStatus'
+import { useAllUnread } from '@/hooks/useNotifications'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 
 interface WorkspacePanelProps {
@@ -16,6 +17,7 @@ interface WorkspacePanelProps {
   onAdd: () => void
   onRemove: (id: string) => void
   onRename: (id: string, name: string) => void
+  onSetPath: (id: string) => void
   open: boolean
   onToggle: () => void
   jumpHints: Map<string, string>
@@ -45,6 +47,7 @@ function WorkspacePanelComponent({
   onAdd,
   onRemove,
   onRename,
+  onSetPath,
   open,
   onToggle,
   jumpHints
@@ -57,6 +60,7 @@ function WorkspacePanelComponent({
 
   const terminalStatuses = useAllTerminalStatuses()
   const browserStatuses = useAllBrowserStatuses()
+  const unreadByTerminal = useAllUnread()
 
   const tilesForWorkspace = useCallback(
     (workspaceId: string) =>
@@ -77,6 +81,17 @@ function WorkspacePanelComponent({
     },
     [tileWorkspaceMap]
   )
+
+  const unreadByWorkspace = useMemo(() => {
+    const result = new Map<string, number>()
+    for (const [sid, count] of unreadByTerminal) {
+      const wsid = tileWorkspaceMap.get(sid)
+      if (wsid) {
+        result.set(wsid, (result.get(wsid) || 0) + count)
+      }
+    }
+    return result
+  }, [unreadByTerminal, tileWorkspaceMap])
 
   const toggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -149,6 +164,7 @@ function WorkspacePanelComponent({
             {workspaces.map((ws) => {
               const isActive = ws.id === activeWorkspaceId
               const count = tileCountFor(ws.id)
+              const wsUnread = unreadByWorkspace.get(ws.id) || 0
               const isEditing = editingId === ws.id
               const isExpanded = expandedIds.has(ws.id)
               const wsTiles = isExpanded ? tilesForWorkspace(ws.id) : []
@@ -215,6 +231,14 @@ function WorkspacePanelComponent({
                                 {count}
                               </span>
                             )}
+                            {wsUnread > 0 && (
+                              <span
+                                className="flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white"
+                                title={`${wsUnread} unread notification${wsUnread === 1 ? '' : 's'}`}
+                              >
+                                {wsUnread > 99 ? '99+' : wsUnread}
+                              </span>
+                            )}
                             {jumpHints.get(ws.id) && (
                               <span className="ml-auto shrink-0 rounded border border-purple-400/50 bg-purple-500/20 px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-purple-300">
                                 {jumpHints.get(ws.id)}
@@ -222,9 +246,24 @@ function WorkspacePanelComponent({
                             )}
                           </div>
                         )}
-                        {ws.path && (
+                        {ws.path ? (
                           <span className="truncate text-[10px] text-zinc-600" title={ws.path}>
                             {shortenPath(ws.path)}
+                          </span>
+                        ) : (
+                          <span
+                            role="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onSetPath(ws.id)
+                            }}
+                            className="flex items-center gap-1 truncate text-[10px] text-zinc-500 hover:text-blue-400"
+                            title="New terminals in this workspace will use this folder as their cwd"
+                          >
+                            <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                            </svg>
+                            Set folder…
                           </span>
                         )}
                       </div>
@@ -271,6 +310,7 @@ function WorkspacePanelComponent({
                         const status = info?.status ?? 'running'
                         const foreground = info?.foregroundProcess
                         const cfg = STATUS_CONFIG[status]
+                        const unread = unreadByTerminal.get(sessionId) || 0
 
                         return (
                           <button
@@ -297,7 +337,15 @@ function WorkspacePanelComponent({
                                 {foreground}
                               </span>
                             )}
-                            <span className={`ml-auto shrink-0 text-[9px] ${cfg.labelColor}`}>
+                            {unread > 0 && (
+                              <span
+                                className="ml-auto flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white"
+                                title={`${unread} unread notification${unread === 1 ? '' : 's'}`}
+                              >
+                                {unread > 99 ? '99+' : unread}
+                              </span>
+                            )}
+                            <span className={`${unread > 0 ? '' : 'ml-auto'} shrink-0 text-[9px] ${cfg.labelColor}`}>
                               {cfg.label}
                             </span>
                           </button>
@@ -313,6 +361,7 @@ function WorkspacePanelComponent({
                         const info = browserStatuses.get(sessionId)
                         const title = info?.title || label
                         const isLoading = info?.loading ?? true
+                        const unread = unreadByTerminal.get(sessionId) || 0
 
                         return (
                           <button
@@ -336,7 +385,15 @@ function WorkspacePanelComponent({
                             >
                               {title}
                             </span>
-                            <span className="ml-auto shrink-0 text-[9px] text-emerald-500/70">
+                            {unread > 0 && (
+                              <span
+                                className="ml-auto flex h-4 min-w-[16px] shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white"
+                                title={`${unread} unread notification${unread === 1 ? '' : 's'}`}
+                              >
+                                {unread > 99 ? '99+' : unread}
+                              </span>
+                            )}
+                            <span className={`${unread > 0 ? '' : 'ml-auto'} shrink-0 text-[9px] text-emerald-500/70`}>
                               Browser
                             </span>
                           </button>

@@ -31,7 +31,8 @@ const FALLBACK: Settings = {
     killFocused: 'Mod+D',
     openInIde: 'Mod+Shift+O'
   },
-  templates: []
+  templates: [],
+  notifications: { enabled: true, soundEnabled: true, nativeWhenUnfocused: true }
 }
 
 // ── Deep partial merge ───────────────────────────────────

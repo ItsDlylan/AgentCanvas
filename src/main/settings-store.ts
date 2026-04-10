@@ -84,6 +84,12 @@ export type HotkeyAction =
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
+export interface NotificationSettings {
+  enabled: boolean
+  soundEnabled: boolean
+  nativeWhenUnfocused: boolean
+}
+
 export interface Settings {
   general: GeneralSettings
   appearance: AppearanceSettings
@@ -92,6 +98,7 @@ export interface Settings {
   canvas: CanvasSettings
   hotkeys: HotkeySettings
   templates: WorkspaceTemplate[]
+  notifications: NotificationSettings
 }
 
 // ── Defaults ─────────────────────────────────────────────
@@ -173,7 +180,12 @@ export const DEFAULT_SETTINGS: Settings = {
         { type: 'terminal', relativePosition: { x: 1360, y: 0 }, width: 640, height: 400 }
       ]
     }
-  ]
+  ],
+  notifications: {
+    enabled: true,
+    soundEnabled: true,
+    nativeWhenUnfocused: true
+  }
 }
 
 // ── Deep merge ───────────────────────────────────────────

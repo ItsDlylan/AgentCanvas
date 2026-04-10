@@ -4,7 +4,7 @@ import { formatHotkey, captureHotkey, DEFAULT_HOTKEYS } from '@/hooks/useHotkeys
 import { DEVICE_PRESETS } from '@/constants/devicePresets'
 import { v4 as uuid } from 'uuid'
 
-type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates'
+type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates' | 'notifications'
 
 interface SettingsPageProps {
   onClose: () => void
@@ -17,7 +17,8 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'browser', label: 'Browser' },
   { id: 'canvas', label: 'Canvas' },
   { id: 'hotkeys', label: 'Hotkeys' },
-  { id: 'templates', label: 'Templates' }
+  { id: 'templates', label: 'Templates' },
+  { id: 'notifications', label: 'Notifications' }
 ]
 
 // ── Shared input components ──────────────────────────────
@@ -900,6 +901,35 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
   )
 }
 
+function NotificationsSection({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }) {
+  const n = settings.notifications ?? { enabled: true, soundEnabled: true, nativeWhenUnfocused: true }
+  return (
+    <div>
+      <h2 className="mb-4 text-sm font-semibold text-zinc-200">Notifications</h2>
+      <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
+        <SettingRow label="Enable Notifications" description="Show toast notifications from agents">
+          <Toggle
+            value={n.enabled}
+            onChange={(v) => update({ notifications: { ...n, enabled: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Notification Sounds" description="Play a chime when a notification arrives">
+          <Toggle
+            value={n.soundEnabled}
+            onChange={(v) => update({ notifications: { ...n, soundEnabled: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Native OS Notifications" description="Show system notifications when the window is unfocused">
+          <Toggle
+            value={n.nativeWhenUnfocused}
+            onChange={(v) => update({ notifications: { ...n, nativeWhenUnfocused: v } })}
+          />
+        </SettingRow>
+      </div>
+    </div>
+  )
+}
+
 // ── Main settings page ───────────────────────────────────
 
 function SettingsPageComponent({ onClose }: SettingsPageProps) {
@@ -961,6 +991,7 @@ function SettingsPageComponent({ onClose }: SettingsPageProps) {
           {activeCategory === 'canvas' && <CanvasSection settings={settings} update={update} />}
           {activeCategory === 'hotkeys' && <HotkeysSection settings={settings} update={update} />}
           {activeCategory === 'templates' && <TemplatesSection settings={settings} update={update} />}
+          {activeCategory === 'notifications' && <NotificationsSection settings={settings} update={update} />}
         </div>
       </div>
     </div>

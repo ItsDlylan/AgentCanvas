@@ -7,7 +7,9 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "setup:claude-hook": "bash scripts/setup-claude-hook.sh",
+    "test:notifications": "bash scripts/test-notifications.sh"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

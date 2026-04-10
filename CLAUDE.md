@@ -28,3 +28,15 @@ agent-browser --cdp $AGENT_BROWSER_CDP_PORT click @e1
 ```
 
 **Do NOT use `Fetch()` or `WebSearch()` when the user asks you to browse a website** — use the canvas browser tile so they can see what you're doing.
+
+### Notifications
+
+Send a toast notification to the AgentCanvas UI:
+
+```bash
+curl -s -X POST $AGENT_CANVAS_API/api/notify \
+  -H 'Content-Type: application/json' \
+  -d "{\"title\":\"Task Complete\",\"body\":\"Finished refactoring\",\"level\":\"success\",\"terminalId\":\"$AGENT_CANVAS_TERMINAL_ID\"}"
+```
+
+Levels: `info` (default), `success`, `warning`, `error`. Error notifications are sticky (no auto-dismiss).

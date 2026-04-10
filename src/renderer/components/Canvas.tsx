@@ -27,6 +27,9 @@ import { NotesTile } from './NotesTile'
 import { DiffViewerTile } from './DiffViewerTile'
 import { DevToolsTile } from './DevToolsTile'
 import { DrawTile } from './draw/DrawTile'
+import { NotificationToast } from './NotificationToast'
+import { NotificationCenter } from './NotificationCenter'
+import { markTerminalRead } from '@/hooks/useNotifications'
 import { parseMermaid } from '@/lib/mermaid-parser'
 import { layoutMermaidGraph } from '@/lib/mermaid-layout'
 import { ProcessPanel } from './ProcessPanel'
@@ -1413,6 +1416,7 @@ export default function Canvas() {
   const focusTerminal = useCallback(
     (sessionId: string) => {
       setFocusedId(sessionId)
+      markTerminalRead(sessionId)
       const node = allNodesRef.current.find(
         (n) => (n.data as Record<string, unknown>).sessionId === sessionId
       )
@@ -1673,6 +1677,7 @@ export default function Canvas() {
   // Switch to a workspace and focus a specific tile
   const handleFocusProcess = useCallback(
     (workspaceId: string, sessionId: string) => {
+      markTerminalRead(sessionId)
       if (workspaceId !== activeWorkspaceId) {
         // Save current viewport, switch workspace
         viewportCache.current.set(activeWorkspaceId, getViewport())
@@ -1799,6 +1804,12 @@ export default function Canvas() {
     },
     []
   )
+
+  const handleSetWorkspacePath = useCallback(async (id: string) => {
+    const dirPath = await window.workspace.pickDirectory()
+    if (!dirPath) return
+    setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, path: dirPath } : w)))
+  }, [])
 
   // ── Mod-hold kill highlight ──
   // Hold Cmd/Ctrl for 300ms to pulse the focused tile red, hinting that
@@ -2162,6 +2173,7 @@ export default function Canvas() {
           </div>
           <div className="titlebar-no-drag flex items-center gap-2">
             <PomodoroWidget pomodoro={pomodoro} expanded={pomodoroExpanded} onToggle={togglePomodoro} />
+            <NotificationCenter onFocusTerminal={focusTerminal} />
             <button
               onClick={() => setSettingsOpen(true)}
               className="rounded p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
@@ -2235,6 +2247,7 @@ export default function Canvas() {
             onAdd={handleAddWorkspace}
             onRemove={handleRemoveWorkspace}
             onRename={handleRenameWorkspace}
+            onSetPath={handleSetWorkspacePath}
             open={workspacePanelOpen}
             onToggle={toggleWorkspacePanel}
             jumpHints={wsJumpAssignments}
@@ -2269,6 +2282,8 @@ export default function Canvas() {
             activeWorkspaceId={activeWorkspaceId}
             jumpHints={jumpAssignments}
           />
+          <NotificationToast onFocusTerminal={focusTerminal} />
+
           {/* Right-click context menu */}
           {contextMenu && (
             <div

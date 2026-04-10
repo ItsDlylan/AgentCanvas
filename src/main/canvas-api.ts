@@ -10,6 +10,7 @@ import { EventEmitter } from 'events'
  *   POST /api/browser/open   { url, terminalId? }  → spawn a browser tile
  *   POST /api/browser/close  { sessionId }          → close a browser tile
  *   POST /api/tile/rename    { sessionId, label }   → rename any tile
+ *   POST /api/notify         { body, title?, level?, terminalId?, duration?, sound? } → toast notification
  *   GET  /api/status                                 → list all tiles
  *
  * Injected into every terminal as AGENT_CANVAS_API=http://127.0.0.1:<port>
@@ -218,6 +219,40 @@ export class CanvasApi extends EventEmitter {
           return
         }
         this.emit('draw-close', { sessionId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/notify') {
+      this.readBody(req).then((body) => {
+        const { title, body: message, level: rawLevel, terminalId, duration: rawDuration, sound: rawSound } = body as {
+          title?: string; body?: string; level?: string; terminalId?: string; duration?: number; sound?: boolean
+        }
+        if (!message) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'body is required' }))
+          return
+        }
+        const level = (['info', 'success', 'warning', 'error'].includes(rawLevel || '') ? rawLevel : 'info') as string
+        const defaultDuration = level === 'error' ? 0 : level === 'warning' ? 7000 : level === 'success' ? 4000 : 5000
+        const defaultSound = level === 'success' || level === 'error'
+        const id = `notify-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+        this.emit('notify', {
+          id,
+          title,
+          body: message,
+          level,
+          terminalId,
+          duration: rawDuration ?? defaultDuration,
+          sound: rawSound ?? defaultSound,
+          timestamp: Date.now()
+        }, (result: unknown) => {
           res.writeHead(200)
           res.end(JSON.stringify(result))
         })

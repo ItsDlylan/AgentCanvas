@@ -470,6 +470,38 @@ const drawAPI: DrawAPI = {
 
 contextBridge.exposeInMainWorld('draw', drawAPI)
 
+// ── Notify API ──────────────────────────────────────────
+
+export interface CanvasNotification {
+  id: string
+  title?: string
+  body: string
+  level: 'info' | 'success' | 'warning' | 'error'
+  terminalId?: string
+  duration: number
+  sound: boolean
+  timestamp: number
+}
+
+export interface NotifyAPI {
+  onNotify: (callback: (notification: CanvasNotification) => void) => () => void
+}
+
+const notifyAPI: NotifyAPI = {
+  onNotify: (callback) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      notification: CanvasNotification
+    ) => {
+      callback(notification)
+    }
+    ipcRenderer.on('canvas:notify', handler)
+    return () => ipcRenderer.removeListener('canvas:notify', handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('notify', notifyAPI)
+
 // ── Diff API ────────────────────────────────────────────
 
 export interface DiffAPI {

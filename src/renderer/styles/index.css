@@ -670,3 +670,14 @@
 .react-flow__minimap {
   background-color: #18181b !important;
 }
+
+/* Toast notification animations */
+@keyframes toast-enter {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes toast-exit {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(100%); opacity: 0; }
+}
