@@ -67,11 +67,18 @@ export interface NotesNodeData {
   linkedNoteId?: string
   onClose?: (sessionId: string) => void
   onDelete?: (sessionId: string) => void
+  onSpawnLinkedNote?: (
+    sourceNoteId: string,
+    taskId: string,
+    taskText: string,
+    onCreated: (newNoteId: string) => void
+  ) => void
+  onNavigateToNote?: (noteId: string) => void
 }
 
 function NotesTileComponent({ data, width, height }: NodeProps) {
   registerRender('NotesTile')
-  const { sessionId, label, onClose, onDelete } = data as unknown as NotesNodeData
+  const { sessionId, label, onClose, onDelete, onSpawnLinkedNote, onNavigateToNote } = data as unknown as NotesNodeData
   const { focusedId, setFocusedId, killHighlight, renameTile } = useFocusedTerminal()
   const { addTask: addPomodoroTask, tasks: pomodoroTasks } = usePomodoroContext()
   const isPanning = useIsPanning()
@@ -148,6 +155,46 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
     el.addEventListener('wheel', handler)
     return () => el.removeEventListener('wheel', handler)
   }, [isFocused])
+
+  // Listen for task:spawn-note and task:navigate-note CustomEvents from LinkedTaskItem NodeView
+  useEffect(() => {
+    const el = bodyElRef.current
+    if (!el || !editor) return
+
+    const handleSpawn = (e: Event) => {
+      const { taskId, taskText } = (e as CustomEvent).detail
+      if (!taskId || !onSpawnLinkedNote) return
+
+      // taskId was already assigned by the NodeView via getPos() — just spawn the note
+      onSpawnLinkedNote(sessionId, taskId, taskText, (newNoteId: string) => {
+        // Set linkedNoteId on the task item via editor transaction
+        const { state } = editor
+        const { tr } = state
+        let set = false
+        state.doc.descendants((node, pos) => {
+          if (set) return false
+          if (node.type.name === 'taskItem' && node.attrs.taskId === taskId) {
+            tr.setNodeMarkup(pos, undefined, { ...node.attrs, linkedNoteId: newNoteId })
+            set = true
+            return false
+          }
+        })
+        if (set) editor.view.dispatch(tr)
+      })
+    }
+
+    const handleNavigate = (e: Event) => {
+      const { linkedNoteId } = (e as CustomEvent).detail
+      if (linkedNoteId && onNavigateToNote) onNavigateToNote(linkedNoteId)
+    }
+
+    el.addEventListener('task:spawn-note', handleSpawn)
+    el.addEventListener('task:navigate-note', handleNavigate)
+    return () => {
+      el.removeEventListener('task:spawn-note', handleSpawn)
+      el.removeEventListener('task:navigate-note', handleNavigate)
+    }
+  }, [editor, sessionId, onSpawnLinkedNote, onNavigateToNote])
 
   return (
     <div
@@ -295,6 +342,36 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
             >
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              </svg>
+            </ToolbarButton>
+            <span className="mx-1 h-4 w-px bg-zinc-700" />
+            <ToolbarButton
+              active={false}
+              onClick={() => {
+                window.attachment.pickFile().then((paths) => {
+                  if (!paths || !editor) return
+                  for (const filePath of paths) {
+                    const lower = filePath.toLowerCase()
+                    const isImage = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp'].some((ext) => lower.endsWith(ext))
+                    const isVideo = ['.mp4', '.webm', '.mov', '.avi', '.mkv'].some((ext) => lower.endsWith(ext))
+                    if (isImage) {
+                      window.attachment.saveFromPath(sessionId, filePath).then((url) => {
+                        editor.chain().focus().setImage({ src: url }).run()
+                      })
+                    } else if (isVideo) {
+                      window.attachment.saveFromPath(sessionId, filePath).then((url) => {
+                        editor.chain().focus().setVideo({ src: url, type: 'local' }).run()
+                      })
+                    }
+                  }
+                })
+              }}
+              title="Insert image or video"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="m21 15-5-5L5 21" />
               </svg>
             </ToolbarButton>
             {uncheckedTasks.length > 0 && (

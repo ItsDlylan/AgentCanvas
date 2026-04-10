@@ -203,6 +203,7 @@ export interface NoteMeta {
   height: number
   linkedTerminalId?: string
   linkedNoteId?: string
+  parentTaskInfo?: { noteId: string; taskId: string }
   createdAt: number
   updatedAt: number
 }
@@ -229,6 +230,26 @@ const noteAPI: NoteAPI = {
 }
 
 contextBridge.exposeInMainWorld('note', noteAPI)
+
+// ── Attachment API ───────────────────────────────────────
+
+export interface AttachmentAPI {
+  save: (noteId: string, filename: string, data: ArrayBuffer) => Promise<string>
+  saveFromPath: (noteId: string, sourcePath: string) => Promise<string>
+  deleteAll: (noteId: string) => Promise<void>
+  list: (noteId: string) => Promise<string[]>
+  pickFile: () => Promise<string[] | null>
+}
+
+const attachmentAPI: AttachmentAPI = {
+  save: (noteId, filename, data) => ipcRenderer.invoke('attachment:save', { noteId, filename, data }),
+  saveFromPath: (noteId, sourcePath) => ipcRenderer.invoke('attachment:save-from-path', { noteId, sourcePath }),
+  deleteAll: (noteId) => ipcRenderer.invoke('attachment:delete-all', { noteId }),
+  list: (noteId) => ipcRenderer.invoke('attachment:list', { noteId }),
+  pickFile: () => ipcRenderer.invoke('attachment:pick-file')
+}
+
+contextBridge.exposeInMainWorld('attachment', attachmentAPI)
 
 // ── Settings API ─────────────────────────────────────────
 

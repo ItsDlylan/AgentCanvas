@@ -101,6 +101,25 @@ function renderNode(node: TipTapNode, indent = ''): string {
     case 'taskItem':
       return (node.content ?? []).map((n) => renderInline(n.content)).join('\n')
 
+    case 'image': {
+      const src = (node.attrs?.src as string) ?? ''
+      const alt = (node.attrs?.alt as string) ?? ''
+      // Convert agentcanvas:// URLs to filesystem paths for export
+      const displaySrc = src.startsWith('agentcanvas://attachment/')
+        ? require('path').join(require('os').homedir(), 'AgentCanvas', 'attachments', src.replace('agentcanvas://attachment/', ''))
+        : src
+      return `![${alt}](${displaySrc})`
+    }
+
+    case 'video': {
+      const src = (node.attrs?.src as string) ?? ''
+      const displaySrc = src.startsWith('agentcanvas://attachment/')
+        ? require('path').join(require('os').homedir(), 'AgentCanvas', 'attachments', src.replace('agentcanvas://attachment/', ''))
+        : src
+      const filename = displaySrc.split('/').pop() || 'video'
+      return `[Video: ${filename}](${displaySrc})`
+    }
+
     case 'horizontalRule':
       return '---'
 

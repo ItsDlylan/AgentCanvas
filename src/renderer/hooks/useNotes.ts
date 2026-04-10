@@ -2,11 +2,18 @@ import { useEffect, useRef } from 'react'
 import { useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
+import { LinkedTaskItem } from '@/extensions/LinkedTaskItem'
 import Placeholder from '@tiptap/extension-placeholder'
+import { ResizableImage } from '@/extensions/ResizableImage'
+import { VideoNode } from '@/extensions/VideoNode'
 import { Fragment, Slice } from '@tiptap/pm/model'
 import type { Editor } from '@tiptap/react'
 import type { JSONContent } from '@tiptap/core'
+
+const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp']
+const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska']
+const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp']
+const VIDEO_EXTS = ['.mp4', '.webm', '.mov', '.avi', '.mkv']
 
 const SAVE_DEBOUNCE_MS = 500
 
@@ -63,7 +70,9 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
     extensions: [
       StarterKit,
       TaskList,
-      TaskItem.configure({ nested: true }),
+      LinkedTaskItem.configure({ nested: true }),
+      ResizableImage.configure({ allowBase64: true }),
+      VideoNode,
       Placeholder.configure({ placeholder: 'Type or paste...  # ## - [ ] for formatting' })
     ],
     content: '',
@@ -71,7 +80,65 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
       attributes: {
         class: 'outline-none min-h-full'
       },
+      handleDrop(view, event) {
+        if (!event.dataTransfer?.files?.length) return false
+        const files = Array.from(event.dataTransfer.files)
+        const mediaFiles = files.filter(
+          (f) => IMAGE_TYPES.includes(f.type) || VIDEO_TYPES.includes(f.type)
+        )
+        if (mediaFiles.length === 0) return false
+
+        event.preventDefault()
+        // Electron drag-and-drop provides file paths via path property
+        for (const file of mediaFiles) {
+          const filePath = (file as File & { path?: string }).path
+          if (!filePath) continue
+          const isImage = IMAGE_TYPES.includes(file.type) || IMAGE_EXTS.some((ext) => filePath.toLowerCase().endsWith(ext))
+          window.attachment.saveFromPath(noteIdRef.current, filePath).then((url) => {
+            if (isImage) {
+              view.dispatch(
+                view.state.tr.replaceSelectionWith(
+                  view.state.schema.nodes.image.create({ src: url })
+                )
+              )
+            } else {
+              view.dispatch(
+                view.state.tr.replaceSelectionWith(
+                  view.state.schema.nodes.video.create({ src: url, type: 'local' })
+                )
+              )
+            }
+          })
+        }
+        return true
+      },
       handlePaste(view, event) {
+        // Check for image files in clipboard (screenshot paste)
+        const clipFiles = event.clipboardData?.files
+        if (clipFiles && clipFiles.length > 0) {
+          const imageFiles = Array.from(clipFiles).filter((f) => IMAGE_TYPES.includes(f.type))
+          if (imageFiles.length > 0) {
+            event.preventDefault()
+            for (const file of imageFiles) {
+              const reader = new FileReader()
+              reader.onload = () => {
+                const buffer = reader.result as ArrayBuffer
+                const ext = file.type.split('/')[1] || 'png'
+                const filename = `paste-${Date.now()}.${ext}`
+                window.attachment.save(noteIdRef.current, filename, buffer).then((url) => {
+                  view.dispatch(
+                    view.state.tr.replaceSelectionWith(
+                      view.state.schema.nodes.image.create({ src: url })
+                    )
+                  )
+                })
+              }
+              reader.readAsArrayBuffer(file)
+            }
+            return true
+          }
+        }
+
         const html = event.clipboardData?.getData('text/html')
         const text = event.clipboardData?.getData('text/plain')
 
@@ -125,6 +192,27 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
     }
     window.addEventListener('pomodoro:note-updated', handler)
     return () => window.removeEventListener('pomodoro:note-updated', handler)
+  }, [editor])
+
+  // When a linked note is removed, clear stale linkedNoteId attributes
+  useEffect(() => {
+    if (!editor) return
+    const handler = (e: Event) => {
+      const { noteId: removedId } = (e as CustomEvent).detail
+      if (!removedId || editor.isDestroyed) return
+      // Walk the doc and clear any taskItem linkedNoteId pointing to the removed note
+      const { doc, tr } = editor.state
+      let modified = false
+      doc.descendants((node, pos) => {
+        if (node.type.name === 'taskItem' && node.attrs.linkedNoteId === removedId) {
+          tr.setNodeMarkup(pos, undefined, { ...node.attrs, linkedNoteId: null })
+          modified = true
+        }
+      })
+      if (modified) editor.view.dispatch(tr)
+    }
+    window.addEventListener('note:removed', handler)
+    return () => window.removeEventListener('note:removed', handler)
   }, [editor])
 
   // Auto-save content on changes (metadata is saved separately by Canvas)

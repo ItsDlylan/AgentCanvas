@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, dialog, Menu, globalShortcut } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog, Menu, globalShortcut, protocol, net } from 'electron'
 import { join } from 'path'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
@@ -12,6 +12,7 @@ import { CanvasApi } from './canvas-api'
 import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
+import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachments } from './attachment-store'
 import { ensureDrawDir, loadDraw, saveDraw, deleteDraw, listDraws } from './draw-store'
 import { jsonToMarkdown } from './note-converter'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
@@ -448,6 +449,7 @@ ipcMain.handle('note:save', (_event, { noteId, meta, content }) => {
 
 ipcMain.handle('note:delete', (_event, { noteId }) => {
   deleteNote(noteId)
+  deleteAttachments(noteId)
 })
 
 ipcMain.handle('note:list', () => {
@@ -482,6 +484,39 @@ ipcMain.handle(
     return true
   }
 )
+
+// ── Attachment IPC Handlers ──────────────────────────────
+
+ipcMain.handle('attachment:save', (_event, { noteId, filename, data }: { noteId: string; filename: string; data: ArrayBuffer }) => {
+  return saveAttachment(noteId, filename, Buffer.from(data))
+})
+
+ipcMain.handle('attachment:save-from-path', (_event, { noteId, sourcePath }: { noteId: string; sourcePath: string }) => {
+  return saveAttachmentFromPath(noteId, sourcePath)
+})
+
+ipcMain.handle('attachment:delete-all', (_event, { noteId }: { noteId: string }) => {
+  deleteAttachments(noteId)
+})
+
+ipcMain.handle('attachment:list', (_event, { noteId }: { noteId: string }) => {
+  return listAttachments(noteId)
+})
+
+ipcMain.handle('attachment:pick-file', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Insert Media',
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'] },
+      { name: 'Videos', extensions: ['mp4', 'webm', 'mov', 'avi', 'mkv'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  })
+  if (result.canceled) return null
+  return result.filePaths
+})
 
 // ── Draw IPC Handlers ───────────────────────────────────
 
@@ -721,10 +756,34 @@ canvasApi.on('status-request', (reply: (data: unknown) => void) => {
   reply({ terminals, browsers })
 })
 
+// ── Custom Protocol ──────────────────────────────────────
+
+// Must be registered before app.whenReady()
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'agentcanvas', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+])
+
 // ── App Lifecycle ─────────────────────────────────────────
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.agentcanvas.app')
+
+  // Serve local attachment files via agentcanvas:// protocol
+  protocol.handle('agentcanvas', (request) => {
+    const url = new URL(request.url)
+    // URL format: agentcanvas://attachment/{noteId}/{filename}
+    const parts = url.pathname.replace(/^\/+/, '').split('/')
+    if (parts.length < 2) return new Response('Not found', { status: 404 })
+    const noteId = parts[0]
+    const filename = parts.slice(1).join('/')
+    const { join } = require('path')
+    const { homedir } = require('os')
+    const attachmentsBase = join(homedir(), 'AgentCanvas', 'attachments')
+    const filePath = join(attachmentsBase, noteId, filename)
+    // Path traversal prevention
+    if (!filePath.startsWith(attachmentsBase)) return new Response('Forbidden', { status: 403 })
+    return net.fetch(`file://${filePath}`)
+  })
 
   // Accept self-signed certificates for local dev domains (.test, .local, localhost)
   app.on('certificate-error', (event, _webContents, url, _error, _cert, callback) => {

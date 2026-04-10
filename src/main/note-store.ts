@@ -14,6 +14,7 @@ export interface NoteMeta {
   height: number
   linkedTerminalId?: string
   linkedNoteId?: string
+  parentTaskInfo?: { noteId: string; taskId: string }
   createdAt: number
   updatedAt: number
 }
@@ -79,6 +80,7 @@ export function saveNote(noteId: string, meta: Partial<NoteMeta>, content?: Reco
       height: meta.height ?? existing?.meta?.height ?? 400,
       linkedTerminalId: meta.linkedTerminalId ?? existing?.meta?.linkedTerminalId,
       linkedNoteId: meta.linkedNoteId ?? existing?.meta?.linkedNoteId,
+      parentTaskInfo: meta.parentTaskInfo ?? existing?.meta?.parentTaskInfo,
       createdAt: existing?.meta?.createdAt ?? now,
       updatedAt: now
     },

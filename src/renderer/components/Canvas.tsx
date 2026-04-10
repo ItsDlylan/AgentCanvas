@@ -306,22 +306,141 @@ export default function Canvas() {
     [removeTileFromCanvas]
   )
 
+  /** Collect all descendant note IDs linked to a parent (recursively). */
+  const getChildNoteIds = useCallback((parentId: string): string[] => {
+    const children: string[] = []
+    for (const n of allNodesRef.current) {
+      if (n.type !== 'notes') continue
+      const data = n.data as Record<string, unknown>
+      if (data.linkedNoteId === parentId) {
+        const childId = data.sessionId as string
+        children.push(childId, ...getChildNoteIds(childId))
+      }
+    }
+    return children
+  }, [])
+
   const closeNote = useCallback(
     (sessionId: string) => {
+      // Cascade: soft-close all child notes first
+      for (const childId of getChildNoteIds(sessionId)) {
+        window.note.save(childId, { isSoftDeleted: true })
+        removeTileFromCanvas(childId)
+        window.dispatchEvent(new CustomEvent('note:removed', { detail: { noteId: childId } }))
+      }
       // Soft close: mark as soft-deleted in file, remove from canvas
       window.note.save(sessionId, { isSoftDeleted: true })
       removeTileFromCanvas(sessionId)
+      window.dispatchEvent(new CustomEvent('note:removed', { detail: { noteId: sessionId } }))
     },
-    [removeTileFromCanvas]
+    [removeTileFromCanvas, getChildNoteIds]
   )
 
   const deleteNote = useCallback(
     (sessionId: string) => {
+      // Cascade: hard-delete all child notes first
+      for (const childId of getChildNoteIds(sessionId)) {
+        window.note.delete(childId)
+        removeTileFromCanvas(childId)
+        window.dispatchEvent(new CustomEvent('note:removed', { detail: { noteId: childId } }))
+      }
       // Hard delete: remove from canvas AND delete file
       window.note.delete(sessionId)
       removeTileFromCanvas(sessionId)
+      window.dispatchEvent(new CustomEvent('note:removed', { detail: { noteId: sessionId } }))
     },
-    [removeTileFromCanvas]
+    [removeTileFromCanvas, getChildNoteIds]
+  )
+
+  // ── Linked note spawning from checklist items ──
+
+  const spawnLinkedNote = useCallback(
+    (sourceNoteId: string, taskId: string, taskText: string, onCreated: (newNoteId: string) => void) => {
+      tileCount++
+      const newNoteId = uuid()
+
+      // Find source node to position relative to it
+      const sourceNode = allNodesRef.current.find(
+        (n) => (n.data as Record<string, unknown>).sessionId === sourceNoteId
+      )
+      const sourceWidth = (sourceNode?.measured?.width ?? (sourceNode?.style?.width as number) ?? 400)
+      const sourcePos = sourceNode?.position ?? { x: 100, y: 100 }
+
+      const targetPos = {
+        x: sourcePos.x + sourceWidth + settings.canvas.tileGap,
+        y: sourcePos.y
+      }
+      const pos = snapToGrid(targetPos, allNodesRef.current, 400, 400, settings.canvas.tileGap)
+
+      const label = taskText.length > 30 ? taskText.slice(0, 30) + '...' : taskText
+      const wsId = activeWorkspaceIdRef.current
+
+      const newNode: Node = {
+        id: newNoteId,
+        type: 'notes',
+        position: pos,
+        style: { width: 400, height: 400 },
+        data: {
+          sessionId: newNoteId,
+          label,
+          linkedNoteId: sourceNoteId,
+          onClose: closeNote,
+          onDelete: deleteNote
+        },
+        dragHandle: '.notes-tile-header'
+      }
+      setAllNodes((nds) => [...nds, newNode])
+      setTileWorkspaceMap((prev) => new Map(prev).set(newNoteId, wsId))
+
+      // Create amber edge from source checklist → new note
+      const edgeId = `edge-task-${sourceNoteId}-${newNoteId}`
+      setAllEdges((eds) => [
+        ...eds,
+        {
+          id: edgeId,
+          source: sourceNoteId,
+          target: newNoteId,
+          animated: true,
+          style: { stroke: '#f59e0b', strokeWidth: 2 }
+        }
+      ])
+
+      // Persist note metadata
+      window.note.save(newNoteId, {
+        noteId: newNoteId,
+        label,
+        workspaceId: wsId,
+        isSoftDeleted: false,
+        position: pos,
+        width: 400,
+        height: 400,
+        linkedNoteId: sourceNoteId,
+        parentTaskInfo: { noteId: sourceNoteId, taskId },
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      })
+
+      // Let the caller set the linkedNoteId attribute on the task item
+      onCreated(newNoteId)
+
+      setFocusedId(newNoteId)
+      setCenter(pos.x + 200, pos.y + 200, { zoom: 1, duration: 400 })
+    },
+    [settings.canvas.tileGap, setCenter, closeNote, deleteNote]
+  )
+
+  const focusNoteOnCanvas = useCallback(
+    (noteId: string) => {
+      const node = allNodesRef.current.find(
+        (n) => (n.data as Record<string, unknown>).sessionId === noteId
+      )
+      if (!node) return
+      const cx = ((node.measured?.width ?? (node.style?.width as number) ?? 400) / 2)
+      const cy = ((node.measured?.height ?? (node.style?.height as number) ?? 400) / 2)
+      setFocusedId(noteId)
+      setCenter(node.position.x + cx, node.position.y + cy, { zoom: 1, duration: 400 })
+    },
+    [setCenter]
   )
 
   // ── Compute visible nodes/edges for active workspace ──
@@ -363,11 +482,17 @@ export default function Canvas() {
               data: { ...n.data, devToolsIsFocused: true }
             }
           }
-          // Inject close/delete callbacks into notes data
+          // Inject close/delete/spawn callbacks into notes data
           if (n.type === 'notes') {
             return {
               ...n,
-              data: { ...n.data, onClose: closeNote, onDelete: deleteNote }
+              data: {
+                ...n.data,
+                onClose: closeNote,
+                onDelete: deleteNote,
+                onSpawnLinkedNote: spawnLinkedNote,
+                onNavigateToNote: focusNoteOnCanvas
+              }
             }
           }
           // Inject close/delete callbacks into draw data
@@ -393,7 +518,7 @@ export default function Canvas() {
           }
           return n
         }),
-    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote, closeDraw, deleteDraw, removeTileFromCanvas, focusedDevToolsLinkedBrowser]
+    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote, closeDraw, deleteDraw, removeTileFromCanvas, focusedDevToolsLinkedBrowser, spawnLinkedNote, focusNoteOnCanvas]
   )
 
   const visibleNodeIds = useMemo(
