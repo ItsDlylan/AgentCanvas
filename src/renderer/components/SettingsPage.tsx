@@ -941,6 +941,17 @@ function SettingsPageComponent({ onClose }: SettingsPageProps) {
     [updateSettings]
   )
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose])
+
   return (
     <div className="absolute inset-0 z-30 flex bg-zinc-950/95 backdrop-blur-sm">
       {/* Sidebar */}
