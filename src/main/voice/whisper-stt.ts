@@ -129,19 +129,19 @@ export async function transcribe(
 ): Promise<{ text: string; durationMs: number }> {
   const startTime = Date.now()
 
+  console.log(`[whisper] Received ${audioSamples.length} samples, first 5: [${audioSamples.slice(0, 5).map(v => v.toFixed(4)).join(', ')}]`)
+
   const modelPath = getModelPath(model)
   if (!existsSync(modelPath)) {
     throw new Error(`Model '${model}' not downloaded. Call voice:load-model first.`)
   }
 
-  // Write audio to temp WAV file
+  // Write audio to temp WAV file — keep it for debugging
   const tmpDir = app.getPath('temp')
-  const tmpFile = join(tmpDir, `whisper-${randomUUID()}.wav`)
+  const tmpFile = join(tmpDir, `whisper-debug.wav`)
   const float32 = new Float32Array(audioSamples)
   const wavBuffer = float32ToWav(float32)
   writeFileSync(tmpFile, wavBuffer)
-
-  console.log(`[whisper] Transcribing ${float32.length} samples, WAV size: ${wavBuffer.length} bytes, model: ${modelPath}`)
 
   // Verify audio isn't silent
   let maxSample = 0
@@ -149,7 +149,7 @@ export async function transcribe(
     const abs = Math.abs(float32[i])
     if (abs > maxSample) maxSample = abs
   }
-  console.log(`[whisper] Audio peak amplitude: ${maxSample.toFixed(4)}`)
+  console.log(`[whisper] WAV: ${wavBuffer.length} bytes, peak: ${maxSample.toFixed(4)}, file: ${tmpFile}`)
 
   try {
     // Use whisper-node
