@@ -154,13 +154,15 @@ export async function transcribe(
     }
   }
 
-  // Write audio to temp WAV file
-  const tmpDir = app.getPath('temp')
-  const tmpFile = join(tmpDir, `whisper-debug.wav`)
+  // Write audio to a stable temp path (not cleaned between runs)
+  const tmpFile = join(app.getPath('home'), '.agentcanvas', 'whisper-debug.wav')
   const wavBuffer = float32ToWav(float32)
   writeFileSync(tmpFile, wavBuffer)
 
-  console.log(`[whisper] WAV: ${wavBuffer.length} bytes, original peak: ${peak.toFixed(4)}, file: ${tmpFile}`)
+  // Verify file was written correctly
+  const { statSync } = require('fs') as typeof import('fs')
+  const stat = statSync(tmpFile)
+  console.log(`[whisper] WAV: ${wavBuffer.length} bytes written, file size on disk: ${stat.size}, peak: ${peak.toFixed(4)}, file: ${tmpFile}`)
 
   try {
     // Use whisper-node
@@ -181,8 +183,9 @@ export async function transcribe(
       : ''
 
     return { text, durationMs: Date.now() - startTime }
-  } finally {
-    // Clean up temp file
-    try { unlinkSync(tmpFile) } catch { /* ignore */ }
+  } catch (err) {
+    console.error('[whisper] Error:', err)
+    return { text: '', durationMs: Date.now() - startTime }
   }
+  // Note: keeping WAV file at ~/.agentcanvas/whisper-debug.wav for debugging
 }
