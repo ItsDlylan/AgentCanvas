@@ -139,9 +139,20 @@ export async function transcribe(
   const wavBuffer = float32ToWav(float32)
   writeFileSync(tmpFile, wavBuffer)
 
+  console.log(`[whisper] Transcribing ${float32.length} samples, WAV size: ${wavBuffer.length} bytes, model: ${modelPath}`)
+
+  // Verify audio isn't silent
+  let maxSample = 0
+  for (let i = 0; i < float32.length; i++) {
+    const abs = Math.abs(float32[i])
+    if (abs > maxSample) maxSample = abs
+  }
+  console.log(`[whisper] Audio peak amplitude: ${maxSample.toFixed(4)}`)
+
   try {
     // Use whisper-node
     const { whisper } = await import('whisper-node')
+    console.log(`[whisper] Running whisper.cpp on ${tmpFile}`)
     const result: TranscriptSegment[] | undefined = await whisper(tmpFile, {
       modelPath,
       whisperOptions: {
@@ -149,6 +160,8 @@ export async function transcribe(
         word_timestamps: false
       }
     })
+
+    console.log(`[whisper] Raw result:`, JSON.stringify(result))
 
     const text = result
       ? result.map((s) => s.speech).join(' ').trim()
