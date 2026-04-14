@@ -321,6 +321,21 @@ Plus custom environment variables configured in Settings > Terminal.
 - Status updates throttled: per-tile immediate, bulk panel at 300ms
 - Optional runtime performance monitor with FPS, frame times, and render counts
 
+## Changelog
+
+### 2026-04-13 / 04-14
+
+- **feat:** Persistent browser sessions and Chrome extension side-loading
+- **feat:** Drag-to-reorder task items in checklist notes
+- **feat:** Comprehensive element editing for draw tile
+- **feat:** Allow workspaces to set a default browser URL
+- **feat:** macOS DMG packaging and app icon — first downloadable release (v0.1.0)
+- **fix:** Prevent terminal scroll jumping to middle on Enter
+- **fix:** Prevent shortcuts from firing while typing in note tiles
+- **fix:** Hide other-workspace browsers from minimap
+- **fix:** Allow backspace to work in note tiles
+- **fix:** Read fresh node state in linked-note click handler
+
 ## License
 
 MIT
