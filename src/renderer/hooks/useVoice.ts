@@ -19,6 +19,18 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
 
   const vadRef = useRef<VADInstance | null>(null)
   const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const modelReady = useRef(false)
+
+  // Ensure Whisper model is downloaded before first transcription
+  useEffect(() => {
+    if (!settings.enabled) return
+    window.voice.getModelStatus().then((models) => {
+      const target = models.find((m) => m.model === settings.whisperModel)
+      if (target?.downloaded) {
+        modelReady.current = true
+      }
+    })
+  }, [settings.enabled, settings.whisperModel])
 
   // Clear error/transcript after display
   useEffect(() => {
@@ -36,9 +48,23 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   const transcribeAudio = useCallback(async (audio: Float32Array) => {
     setMode('processing')
     try {
+      // Auto-download model on first use
+      if (!modelReady.current) {
+        setTranscript(`Downloading ${settings.whisperModel} model...`)
+        const dl = await window.voice.loadModel(settings.whisperModel)
+        if (!dl.ok) {
+          setError(dl.error ?? 'Model download failed')
+          setMode('idle')
+          return
+        }
+        modelReady.current = true
+      }
+
+      setTranscript('Transcribing...')
       const result = await window.voice.transcribe(audio, settings.sttProvider)
       const text = result.text.trim()
       if (!text) {
+        setTranscript(null)
         setMode('idle')
         return
       }
@@ -48,7 +74,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       setError(err instanceof Error ? err.message : 'Transcription failed')
       setMode('idle')
     }
-  }, [settings.sttProvider])
+  }, [settings.sttProvider, settings.whisperModel])
 
   const startListening = useCallback(async () => {
     if (mode !== 'idle') return
