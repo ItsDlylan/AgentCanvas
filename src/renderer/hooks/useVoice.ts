@@ -114,14 +114,18 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       }
 
       setTranscript('Transcribing...')
+      console.log(`[Voice] Sending ${audio.length} samples (${(audio.length / 16000).toFixed(1)}s) to Whisper`)
       const result = await window.voice.transcribe(audio, settings.sttProvider)
+      console.log('[Voice] Whisper result:', JSON.stringify(result))
       const text = result.text.trim()
       if (!text) {
+        console.log('[Voice] Empty transcript, ignoring')
         setTranscript(null)
         setMode('idle')
         return
       }
 
+      console.log(`[Voice] Transcript: "${text}"`)
       // Route through command system
       processCommand(text)
     } catch (err) {
