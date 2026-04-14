@@ -1262,6 +1262,12 @@ export default function Canvas() {
       const tileH = preset ? preset.height + BROWSER_CHROME_HEIGHT : 600
       const visible = visibleNodes
       const pos = position ?? findOpenPosition(visible, tileW, tileH, 3, settings.canvas.tileGap)
+
+      // Get workspace default URL for browser, falling back to global setting
+      const wsId = activeWorkspaceIdRef.current
+      const ws = workspaces.find((w) => w.id === wsId)
+      const browserUrl = ws?.defaultUrl || settings.browser.defaultUrl
+
       const newNode: Node = {
         id: sessionId,
         type: 'browser',
@@ -1270,7 +1276,7 @@ export default function Canvas() {
         data: {
           sessionId,
           label: `Browser ${tileCount}`,
-          initialUrl: settings.browser.defaultUrl,
+          initialUrl: browserUrl,
           initialPreset: preset && (preset.mobile || preset.dpr > 1) ? preset : undefined
         },
         dragHandle: '.browser-tile-header'
@@ -1280,7 +1286,7 @@ export default function Canvas() {
       setFocusedId(sessionId)
       setCenter(pos.x + tileW / 2, pos.y + tileH / 2, { zoom: 1, duration: 400 })
     },
-    [visibleNodes, setCenter]
+    [visibleNodes, workspaces, setCenter]
   )
 
   const addBrowser = useCallback((preset?: DevicePreset) => addBrowserAt(undefined, preset), [addBrowserAt])
@@ -1739,6 +1745,7 @@ export default function Canvas() {
       id: uuid(),
       name,
       path: dirPath,
+      defaultUrl: null,
       isDefault: false,
       createdAt: Date.now()
     }
@@ -1809,6 +1816,10 @@ export default function Canvas() {
     const dirPath = await window.workspace.pickDirectory()
     if (!dirPath) return
     setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, path: dirPath } : w)))
+  }, [])
+
+  const handleSetDefaultUrl = useCallback((id: string, url: string | null) => {
+    setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, defaultUrl: url } : w)))
   }, [])
 
   // ── Mod-hold kill highlight ──
@@ -2248,6 +2259,7 @@ export default function Canvas() {
             onRemove={handleRemoveWorkspace}
             onRename={handleRenameWorkspace}
             onSetPath={handleSetWorkspacePath}
+            onSetDefaultUrl={handleSetDefaultUrl}
             open={workspacePanelOpen}
             onToggle={toggleWorkspacePanel}
             jumpHints={wsJumpAssignments}

@@ -6,6 +6,7 @@ interface Workspace {
   id: string
   name: string
   path: string | null
+  defaultUrl: string | null
   isDefault: boolean
   createdAt: number
 }
@@ -17,7 +18,7 @@ interface WorkspaceData {
 
 const DEFAULT_DATA: WorkspaceData = {
   workspaces: [
-    { id: 'default', name: 'AgentCanvas', path: null, isDefault: true, createdAt: 0 }
+    { id: 'default', name: 'AgentCanvas', path: null, defaultUrl: null, isDefault: true, createdAt: 0 }
   ],
   activeWorkspaceId: 'default'
 }

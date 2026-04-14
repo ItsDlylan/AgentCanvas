@@ -18,6 +18,7 @@ interface WorkspacePanelProps {
   onRemove: (id: string) => void
   onRename: (id: string, name: string) => void
   onSetPath: (id: string) => void
+  onSetDefaultUrl: (id: string, url: string | null) => void
   open: boolean
   onToggle: () => void
   jumpHints: Map<string, string>
@@ -27,6 +28,10 @@ const STATUS_CONFIG: Record<TerminalStatus, { dot: string; label: string; labelC
   idle: { dot: 'bg-zinc-500', label: 'Idle', labelColor: 'text-zinc-600' },
   running: { dot: 'bg-green-500', label: 'Running', labelColor: 'text-green-500/70' },
   waiting: { dot: 'bg-amber-400 animate-pulse', label: 'Waiting', labelColor: 'text-amber-400/70' }
+}
+
+function shortenUrl(url: string): string {
+  return url.replace(/^https?:\/\//, '').replace(/\/$/, '')
 }
 
 function shortenPath(path: string): string {
@@ -48,6 +53,7 @@ function WorkspacePanelComponent({
   onRemove,
   onRename,
   onSetPath,
+  onSetDefaultUrl,
   open,
   onToggle,
   jumpHints
@@ -57,6 +63,9 @@ function WorkspacePanelComponent({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const editInputRef = useRef<HTMLInputElement>(null)
+  const [editingUrlId, setEditingUrlId] = useState<string | null>(null)
+  const [urlEditValue, setUrlEditValue] = useState('')
+  const urlInputRef = useRef<HTMLInputElement>(null)
 
   const terminalStatuses = useAllTerminalStatuses()
   const browserStatuses = useAllBrowserStatuses()
@@ -120,6 +129,13 @@ function WorkspacePanelComponent({
       editInputRef.current.select()
     }
   }, [editingId])
+
+  useEffect(() => {
+    if (editingUrlId && urlInputRef.current) {
+      urlInputRef.current.focus()
+      urlInputRef.current.select()
+    }
+  }, [editingUrlId])
 
   return (
     <>
@@ -264,6 +280,61 @@ function WorkspacePanelComponent({
                               <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
                             </svg>
                             Set folder…
+                          </span>
+                        )}
+                        {/* Default browser URL */}
+                        {editingUrlId === ws.id ? (
+                          <input
+                            ref={urlInputRef}
+                            type="text"
+                            value={urlEditValue}
+                            onChange={(e) => setUrlEditValue(e.target.value)}
+                            onBlur={() => {
+                              onSetDefaultUrl(ws.id, urlEditValue.trim() || null)
+                              setEditingUrlId(null)
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                onSetDefaultUrl(ws.id, urlEditValue.trim() || null)
+                                setEditingUrlId(null)
+                              }
+                              if (e.key === 'Escape') setEditingUrlId(null)
+                            }}
+                            className="w-full rounded bg-zinc-800 px-1 py-0.5 text-[10px] text-zinc-200 outline-none ring-1 ring-blue-500/50"
+                            placeholder="https://example.com"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        ) : ws.defaultUrl ? (
+                          <span
+                            role="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setEditingUrlId(ws.id)
+                              setUrlEditValue(ws.defaultUrl!)
+                            }}
+                            className="flex items-center gap-1 truncate text-[10px] text-zinc-600 hover:text-blue-400"
+                            title={`New browsers open: ${ws.defaultUrl}`}
+                          >
+                            <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
+                            </svg>
+                            {shortenUrl(ws.defaultUrl)}
+                          </span>
+                        ) : (
+                          <span
+                            role="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setEditingUrlId(ws.id)
+                              setUrlEditValue('')
+                            }}
+                            className="flex items-center gap-1 truncate text-[10px] text-zinc-500 hover:text-blue-400"
+                            title="New browser tiles in this workspace will start on this URL"
+                          >
+                            <svg className="h-2.5 w-2.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
+                            </svg>
+                            Set URL…
                           </span>
                         )}
                       </div>
