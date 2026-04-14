@@ -14,6 +14,10 @@ export interface ExecuteResult {
   ok: boolean
   message: string
   needsConfirmation?: boolean
+  /** Signals that an overlay should be activated */
+  overlay?: 'numbers' | 'grid'
+  /** For overlay.focusNumber — the selected number */
+  selectedNumber?: number
 }
 
 export function executeAction(action: VoiceAction): ExecuteResult {
@@ -198,6 +202,21 @@ export function executeAction(action: VoiceAction): ExecuteResult {
       const browsers = nodes.filter((n) => n.type === 'browser').length
       const notes = nodes.filter((n) => n.type === 'notes').length
       return { ok: true, message: `${terminals} terminals, ${browsers} browsers, ${notes} notes` }
+    }
+
+    // ── Overlays ──
+
+    case 'overlay.showNumbers': {
+      return { ok: true, message: 'Showing numbers', overlay: 'numbers' }
+    }
+
+    case 'overlay.showGrid': {
+      return { ok: true, message: 'Showing grid', overlay: 'grid' }
+    }
+
+    case 'overlay.focusNumber': {
+      const num = action.params.number as number
+      return { ok: true, message: `Selected ${num}`, selectedNumber: num }
     }
 
     // ── Undo ──

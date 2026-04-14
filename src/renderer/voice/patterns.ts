@@ -99,4 +99,7 @@ export const patterns: VoiceCommandPattern[] = [
   // ── Notifications ──
   { patterns: [/^(?:go to )?(?:last )?unread$/], action: 'notify.goToUnread' },
   { patterns: [/^mark (?:all )?(?:notifications )?read$/], action: 'notify.markAllRead' },
+
+  // ── Bare number (for overlay selection, lowest priority) ──
+  { patterns: [/^(\d+)$/], action: 'overlay.focusNumber', extract: (m) => ({ number: parseInt(m[1]) }) },
 ]

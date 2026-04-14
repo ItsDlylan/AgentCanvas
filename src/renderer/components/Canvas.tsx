@@ -46,6 +46,8 @@ import { useHotkeys } from '@/hooks/useHotkeys'
 import type { HotkeyAction } from '@/types/settings'
 import { SettingsPage } from './SettingsPage'
 import { VoiceIndicator } from './VoiceIndicator'
+import { VoiceNumberOverlay } from './VoiceNumberOverlay'
+import { VoiceGridOverlay } from './VoiceGridOverlay'
 import { useVoice } from '@/hooks/useVoice'
 import { useCanvasStore, snapToGrid } from '@/store/canvas-store'
 
@@ -1380,13 +1382,25 @@ export default function Canvas() {
             />
             <PanDetector />
             {settings.voice.enabled && (
-              <VoiceIndicator
-                mode={voice.mode}
-                transcript={voice.transcript}
-                error={voice.error}
-                onConfirm={voice.confirm}
-                onCancel={voice.cancel}
-              />
+              <>
+                <VoiceIndicator
+                  mode={voice.mode}
+                  transcript={voice.transcript}
+                  error={voice.error}
+                  onConfirm={voice.confirm}
+                  onCancel={voice.cancel}
+                />
+                <VoiceNumberOverlay
+                  active={voice.numberOverlayActive}
+                  tiles={voice.numberedTiles}
+                  onDismiss={voice.dismissOverlay}
+                />
+                <VoiceGridOverlay
+                  active={voice.gridOverlayActive}
+                  onSelect={voice.selectGridRegion}
+                  onDismiss={voice.dismissOverlay}
+                />
+              </>
             )}
             {settings.canvas.minimapEnabled && (
               <CanvasMiniMap

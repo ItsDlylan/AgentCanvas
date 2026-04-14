@@ -4,6 +4,9 @@ import { createVAD, type VADInstance } from '@/voice/vad'
 import { matchCommand } from '@/voice/command-router'
 import { executeAction } from '@/voice/action-executor'
 import { buildContext } from '@/voice/context-builder'
+import { useCanvasStore } from '@/store/canvas-store'
+import { defaultTileWidth, defaultTileHeight } from '@/store/canvas-store'
+import type { NumberedTile } from '@/components/VoiceNumberOverlay'
 
 export interface UseVoiceReturn {
   mode: VoiceMode
@@ -13,12 +16,24 @@ export interface UseVoiceReturn {
   stopListening: () => void
   confirm: () => void
   cancel: () => void
+  // Overlay state
+  numberOverlayActive: boolean
+  gridOverlayActive: boolean
+  numberedTiles: NumberedTile[]
+  dismissOverlay: () => void
+  selectGridRegion: (region: number) => void
 }
 
 export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   const [mode, setMode] = useState<VoiceMode>('idle')
   const [transcript, setTranscript] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Overlay state
+  const [numberOverlayActive, setNumberOverlayActive] = useState(false)
+  const [gridOverlayActive, setGridOverlayActive] = useState(false)
+  const [numberedTiles, setNumberedTiles] = useState<NumberedTile[]>([])
+  const numberMapRef = useRef<Map<number, string>>(new Map())
 
   const vadRef = useRef<VADInstance | null>(null)
   const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -52,6 +67,89 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       if (cleanupTimerRef.current) clearTimeout(cleanupTimerRef.current)
     }
   }, [mode, transcript, error])
+
+  const dismissOverlay = useCallback(() => {
+    setNumberOverlayActive(false)
+    setGridOverlayActive(false)
+    setNumberedTiles([])
+    numberMapRef.current.clear()
+  }, [])
+
+  const activateNumberOverlay = useCallback(() => {
+    const store = useCanvasStore.getState()
+    const visible = store.getVisibleNodes()
+
+    // Sort spatially: top-to-bottom, left-to-right
+    const sorted = [...visible].sort((a, b) => {
+      const rowDiff = a.position.y - b.position.y
+      if (Math.abs(rowDiff) > 50) return rowDiff
+      return a.position.x - b.position.x
+    })
+
+    const tiles: NumberedTile[] = sorted.map((node, i) => {
+      const data = node.data as Record<string, unknown>
+      const sessionId = data.sessionId as string
+      return {
+        number: i + 1,
+        sessionId,
+        label: (data.label as string) ?? '',
+        position: node.position,
+        width: (node.style?.width as number) ?? defaultTileWidth(node.type),
+        height: (node.style?.height as number) ?? defaultTileHeight(node.type)
+      }
+    })
+
+    const map = new Map<number, string>()
+    for (const t of tiles) map.set(t.number, t.sessionId)
+    numberMapRef.current = map
+
+    setNumberedTiles(tiles)
+    setNumberOverlayActive(true)
+    setGridOverlayActive(false)
+  }, [])
+
+  const handleNumberSelection = useCallback((num: number) => {
+    const sessionId = numberMapRef.current.get(num)
+    if (sessionId) {
+      useCanvasStore.getState().focusTile(sessionId)
+      setTranscript(`Focused #${num}`)
+    } else {
+      setError(`No tile #${num}`)
+    }
+    dismissOverlay()
+    setMode('idle')
+  }, [dismissOverlay])
+
+  const selectGridRegion = useCallback((region: number) => {
+    if (region < 1 || region > 9) return
+    const store = useCanvasStore.getState()
+    const instance = store.reactFlowInstance
+    if (!instance) return
+
+    const viewport = instance.getViewport()
+    // We need the DOM element dimensions to calculate visible area
+    const flowEl = document.querySelector('.react-flow') as HTMLElement
+    if (!flowEl) return
+    const { width, height } = flowEl.getBoundingClientRect()
+
+    const visibleWidth = width / viewport.zoom
+    const visibleHeight = height / viewport.zoom
+    const flowLeft = -viewport.x / viewport.zoom
+    const flowTop = -viewport.y / viewport.zoom
+
+    const col = ((region - 1) % 3)
+    const row = Math.floor((region - 1) / 3)
+    const cellWidth = visibleWidth / 3
+    const cellHeight = visibleHeight / 3
+
+    const centerX = flowLeft + cellWidth * col + cellWidth / 2
+    const centerY = flowTop + cellHeight * row + cellHeight / 2
+
+    instance.setCenter(centerX, centerY, { duration: 400, zoom: viewport.zoom })
+    setTranscript(`Grid ${region}`)
+    dismissOverlay()
+    setMode('idle')
+  }, [dismissOverlay])
 
   const processCommand = useCallback((text: string) => {
     const context = buildContext()
@@ -92,13 +190,37 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
 
     // Non-destructive: execute immediately
     const execResult = executeAction(result.action)
+
+    // Handle overlay signals
+    if (execResult.overlay === 'numbers') {
+      activateNumberOverlay()
+      setTranscript(execResult.message)
+      setMode('idle')
+      return
+    }
+    if (execResult.overlay === 'grid') {
+      setGridOverlayActive(true)
+      setNumberOverlayActive(false)
+      setTranscript(execResult.message)
+      setMode('idle')
+      return
+    }
+    if (execResult.selectedNumber !== undefined) {
+      if (numberOverlayActive) {
+        handleNumberSelection(execResult.selectedNumber)
+      } else if (gridOverlayActive) {
+        selectGridRegion(execResult.selectedNumber)
+      }
+      return
+    }
+
     setTranscript(execResult.message)
     if (!execResult.ok) {
       setError(execResult.message)
       setTranscript(null)
     }
     setMode('idle')
-  }, [])
+  }, [activateNumberOverlay, handleNumberSelection, selectGridRegion, numberOverlayActive, gridOverlayActive])
 
   const transcribeAudio = useCallback(async (audio: Float32Array) => {
     setMode('processing')
@@ -200,5 +322,10 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     }
   }, [])
 
-  return { mode, transcript, error, startListening, stopListening, confirm, cancel }
+  return {
+    mode, transcript, error,
+    startListening, stopListening, confirm, cancel,
+    numberOverlayActive, gridOverlayActive, numberedTiles,
+    dismissOverlay, selectGridRegion
+  }
 }
