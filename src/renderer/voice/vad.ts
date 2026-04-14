@@ -3,7 +3,6 @@
 // Fires callbacks when speech starts/ends with the captured audio segment.
 
 import { MicVAD, type RealTimeVADOptions } from '@ricky0123/vad-web'
-import * as ort from 'onnxruntime-web'
 
 export interface VADCallbacks {
   onSpeechStart?: () => void
@@ -40,18 +39,12 @@ export async function createVAD(
 ): Promise<VADInstance> {
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
-  // Resolve asset paths — in dev, Vite serves from public/; in prod, from app resources
+  // VAD model + worklet are served from public/vad/ as static assets.
+  // ONNX Runtime WASM files resolve through Vite's node_modules serving — do NOT override onnxWASMBasePath.
   const basePath = import.meta.env.DEV ? '/vad/' : './vad/'
-
-  // Disable multi-threaded WASM — avoids needing to serve ort-wasm-simd-threaded.mjs
-  // as a module (Vite's public dir can't serve importable JS modules).
-  // Single-threaded is fine for the small Silero VAD model.
-  ort.env.wasm.numThreads = 1
-  ort.env.wasm.wasmPaths = basePath
 
   const vadOptions: Partial<RealTimeVADOptions> = {
     baseAssetPath: basePath,
-    onnxWASMBasePath: basePath,
     model: 'legacy',
     positiveSpeechThreshold: opts.positiveSpeechThreshold,
     negativeSpeechThreshold: opts.negativeSpeechThreshold,

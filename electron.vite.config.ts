@@ -21,6 +21,9 @@ export default defineConfig({
       alias: {
         '@': resolve('src/renderer')
       }
+    },
+    optimizeDeps: {
+      exclude: ['onnxruntime-web']
     }
   }
 })
