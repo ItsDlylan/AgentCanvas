@@ -449,7 +449,8 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
 
         <div
           ref={bodyElRef}
-          className="notes-tile-body titlebar-no-drag"
+          className="notes-tile-body titlebar-no-drag nokey"
+          onKeyDown={(e) => e.stopPropagation()}
         >
           <EditorContent editor={editor} />
         </div>
