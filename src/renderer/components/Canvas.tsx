@@ -5,7 +5,6 @@ import {
   BackgroundVariant,
   Controls,
   MiniMap,
-  Panel,
   useReactFlow,
   useStore,
   applyNodeChanges,
@@ -16,11 +15,10 @@ import {
   type NodeChange,
   type EdgeChange,
   type OnConnect,
-  type Viewport,
+  type ReactFlowInstance,
   addEdge
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { v4 as uuid } from 'uuid'
 import { TerminalTile } from './TerminalTile'
 import { BrowserTile } from './BrowserTile'
 import { NotesTile } from './NotesTile'
@@ -29,7 +27,6 @@ import { DevToolsTile } from './DevToolsTile'
 import { DrawTile } from './draw/DrawTile'
 import { NotificationToast } from './NotificationToast'
 import { NotificationCenter } from './NotificationCenter'
-import { markTerminalRead } from '@/hooks/useNotifications'
 import { parseMermaid } from '@/lib/mermaid-parser'
 import { layoutMermaidGraph } from '@/lib/mermaid-layout'
 import { ProcessPanel } from './ProcessPanel'
@@ -38,17 +35,17 @@ import { OffscreenIndicators } from './OffscreenIndicators'
 import { CanvasBackground } from './CanvasBackground'
 import { FocusedTerminalContext } from '@/hooks/useFocusedTerminal'
 import { PanDetector } from './PanDetector'
-import { navigateBrowser, reloadBrowser, onBrowserOpenRequest } from '@/hooks/useBrowserNavigation'
+import { onBrowserOpenRequest, reloadBrowser } from '@/hooks/useBrowserNavigation'
 import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug'
 import { PerformanceOverlay } from './PerformanceOverlay'
 import { PomodoroWidget } from './PomodoroWidget'
 import { usePomodoro, PomodoroContext } from '@/hooks/usePomodoro'
-import { BROWSER_CHROME_HEIGHT, BROWSER_CHROME_WIDTH, type DevicePreset } from '@/constants/devicePresets'
-import { DEFAULT_WORKSPACE, type Workspace } from '@/types/workspace'
-import { useSettings, type WorkspaceTemplate } from '@/hooks/useSettings'
+import { DEFAULT_WORKSPACE } from '@/types/workspace'
+import { useSettings } from '@/hooks/useSettings'
 import { useHotkeys } from '@/hooks/useHotkeys'
 import type { HotkeyAction } from '@/types/settings'
 import { SettingsPage } from './SettingsPage'
+import { useCanvasStore, snapToGrid } from '@/store/canvas-store'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
@@ -144,120 +141,6 @@ function CanvasMiniMap({ position, panelOpen, workspacePanelOpen }: {
   )
 }
 
-function defaultTileWidth(type: string | undefined): number {
-  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : type === 'devTools' ? 900 : type === 'draw' ? 800 : 640
-}
-
-function defaultTileHeight(type: string | undefined): number {
-  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : type === 'devTools' ? 500 : type === 'draw' ? 600 : 400
-}
-
-let tileCount = 0
-
-/** Find a position that doesn't overlap any existing node. */
-function findOpenPosition(
-  existingNodes: Node[],
-  width: number,
-  height: number,
-  colSpan: number,
-  gap: number
-): { x: number; y: number } {
-  const stepX = width + gap
-  const stepY = height + gap
-
-  for (let slot = 0; slot < 200; slot++) {
-    const candidate = {
-      x: 100 + (slot % colSpan) * stepX,
-      y: 100 + Math.floor(slot / colSpan) * stepY
-    }
-    const overlaps = existingNodes.some((n) => {
-      const nw = (n.style?.width as number) ?? defaultTileWidth(n.type)
-      const nh = (n.style?.height as number) ?? defaultTileHeight(n.type)
-      return (
-        candidate.x < n.position.x + nw &&
-        candidate.x + width > n.position.x &&
-        candidate.y < n.position.y + nh &&
-        candidate.y + height > n.position.y
-      )
-    })
-    if (!overlaps) return candidate
-  }
-  // Fallback: offset from last node
-  return { x: 100, y: 100 + existingNodes.length * stepY }
-}
-
-/** Find the nearest open grid cell to a click position. */
-function snapToGrid(
-  click: { x: number; y: number },
-  existingNodes: Node[],
-  width: number,
-  height: number,
-  gap: number
-): { x: number; y: number } {
-  const stepX = width + gap
-  const stepY = height + gap
-
-  // Determine search center in grid coords
-  const centerCol = Math.round((click.x - 100) / stepX)
-  const centerRow = Math.round((click.y - 100) / stepY)
-
-  const isOccupied = (c: number, r: number) => {
-    const pos = { x: 100 + c * stepX, y: 100 + r * stepY }
-    return existingNodes.some((n) => {
-      const nw = (n.style?.width as number) ?? defaultTileWidth(n.type)
-      const nh = (n.style?.height as number) ?? defaultTileHeight(n.type)
-      return (
-        pos.x < n.position.x + nw &&
-        pos.x + width > n.position.x &&
-        pos.y < n.position.y + nh &&
-        pos.y + height > n.position.y
-      )
-    })
-  }
-
-  // Search grid cells in a square around the click, pick closest open one
-  const range = 10
-  let best: { x: number; y: number } | null = null
-  let bestDist = Infinity
-  for (let r = centerRow - range; r <= centerRow + range; r++) {
-    for (let c = centerCol - range; c <= centerCol + range; c++) {
-      if (isOccupied(c, r)) continue
-      const cellCenterX = 100 + c * stepX + width / 2
-      const cellCenterY = 100 + r * stepY + height / 2
-      const d = (click.x - cellCenterX) ** 2 + (click.y - cellCenterY) ** 2
-      if (d < bestDist) {
-        bestDist = d
-        best = { x: 100 + c * stepX, y: 100 + r * stepY }
-      }
-    }
-  }
-
-  return best ?? { x: 100, y: 100 + existingNodes.length * stepY }
-}
-
-/** Compute radial position for the Nth worker tile around a source tile. */
-function radialPosition(
-  source: { x: number; y: number; width: number; height: number },
-  index: number,
-  total: number,
-  radius = 800
-): { x: number; y: number } {
-  // Spread workers in a semicircle to the right of the source (-70° to +70°)
-  const arcStart = -70 * (Math.PI / 180)
-  const arcEnd = 70 * (Math.PI / 180)
-  const angle = total <= 1
-    ? 0 // Single worker: directly to the right
-    : arcStart + (index / (total - 1)) * (arcEnd - arcStart)
-
-  const centerX = source.x + source.width / 2
-  const centerY = source.y + source.height / 2
-
-  return {
-    x: centerX + Math.cos(angle) * radius,
-    y: centerY + Math.sin(angle) * radius
-  }
-}
-
 // ── Jump hints overlay (Ctrl-hold to show, press letter to jump) ──
 
 // 1-9, 0, then A-Z
@@ -272,203 +155,47 @@ export default function Canvas() {
   const [pomodoroExpanded, setPomodoroExpanded] = useState(false)
   const togglePomodoro = useCallback(() => setPomodoroExpanded((o) => !o), [])
 
-  // ── All nodes/edges (across all workspaces) ──
-  const [allNodes, setAllNodes] = useState<Node[]>([])
-  const [allEdges, setAllEdges] = useState<Edge[]>([])
-  const [nodesLoadedFlags, setNodesLoadedFlags] = useState({ notes: false, terminals: false, browsers: false, draws: false })
+  // ── Store state subscriptions ──
+  const allNodes = useCanvasStore(s => s.allNodes)
+  const allEdges = useCanvasStore(s => s.allEdges)
+  const focusedId = useCanvasStore(s => s.focusedId)
+  const tileWorkspaceMap = useCanvasStore(s => s.tileWorkspaceMap)
+  const activeWorkspaceId = useCanvasStore(s => s.activeWorkspaceId)
+  const workspaces = useCanvasStore(s => s.workspaces)
+  const nodesLoadedFlags = useCanvasStore(s => s.nodesLoadedFlags)
 
-  // ── Workspace state ──
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([DEFAULT_WORKSPACE])
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState('default')
-  const [tileWorkspaceMap, setTileWorkspaceMap] = useState<Map<string, string>>(new Map())
+  // ── Store action references (stable, never change) ──
+  const setAllNodes = useCanvasStore(s => s.setAllNodes)
+  const setAllEdges = useCanvasStore(s => s.setAllEdges)
+  const setFocusedId = useCanvasStore(s => s.setFocusedId)
+  const setTileWorkspaceMap = useCanvasStore(s => s.setTileWorkspaceMap)
+  const setWorkspaces = useCanvasStore(s => s.setWorkspaces)
+  const setNodesLoadedFlags = useCanvasStore(s => s.setNodesLoadedFlags)
+
+  // ── UI-only state ──
   const [workspacePanelOpen, setWorkspacePanelOpen] = useState(true)
-  const viewportCache = useRef<Map<string, Viewport>>(new Map())
-
   const [panelOpen, setPanelOpen] = useState(true)
-  const [focusedId, setFocusedId] = useState<string | null>(null)
-  const { setCenter, getViewport, setViewport, fitView, screenToFlowPosition } = useReactFlow()
 
+  // ── ReactFlow instance ──
+  const reactFlowInstance = useReactFlow()
+  const { screenToFlowPosition } = reactFlowInstance
+
+  useEffect(() => {
+    useCanvasStore.getState().setReactFlowInstance(reactFlowInstance as unknown as ReactFlowInstance)
+  }, [reactFlowInstance])
+
+  // ── Sync settings to store ──
+  useEffect(() => {
+    useCanvasStore.getState().setTileGap(settings.canvas.tileGap)
+    useCanvasStore.getState().setBrowserDefaultUrl(settings.browser.defaultUrl)
+  }, [settings.canvas.tileGap, settings.browser.defaultUrl])
+
+  // ── Refs that sync from store (for beforeunload handler and onConnect) ──
   const allNodesRef = useRef(allNodes)
   allNodesRef.current = allNodes
 
   const allEdgesRef = useRef(allEdges)
   allEdgesRef.current = allEdges
-
-  const tileWorkspaceMapRef = useRef(tileWorkspaceMap)
-  tileWorkspaceMapRef.current = tileWorkspaceMap
-
-  const activeWorkspaceIdRef = useRef(activeWorkspaceId)
-  activeWorkspaceIdRef.current = activeWorkspaceId
-
-  // ── Note close/delete (must be defined before visibleNodes) ──
-
-  const removeTileFromCanvas = useCallback((sessionId: string) => {
-    setAllNodes((nds) =>
-      nds.filter((n) => (n.data as Record<string, unknown>).sessionId !== sessionId)
-    )
-    setAllEdges((eds) =>
-      eds.filter((e) => e.source !== sessionId && e.target !== sessionId)
-    )
-    setTileWorkspaceMap((prev) => {
-      const next = new Map(prev)
-      next.delete(sessionId)
-      return next
-    })
-    setFocusedId((prev) => (prev === sessionId ? null : prev))
-  }, [])
-
-  const closeDraw = useCallback(
-    (sessionId: string) => {
-      window.draw.save(sessionId, { isSoftDeleted: true })
-      removeTileFromCanvas(sessionId)
-    },
-    [removeTileFromCanvas]
-  )
-
-  const deleteDraw = useCallback(
-    (sessionId: string) => {
-      window.draw.delete(sessionId)
-      removeTileFromCanvas(sessionId)
-    },
-    [removeTileFromCanvas]
-  )
-
-  /** Collect all descendant note IDs linked to a parent (recursively). */
-  const getChildNoteIds = useCallback((parentId: string): string[] => {
-    const children: string[] = []
-    for (const n of allNodesRef.current) {
-      if (n.type !== 'notes') continue
-      const data = n.data as Record<string, unknown>
-      if (data.linkedNoteId === parentId) {
-        const childId = data.sessionId as string
-        children.push(childId, ...getChildNoteIds(childId))
-      }
-    }
-    return children
-  }, [])
-
-  const closeNote = useCallback(
-    (sessionId: string) => {
-      // Cascade: soft-close all child notes first
-      for (const childId of getChildNoteIds(sessionId)) {
-        window.note.save(childId, { isSoftDeleted: true })
-        removeTileFromCanvas(childId)
-        window.dispatchEvent(new CustomEvent('note:removed', { detail: { noteId: childId } }))
-      }
-      // Soft close: mark as soft-deleted in file, remove from canvas
-      window.note.save(sessionId, { isSoftDeleted: true })
-      removeTileFromCanvas(sessionId)
-      window.dispatchEvent(new CustomEvent('note:removed', { detail: { noteId: sessionId } }))
-    },
-    [removeTileFromCanvas, getChildNoteIds]
-  )
-
-  const deleteNote = useCallback(
-    (sessionId: string) => {
-      // Cascade: hard-delete all child notes first
-      for (const childId of getChildNoteIds(sessionId)) {
-        window.note.delete(childId)
-        removeTileFromCanvas(childId)
-        window.dispatchEvent(new CustomEvent('note:removed', { detail: { noteId: childId } }))
-      }
-      // Hard delete: remove from canvas AND delete file
-      window.note.delete(sessionId)
-      removeTileFromCanvas(sessionId)
-      window.dispatchEvent(new CustomEvent('note:removed', { detail: { noteId: sessionId } }))
-    },
-    [removeTileFromCanvas, getChildNoteIds]
-  )
-
-  // ── Linked note spawning from checklist items ──
-
-  const spawnLinkedNote = useCallback(
-    (sourceNoteId: string, taskId: string, taskText: string, onCreated: (newNoteId: string) => void) => {
-      tileCount++
-      const newNoteId = uuid()
-
-      // Find source node to position relative to it
-      const sourceNode = allNodesRef.current.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === sourceNoteId
-      )
-      const sourceWidth = (sourceNode?.measured?.width ?? (sourceNode?.style?.width as number) ?? 400)
-      const sourcePos = sourceNode?.position ?? { x: 100, y: 100 }
-
-      const targetPos = {
-        x: sourcePos.x + sourceWidth + settings.canvas.tileGap,
-        y: sourcePos.y
-      }
-      const pos = snapToGrid(targetPos, allNodesRef.current, 400, 400, settings.canvas.tileGap)
-
-      const label = taskText.length > 30 ? taskText.slice(0, 30) + '...' : taskText
-      const wsId = activeWorkspaceIdRef.current
-
-      const newNode: Node = {
-        id: newNoteId,
-        type: 'notes',
-        position: pos,
-        style: { width: 400, height: 400 },
-        data: {
-          sessionId: newNoteId,
-          label,
-          linkedNoteId: sourceNoteId,
-          onClose: closeNote,
-          onDelete: deleteNote
-        },
-        dragHandle: '.notes-tile-header'
-      }
-      setAllNodes((nds) => [...nds, newNode])
-      setTileWorkspaceMap((prev) => new Map(prev).set(newNoteId, wsId))
-
-      // Create amber edge from source checklist → new note
-      const edgeId = `edge-task-${sourceNoteId}-${newNoteId}`
-      setAllEdges((eds) => [
-        ...eds,
-        {
-          id: edgeId,
-          source: sourceNoteId,
-          target: newNoteId,
-          animated: true,
-          style: { stroke: '#f59e0b', strokeWidth: 2 }
-        }
-      ])
-
-      // Persist note metadata
-      window.note.save(newNoteId, {
-        noteId: newNoteId,
-        label,
-        workspaceId: wsId,
-        isSoftDeleted: false,
-        position: pos,
-        width: 400,
-        height: 400,
-        linkedNoteId: sourceNoteId,
-        parentTaskInfo: { noteId: sourceNoteId, taskId },
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      })
-
-      // Let the caller set the linkedNoteId attribute on the task item
-      onCreated(newNoteId)
-
-      setFocusedId(newNoteId)
-      setCenter(pos.x + 200, pos.y + 200, { zoom: 1, duration: 400 })
-    },
-    [settings.canvas.tileGap, setCenter, closeNote, deleteNote]
-  )
-
-  const focusNoteOnCanvas = useCallback(
-    (noteId: string) => {
-      const node = allNodesRef.current.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === noteId
-      )
-      if (!node) return
-      const cx = ((node.measured?.width ?? (node.style?.width as number) ?? 400) / 2)
-      const cy = ((node.measured?.height ?? (node.style?.height as number) ?? 400) / 2)
-      setFocusedId(noteId)
-      setCenter(node.position.x + cx, node.position.y + cy, { zoom: 1, duration: 400 })
-    },
-    [setCenter]
-  )
 
   // ── Compute visible nodes/edges for active workspace ──
   // Browser nodes from ALL workspaces stay mounted so their webview + CDP connection
@@ -515,10 +242,10 @@ export default function Canvas() {
               ...n,
               data: {
                 ...n.data,
-                onClose: closeNote,
-                onDelete: deleteNote,
-                onSpawnLinkedNote: spawnLinkedNote,
-                onNavigateToNote: focusNoteOnCanvas
+                onClose: useCanvasStore.getState().closeNote,
+                onDelete: useCanvasStore.getState().deleteNote,
+                onSpawnLinkedNote: useCanvasStore.getState().spawnLinkedNote,
+                onNavigateToNote: useCanvasStore.getState().focusNoteOnCanvas
               }
             }
           }
@@ -526,26 +253,26 @@ export default function Canvas() {
           if (n.type === 'draw') {
             return {
               ...n,
-              data: { ...n.data, onClose: closeDraw, onDelete: deleteDraw }
+              data: { ...n.data, onClose: useCanvasStore.getState().closeDraw, onDelete: useCanvasStore.getState().deleteDraw }
             }
           }
           // Inject close callback into diff viewer data
           if (n.type === 'diffViewer') {
             return {
               ...n,
-              data: { ...n.data, onClose: (sid: string) => removeTileFromCanvas(sid) }
+              data: { ...n.data, onClose: (sid: string) => useCanvasStore.getState().removeTileFromCanvas(sid) }
             }
           }
           // Inject close callback into devtools data
           if (n.type === 'devTools') {
             return {
               ...n,
-              data: { ...n.data, onClose: (sid: string) => removeTileFromCanvas(sid) }
+              data: { ...n.data, onClose: (sid: string) => useCanvasStore.getState().removeTileFromCanvas(sid) }
             }
           }
           return n
         }),
-    [allNodes, tileWorkspaceMap, activeWorkspaceId, closeNote, deleteNote, closeDraw, deleteDraw, removeTileFromCanvas, focusedDevToolsLinkedBrowser, spawnLinkedNote, focusNoteOnCanvas]
+    [allNodes, tileWorkspaceMap, activeWorkspaceId, focusedDevToolsLinkedBrowser]
   )
 
   const visibleNodeIds = useMemo(
@@ -623,7 +350,7 @@ export default function Canvas() {
 
       // Helper: persist linkedTerminalId on a note and sync its workspace
       const linkNoteToTerminal = (noteId: string, terminalId: string) => {
-        const terminalWs = tileWorkspaceMapRef.current.get(terminalId)
+        const terminalWs = useCanvasStore.getState().tileWorkspaceMap.get(terminalId)
         if (terminalWs) {
           setTileWorkspaceMap((prev) => new Map(prev).set(noteId, terminalWs))
           window.note.save(noteId, { workspaceId: terminalWs, linkedTerminalId: terminalId })
@@ -698,7 +425,7 @@ export default function Canvas() {
     window.workspace.load().then((data) => {
       if (data) {
         setWorkspaces(data.workspaces)
-        setActiveWorkspaceId(data.activeWorkspaceId)
+        useCanvasStore.getState().setActiveWorkspaceId(data.activeWorkspaceId)
       }
       // Enable the save effect only after the load has populated state,
       // preventing StrictMode double-invoke from saving defaults to disk
@@ -721,7 +448,6 @@ export default function Canvas() {
         for (const nf of notesToRestore) {
           const { noteId, label, workspaceId, position, width, height } = nf.meta
           if (existingIds.has(noteId)) continue
-          tileCount++
           newNodes.push({
             id: noteId,
             type: 'notes',
@@ -804,7 +530,6 @@ export default function Canvas() {
 
         for (const pt of persisted) {
           if (existingIds.has(pt.sessionId)) continue
-          tileCount++
           newNodes.push({
             id: pt.sessionId,
             type: 'terminal',
@@ -832,7 +557,7 @@ export default function Canvas() {
         return newNodes.length > 0 ? [...nds, ...newNodes] : nds
       })
 
-      // Reconstruct note→terminal edges now that terminal nodes exist
+      // Reconstruct note->terminal edges now that terminal nodes exist
       window.note.list().then((noteFiles) => {
         const edgesToRestore: Edge[] = []
         const edgeIds = new Set<string>()
@@ -878,7 +603,6 @@ export default function Canvas() {
 
         for (const pb of persisted) {
           if (existingIds.has(pb.sessionId)) continue
-          tileCount++
           newNodes.push({
             id: pb.sessionId,
             type: 'browser',
@@ -928,7 +652,6 @@ export default function Canvas() {
         for (const df of drawsToRestore) {
           const { drawId, label, workspaceId, position, width, height } = df.meta
           if (existingIds.has(drawId)) continue
-          tileCount++
           newNodes.push({
             id: drawId,
             type: 'draw',
@@ -1015,13 +738,14 @@ export default function Canvas() {
   // ── Save terminal tile layout on window close ──
   useEffect(() => {
     const handler = () => {
+      const currentTileWorkspaceMap = useCanvasStore.getState().tileWorkspaceMap
       const terminalNodes = allNodesRef.current.filter((n) => n.type === 'terminal')
       const layout = terminalNodes.map((n) => ({
         sessionId: (n.data as { sessionId: string }).sessionId,
         position: n.position,
         width: (n.style?.width as number) ?? 640,
         height: (n.style?.height as number) ?? 400,
-        workspaceId: tileWorkspaceMapRef.current.get((n.data as { sessionId: string }).sessionId) ?? 'default'
+        workspaceId: currentTileWorkspaceMap.get((n.data as { sessionId: string }).sessionId) ?? 'default'
       }))
       window.terminalTiles.saveLayout(layout)
 
@@ -1042,7 +766,7 @@ export default function Canvas() {
           position: n.position,
           width: (n.style?.width as number) ?? 800,
           height: (n.style?.height as number) ?? 600,
-          workspaceId: tileWorkspaceMapRef.current.get(d.sessionId) ?? 'default',
+          workspaceId: currentTileWorkspaceMap.get(d.sessionId) ?? 'default',
           linkedTerminalId: d.linkedTerminalId,
           initialPreset: d.initialPreset
         }
@@ -1090,425 +814,49 @@ export default function Canvas() {
         next.delete(id)
         return next
       })
-      setFocusedId((prev) => (prev === id ? null : prev))
+      setFocusedId(useCanvasStore.getState().focusedId === id ? null : useCanvasStore.getState().focusedId)
     })
     return unsub
   }, [])
 
-  // ── Tile management ──
-
-  const killTerminal = useCallback(
-    (sessionId: string) => {
-      const node = allNodesRef.current.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === sessionId
-      )
-      if (node?.type === 'browser') {
-        window.browser.destroy(sessionId)
-        // Also remove any linked DevTools tile
-        const linkedDevTools = allNodesRef.current.find(
-          (n) => n.type === 'devTools' && (n.data as Record<string, unknown>).linkedBrowserId === sessionId
-        )
-        if (linkedDevTools) {
-          removeTileFromCanvas((linkedDevTools.data as Record<string, unknown>).sessionId as string)
-        }
-      } else if (node?.type === 'notes') {
-        // For notes in killTerminal (e.g. workspace removal), delete the file
-        window.note.delete(sessionId)
-      } else if (node?.type === 'draw') {
-        window.draw.delete(sessionId)
-      } else if (node?.type === 'diffViewer') {
-        // Diff viewers just get removed from canvas
-      } else {
-        window.terminal.kill(sessionId)
-        // Also remove any linked diff viewer
-        const linkedDiff = allNodesRef.current.find(
-          (n) => n.type === 'diffViewer' && (n.data as Record<string, unknown>).linkedTerminalId === sessionId
-        )
-        if (linkedDiff) {
-          removeTileFromCanvas((linkedDiff.data as Record<string, unknown>).sessionId as string)
-        }
-      }
-      removeTileFromCanvas(sessionId)
-    },
-    [removeTileFromCanvas]
-  )
-
-  // ── Diff viewer toggle ──
-
-  const toggleDiffViewer = useCallback(
-    (terminalSessionId: string) => {
-      const existing = allNodesRef.current.find(
-        (n) => n.type === 'diffViewer' && (n.data as Record<string, unknown>).linkedTerminalId === terminalSessionId
-      )
-
-      if (existing) {
-        removeTileFromCanvas((existing.data as Record<string, unknown>).sessionId as string)
-        return
-      }
-
-      const terminalNode = allNodesRef.current.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === terminalSessionId
-      )
-      if (!terminalNode) return
-
-      tileCount++
-      const sessionId = uuid()
-      const diffW = 700
-      const diffH = 500
-      const termH = (terminalNode.measured?.height ?? (terminalNode.style?.height as number) ?? 400)
-      const pos = {
-        x: terminalNode.position.x,
-        y: terminalNode.position.y + termH + (settings.canvas.tileGap || 40)
-      }
-
-      const newNode: Node = {
-        id: sessionId,
-        type: 'diffViewer',
-        position: pos,
-        style: { width: diffW, height: diffH },
-        data: {
-          sessionId,
-          label: `Diff Viewer`,
-          linkedTerminalId: terminalSessionId,
-          cwd: (terminalNode.data as Record<string, unknown>).cwd || '',
-          onClose: (sid: string) => removeTileFromCanvas(sid)
-        },
-        dragHandle: '.diff-viewer-tile-header'
-      }
-
-      setAllNodes((nds) => [...nds, newNode])
-      setTileWorkspaceMap((prev) =>
-        new Map(prev).set(sessionId, tileWorkspaceMapRef.current.get(terminalSessionId) ?? activeWorkspaceIdRef.current)
-      )
-
-      // Create auto-edge with diff-specific handle IDs and purple dashed styling
-      const newEdge: Edge = {
-        id: `diff-edge-${terminalSessionId}-${sessionId}`,
-        source: terminalSessionId,
-        target: sessionId,
-        sourceHandle: 'diff-source',
-        targetHandle: 'diff-target',
-        animated: true,
-        style: { stroke: '#a855f7', strokeWidth: 2, strokeDasharray: '6 3' }
-      }
-      setAllEdges((eds) => [...eds, newEdge])
-
-      setFocusedId(sessionId)
-      setCenter(pos.x + diffW / 2, pos.y + diffH / 2, { zoom: 1, duration: 400 })
-    },
-    [removeTileFromCanvas, setCenter, settings.canvas.tileGap]
-  )
-
-  const hasDiffViewer = useCallback(
-    (terminalSessionId: string) => {
-      return allNodes.some(
-        (n) => n.type === 'diffViewer' && (n.data as Record<string, unknown>).linkedTerminalId === terminalSessionId
-      )
-    },
-    [allNodes]
-  )
-
-  const toggleDevTools = useCallback(
-    (browserSessionId: string) => {
-      const existing = allNodesRef.current.find(
-        (n) => n.type === 'devTools' && (n.data as Record<string, unknown>).linkedBrowserId === browserSessionId
-      )
-      if (existing) {
-        removeTileFromCanvas((existing.data as Record<string, unknown>).sessionId as string)
-        return
-      }
-
-      const browserNode = allNodesRef.current.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === browserSessionId
-      )
-      if (!browserNode) return
-
-      tileCount++
-      const sessionId = uuid()
-      const dtW = 900
-      const dtH = 500
-      const browserW = (browserNode.measured?.width ?? (browserNode.style?.width as number) ?? 800)
-      const pos = {
-        x: browserNode.position.x + browserW + (settings.canvas.tileGap || 40),
-        y: browserNode.position.y
-      }
-
-      const newNode: Node = {
-        id: sessionId,
-        type: 'devTools',
-        position: pos,
-        style: { width: dtW, height: dtH },
-        data: {
-          sessionId,
-          label: 'DevTools',
-          linkedBrowserId: browserSessionId,
-          onClose: (sid: string) => removeTileFromCanvas(sid)
-        },
-        dragHandle: '.devtools-tile-header'
-      }
-
-      setAllNodes((nds) => [...nds, newNode])
-      setTileWorkspaceMap((prev) =>
-        new Map(prev).set(sessionId, tileWorkspaceMapRef.current.get(browserSessionId) ?? activeWorkspaceIdRef.current)
-      )
-
-      const newEdge: Edge = {
-        id: `devtools-edge-${browserSessionId}-${sessionId}`,
-        source: browserSessionId,
-        target: sessionId,
-        sourceHandle: 'devtools-source',
-        targetHandle: 'devtools-target',
-        animated: true,
-        style: { stroke: '#f97316', strokeWidth: 2, strokeDasharray: '6 3' }
-      }
-      setAllEdges((eds) => [...eds, newEdge])
-
-      setFocusedId(sessionId)
-      setCenter(pos.x + dtW / 2, pos.y + dtH / 2, { zoom: 1, duration: 400 })
-    },
-    [removeTileFromCanvas, setCenter, settings.canvas.tileGap]
-  )
-
-  const hasDevTools = useCallback(
-    (browserSessionId: string) => {
-      return allNodes.some(
-        (n) => n.type === 'devTools' && (n.data as Record<string, unknown>).linkedBrowserId === browserSessionId
-      )
-    },
-    [allNodes]
-  )
-
-  const addBrowserAt = useCallback(
-    (position?: { x: number; y: number }, preset?: DevicePreset) => {
-      tileCount++
-      const sessionId = uuid()
-      const tileW = preset ? preset.width + BROWSER_CHROME_WIDTH : 800
-      const tileH = preset ? preset.height + BROWSER_CHROME_HEIGHT : 600
-      const visible = visibleNodes
-      const pos = position ?? findOpenPosition(visible, tileW, tileH, 3, settings.canvas.tileGap)
-
-      // Get workspace default URL for browser, falling back to global setting
-      const wsId = activeWorkspaceIdRef.current
-      const ws = workspaces.find((w) => w.id === wsId)
-      const browserUrl = ws?.defaultUrl || settings.browser.defaultUrl
-
-      const newNode: Node = {
-        id: sessionId,
-        type: 'browser',
-        position: pos,
-        style: { width: tileW, height: tileH },
-        data: {
-          sessionId,
-          label: `Browser ${tileCount}`,
-          initialUrl: browserUrl,
-          initialPreset: preset && (preset.mobile || preset.dpr > 1) ? preset : undefined
-        },
-        dragHandle: '.browser-tile-header'
-      }
-      setAllNodes((nds) => [...nds, newNode])
-      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, activeWorkspaceIdRef.current))
-      setFocusedId(sessionId)
-      setCenter(pos.x + tileW / 2, pos.y + tileH / 2, { zoom: 1, duration: 400 })
-    },
-    [visibleNodes, workspaces, setCenter]
-  )
-
-  const addBrowser = useCallback((preset?: DevicePreset) => addBrowserAt(undefined, preset), [addBrowserAt])
-
-  // Auto-spawn a browser tile linked to a terminal when agent-browser is detected
-  const addBrowserForTerminal = useCallback(
-    (terminalId: string, url: string, reservationId?: string, tileWidth?: number, tileHeight?: number) => {
-      // Treat empty terminalId as unlinked
-      const isLinked = terminalId && terminalId !== 'api'
-
-      // If a browser already exists for this terminal, navigate it instead of spawning a new one
-      if (isLinked) {
-        const existing = allNodesRef.current.find(
-          (n) => n.type === 'browser' && (n.data as Record<string, unknown>).linkedTerminalId === terminalId
-        )
-        if (existing) {
-          const existingSessionId = (existing.data as Record<string, unknown>).sessionId as string
-          navigateBrowser(existingSessionId, url)
-          setFocusedId(existingSessionId)
-          return
-        }
-      }
-
-      const terminalNode = allNodesRef.current.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === terminalId
-      )
-
-      tileCount++
-      const sessionId = uuid()
-      const pos = terminalNode
-        ? { x: terminalNode.position.x + 740, y: terminalNode.position.y }
-        : { x: 100 + (tileCount % 3) * 880, y: 100 + Math.floor(tileCount / 3) * 680 }
-
-      const newNode: Node = {
-        id: sessionId,
-        type: 'browser',
-        position: pos,
-        style: { width: tileWidth ?? 800, height: tileHeight ?? 600 },
-        data: {
-          sessionId,
-          label: `Browser ${tileCount}`,
-          initialUrl: url,
-          linkedTerminalId: isLinked ? terminalId : undefined,
-          reservationId
-        },
-        dragHandle: '.browser-tile-header'
-      }
-
-      setAllNodes((nds) => [...nds, newNode])
-
-      // Inherit workspace from the terminal, or fall back to active workspace
-      const terminalWorkspace = isLinked
-        ? tileWorkspaceMapRef.current.get(terminalId)
-        : undefined
-      setTileWorkspaceMap((prev) =>
-        new Map(prev).set(sessionId, terminalWorkspace ?? activeWorkspaceIdRef.current)
-      )
-
-      // Create edge only if linked to a real terminal
-      if (terminalNode) {
-        const newEdge: Edge = {
-          id: `edge-${terminalId}-${sessionId}`,
-          source: terminalId,
-          target: sessionId,
-          animated: true,
-          style: { stroke: '#10b981', strokeWidth: 2 }
-        }
-        setAllEdges((eds) => [...eds, newEdge])
-      }
-
-      setFocusedId(sessionId)
-    },
-    []
-  )
-
+  // ── IPC listeners for browser/terminal tile management ──
   useEffect(() => {
     const unsub = window.terminal.onBrowserRequest((terminalId, url, reservationId, width, height) => {
-      addBrowserForTerminal(terminalId, url, reservationId, width, height)
+      useCanvasStore.getState().addBrowserForTerminal(terminalId, url, reservationId, width, height)
     })
     return unsub
-  }, [addBrowserForTerminal])
+  }, [])
 
   // Open a browser tile when a link is clicked in a terminal
   useEffect(() => {
     return onBrowserOpenRequest((terminalId, url) => {
-      addBrowserForTerminal(terminalId, url)
+      useCanvasStore.getState().addBrowserForTerminal(terminalId, url)
     })
-  }, [addBrowserForTerminal])
+  }, [])
 
   // ── Spawn a terminal tile linked to another terminal (agent orchestration) ──
-  const addTerminalForTerminal = useCallback(
-    (info: {
-      terminalId: string; label?: string; cwd?: string; command?: string;
-      linkedTerminalId?: string; width?: number; height?: number;
-      metadata?: Record<string, unknown>
-    }) => {
-      const { terminalId: sessionId, label, cwd, command, linkedTerminalId, width = 640, height = 400, metadata } = info
-
-      const sourceNode = linkedTerminalId
-        ? allNodesRef.current.find((n) => (n.data as Record<string, unknown>).sessionId === linkedTerminalId)
-        : undefined
-
-      // Collect existing linked worker tiles for radial index
-      const existingLinked = linkedTerminalId
-        ? allNodesRef.current.filter((n) => {
-            const meta = (n.data as Record<string, unknown>).metadata as Record<string, unknown> | undefined
-            const team = meta?.team as Record<string, unknown> | undefined
-            return n.type === 'terminal' && team?.linkedTerminalId === linkedTerminalId
-          })
-        : []
-
-      const workerIndex = existingLinked.length
-      const totalWorkers = workerIndex + 1
-
-      let pos: { x: number; y: number }
-      if (sourceNode) {
-        const srcW = (sourceNode.style?.width as number) ?? 640
-        const srcH = (sourceNode.style?.height as number) ?? 400
-        const src = { x: sourceNode.position.x, y: sourceNode.position.y, width: srcW, height: srcH }
-        pos = radialPosition(src, workerIndex, totalWorkers)
-
-        // Reposition existing workers for even spacing across the arc
-        if (totalWorkers > 1) {
-          setAllNodes((nds) =>
-            nds.map((n) => {
-              const idx = existingLinked.findIndex((e) => e.id === n.id)
-              if (idx < 0) return n
-              return { ...n, position: radialPosition(src, idx, totalWorkers) }
-            })
-          )
-        }
-      } else {
-        pos = findOpenPosition(visibleNodes, width, height, 4, settings.canvas.tileGap)
-      }
-
-      tileCount++
-      const newNode: Node = {
-        id: sessionId,
-        type: 'terminal',
-        position: pos,
-        style: { width, height },
-        data: {
-          sessionId,
-          label: label || `Worker ${tileCount}`,
-          cwd: cwd || (sourceNode ? (sourceNode.data as Record<string, unknown>).cwd : undefined),
-          metadata: {
-            ...(metadata || {}),
-            team: { ...((metadata?.team as Record<string, unknown>) || {}), linkedTerminalId }
-          },
-          command
-        },
-        dragHandle: '.terminal-tile-header'
-      }
-
-      setAllNodes((nds) => [...nds, newNode])
-      const wsId = linkedTerminalId ? tileWorkspaceMapRef.current.get(linkedTerminalId) : undefined
-      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, wsId ?? activeWorkspaceIdRef.current))
-
-      // Purple edge from source → worker
-      if (sourceNode && linkedTerminalId) {
-        setAllEdges((eds) => [
-          ...eds,
-          {
-            id: `team-${linkedTerminalId}-${sessionId}`,
-            source: linkedTerminalId,
-            target: sessionId,
-            animated: true,
-            style: { stroke: '#8b5cf6', strokeWidth: 2 }
-          }
-        ])
-      }
-
-      setFocusedId(sessionId)
-    },
-    [visibleNodes, settings.canvas.tileGap]
-  )
-
   useEffect(() => {
     const unsub = window.terminal.onTerminalSpawn((info) => {
-      addTerminalForTerminal(info)
+      useCanvasStore.getState().addTerminalForTerminal(info)
     })
     return unsub
-  }, [addTerminalForTerminal])
+  }, [])
 
   // Handle Cmd+R / Ctrl+R / F5 — globalShortcut in the main process intercepts
   // the key at the OS level and sends IPC here. Reload the focused browser tile.
   useEffect(() => {
     const unsub = window.browser.onRefreshFocused(() => {
-      if (!focusedId) return
-      const node = allNodesRef.current.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === focusedId
+      const currentFocusedId = useCanvasStore.getState().focusedId
+      if (!currentFocusedId) return
+      const node = useCanvasStore.getState().allNodes.find(
+        (n) => (n.data as Record<string, unknown>).sessionId === currentFocusedId
       )
       if (node?.type === 'browser') {
-        reloadBrowser(focusedId)
+        reloadBrowser(currentFocusedId)
       }
     })
     return unsub
-  }, [focusedId])
+  }, [])
 
   // Handle agentic browser resize via API
   useEffect(() => {
@@ -1545,174 +893,17 @@ export default function Canvas() {
     return unsub
   }, [])
 
-  const focusTerminal = useCallback(
-    (sessionId: string) => {
-      setFocusedId(sessionId)
-      markTerminalRead(sessionId)
-      const node = allNodesRef.current.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === sessionId
-      )
-      if (!node) return
-      const defaultW = defaultTileWidth(node.type)
-      const defaultH = defaultTileHeight(node.type)
-      const cx = (node.measured?.width ?? (node.style?.width as number) ?? defaultW) / 2
-      const cy = (node.measured?.height ?? (node.style?.height as number) ?? defaultH) / 2
-      setCenter(node.position.x + cx, node.position.y + cy, {
-        zoom: 1,
-        duration: 400
-      })
-    },
-    [setCenter]
-  )
-
   const onPaneClick = useCallback(() => {
     setFocusedId(null)
   }, [])
 
-  const addTerminalAt = useCallback(
-    (position?: { x: number; y: number }, width = 640, height = 400) => {
-      tileCount++
-      const sessionId = uuid()
-      const visible = visibleNodes
-      const pos = position ?? findOpenPosition(visible, width, height, 4, settings.canvas.tileGap)
-
-      // Get workspace path for terminal CWD
-      const wsId = activeWorkspaceIdRef.current
-      const ws = workspaces.find((w) => w.id === wsId)
-      const cwd = ws?.path ?? undefined
-
-      const newNode: Node = {
-        id: sessionId,
-        type: 'terminal',
-        position: pos,
-        style: { width, height },
-        data: {
-          sessionId,
-          label: `Terminal ${tileCount}`,
-          cwd
-        },
-        dragHandle: '.terminal-tile-header'
-      }
-      setAllNodes((nds) => [...nds, newNode])
-      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, wsId))
-      setFocusedId(sessionId)
-      setCenter(pos.x + width / 2, pos.y + height / 2, { zoom: 1, duration: 400 })
-    },
-    [visibleNodes, workspaces, setCenter]
-  )
-
-  const addTerminal = useCallback((width?: number, height?: number) => addTerminalAt(undefined, width, height), [addTerminalAt])
-
-  const addNoteAt = useCallback(
-    (position?: { x: number; y: number }) => {
-      tileCount++
-      const sessionId = uuid()
-      const visible = visibleNodes
-      const pos = position ?? findOpenPosition(visible, 400, 400, 4, settings.canvas.tileGap)
-      const label = `Note ${tileCount}`
-      const wsId = activeWorkspaceIdRef.current
-      const newNode: Node = {
-        id: sessionId,
-        type: 'notes',
-        position: pos,
-        style: { width: 400, height: 400 },
-        data: {
-          sessionId,
-          label,
-          onClose: closeNote,
-          onDelete: deleteNote
-        },
-        dragHandle: '.notes-tile-header'
-      }
-      setAllNodes((nds) => [...nds, newNode])
-      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, wsId))
-      setFocusedId(sessionId)
-      setCenter(pos.x + 200, pos.y + 200, { zoom: 1, duration: 400 })
-
-      // Persist metadata
-      window.note.save(sessionId, {
-        noteId: sessionId,
-        label,
-        workspaceId: wsId,
-        isSoftDeleted: false,
-        position: pos,
-        width: 400,
-        height: 400,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      })
-    },
-    [visibleNodes, setCenter, closeNote, deleteNote]
-  )
-
-  const addNote = useCallback(() => addNoteAt(undefined), [addNoteAt])
-
-  const addDrawAt = useCallback(
-    (position?: { x: number; y: number }, linkedTerminalId?: string) => {
-      tileCount++
-      const sessionId = uuid()
-      const visible = visibleNodes
-      const pos = position ?? findOpenPosition(visible, 800, 600, 2, settings.canvas.tileGap)
-      const label = `Draw ${tileCount}`
-      const wsId = activeWorkspaceIdRef.current
-      const newNode: Node = {
-        id: sessionId,
-        type: 'draw',
-        position: pos,
-        style: { width: 800, height: 600 },
-        data: {
-          sessionId,
-          label,
-          linkedTerminalId,
-          onClose: closeDraw,
-          onDelete: deleteDraw
-        },
-        dragHandle: '.draw-tile-header'
-      }
-      setAllNodes((nds) => [...nds, newNode])
-      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, wsId))
-      setFocusedId(sessionId)
-      setCenter(pos.x + 400, pos.y + 300, { zoom: 1, duration: 400 })
-
-      window.draw.save(sessionId, {
-        drawId: sessionId,
-        label,
-        workspaceId: wsId,
-        isSoftDeleted: false,
-        position: pos,
-        width: 800,
-        height: 600,
-        linkedTerminalId,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      })
-
-      // Auto-create edge if linked to a terminal
-      if (linkedTerminalId) {
-        const newEdge: Edge = {
-          id: `edge-${linkedTerminalId}-${sessionId}`,
-          source: linkedTerminalId,
-          target: sessionId,
-          animated: true,
-          style: { stroke: '#ec4899', strokeWidth: 2 }
-        }
-        setAllEdges((eds) => [...eds, newEdge])
-      }
-
-      return sessionId
-    },
-    [visibleNodes, setCenter, closeDraw, deleteDraw, settings.canvas.tileGap]
-  )
-
-  const addDraw = useCallback(() => addDrawAt(undefined), [addDrawAt])
-
   // ── Agent-driven draw tile creation ──
   useEffect(() => {
     const unsub = window.draw.onDrawOpen((info) => {
-      addDrawAt(undefined, info.terminalId)
+      useCanvasStore.getState().addDrawAt(undefined, info.terminalId)
     })
     return unsub
-  }, [addDrawAt])
+  }, [])
 
   // ── Agent-driven draw tile update (Mermaid or raw elements) ──
   useEffect(() => {
@@ -1737,37 +928,6 @@ export default function Canvas() {
     })
     return unsub
   }, [])
-
-  // ── Template spawning ──
-  const spawnTemplate = useCallback(
-    (template: WorkspaceTemplate, origin?: { x: number; y: number }) => {
-      const gap = settings.canvas.tileGap
-      // Find a clear area for the template bounding box
-      let maxW = 0, maxH = 0
-      for (const t of template.tiles) {
-        maxW = Math.max(maxW, t.relativePosition.x + t.width)
-        maxH = Math.max(maxH, t.relativePosition.y + t.height)
-      }
-      const basePos = origin ?? findOpenPosition(visibleNodes, maxW, maxH, 2, gap)
-
-      for (const tile of template.tiles) {
-        const pos = {
-          x: basePos.x + tile.relativePosition.x,
-          y: basePos.y + tile.relativePosition.y
-        }
-        if (tile.type === 'terminal') {
-          addTerminalAt(pos, tile.width, tile.height)
-        } else if (tile.type === 'browser') {
-          addBrowserAt(pos)
-        } else if (tile.type === 'notes') {
-          addNoteAt(pos)
-        } else if (tile.type === 'draw') {
-          addDrawAt(pos)
-        }
-      }
-    },
-    [settings.canvas.tileGap, visibleNodes, addTerminalAt, addBrowserAt, addNoteAt, addDrawAt]
-  )
 
   // ── Right-click context menu ──
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowPos: { x: number; y: number } } | null>(null)
@@ -1798,155 +958,11 @@ export default function Canvas() {
       if (!target.closest('.react-flow__pane')) return
       if (target.closest('.react-flow__node')) return
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      const safePos = snapToGrid(position, allNodes, 640, 400, settings.canvas.tileGap)
-      addTerminalAt(safePos)
+      const safePos = snapToGrid(position, useCanvasStore.getState().allNodes, 640, 400, settings.canvas.tileGap)
+      useCanvasStore.getState().addTerminalAt(safePos)
     },
-    [screenToFlowPosition, addTerminalAt, allNodes]
+    [screenToFlowPosition, settings.canvas.tileGap]
   )
-
-  // ── Workspace management ──
-
-  // Switch to a workspace and focus a specific tile
-  const handleFocusProcess = useCallback(
-    (workspaceId: string, sessionId: string) => {
-      markTerminalRead(sessionId)
-      if (workspaceId !== activeWorkspaceId) {
-        // Save current viewport, switch workspace
-        viewportCache.current.set(activeWorkspaceId, getViewport())
-        setActiveWorkspaceId(workspaceId)
-        // Focus the tile after workspace switch settles
-        requestAnimationFrame(() => {
-          setFocusedId(sessionId)
-          const node = allNodesRef.current.find(
-            (n) => (n.data as Record<string, unknown>).sessionId === sessionId
-          )
-          if (!node) return
-          const defaultW = node.type === 'browser' ? 800 : 640
-          const defaultH = node.type === 'browser' ? 600 : 400
-          const cx = (node.measured?.width ?? (node.style?.width as number) ?? defaultW) / 2
-          const cy = (node.measured?.height ?? (node.style?.height as number) ?? defaultH) / 2
-          setCenter(node.position.x + cx, node.position.y + cy, { zoom: 1, duration: 400 })
-        })
-      } else {
-        focusTerminal(sessionId)
-      }
-    },
-    [activeWorkspaceId, getViewport, setCenter, focusTerminal]
-  )
-
-  const handleSelectWorkspace = useCallback(
-    (id: string) => {
-      if (id === activeWorkspaceId) return
-      // Save current viewport
-      viewportCache.current.set(activeWorkspaceId, getViewport())
-      setActiveWorkspaceId(id)
-      setFocusedId(null)
-      // Restore target viewport
-      const saved = viewportCache.current.get(id)
-      if (saved) {
-        // Use requestAnimationFrame to ensure ReactFlow has processed the new nodes
-        requestAnimationFrame(() => {
-          setViewport(saved, { duration: 300 })
-        })
-      } else {
-        requestAnimationFrame(() => {
-          fitView({ duration: 300, padding: 0.2 })
-        })
-      }
-    },
-    [activeWorkspaceId, getViewport, setViewport, fitView]
-  )
-
-  const handleAddWorkspace = useCallback(async () => {
-    const dirPath = await window.workspace.pickDirectory()
-    if (!dirPath) return
-    // Check if workspace with this path already exists
-    const existing = workspaces.find((w) => w.path === dirPath)
-    if (existing) {
-      handleSelectWorkspace(existing.id)
-      return
-    }
-    const name = dirPath.split('/').pop() || dirPath
-    const ws: Workspace = {
-      id: uuid(),
-      name,
-      path: dirPath,
-      defaultUrl: null,
-      isDefault: false,
-      createdAt: Date.now()
-    }
-    setWorkspaces((prev) => [...prev, ws])
-    handleSelectWorkspace(ws.id)
-  }, [workspaces, handleSelectWorkspace])
-
-  const handleRemoveWorkspace = useCallback(
-    (id: string) => {
-      const ws = workspaces.find((w) => w.id === id)
-      if (!ws || ws.isDefault) return
-
-      // Kill all tiles belonging to this workspace
-      const tilesToKill: string[] = []
-      for (const [sessionId, wsId] of tileWorkspaceMapRef.current) {
-        if (wsId === id) tilesToKill.push(sessionId)
-      }
-      for (const sessionId of tilesToKill) {
-        const node = allNodesRef.current.find(
-          (n) => (n.data as Record<string, unknown>).sessionId === sessionId
-        )
-        if (node?.type === 'browser') {
-          window.browser.destroy(sessionId)
-        } else if (node?.type === 'notes') {
-          window.note.delete(sessionId)
-        } else {
-          window.terminal.kill(sessionId)
-        }
-      }
-      setAllNodes((nds) =>
-        nds.filter((n) => !tilesToKill.includes((n.data as Record<string, unknown>).sessionId as string))
-      )
-      setAllEdges((eds) =>
-        eds.filter((e) => !tilesToKill.includes(e.source) && !tilesToKill.includes(e.target))
-      )
-      setTileWorkspaceMap((prev) => {
-        const next = new Map(prev)
-        for (const sid of tilesToKill) next.delete(sid)
-        return next
-      })
-
-      // Remove workspace
-      setWorkspaces((prev) => prev.filter((w) => w.id !== id))
-      viewportCache.current.delete(id)
-
-      // Switch to default if we just removed the active workspace
-      if (activeWorkspaceId === id) {
-        setActiveWorkspaceId('default')
-        setFocusedId(null)
-        requestAnimationFrame(() => {
-          fitView({ duration: 300, padding: 0.2 })
-        })
-      }
-    },
-    [workspaces, activeWorkspaceId, fitView]
-  )
-
-  const handleRenameWorkspace = useCallback(
-    (id: string, name: string) => {
-      setWorkspaces((prev) =>
-        prev.map((w) => (w.id === id && !w.isDefault ? { ...w, name } : w))
-      )
-    },
-    []
-  )
-
-  const handleSetWorkspacePath = useCallback(async (id: string) => {
-    const dirPath = await window.workspace.pickDirectory()
-    if (!dirPath) return
-    setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, path: dirPath } : w)))
-  }, [])
-
-  const handleSetDefaultUrl = useCallback((id: string, url: string | null) => {
-    setWorkspaces((prev) => prev.map((w) => (w.id === id ? { ...w, defaultUrl: url } : w)))
-  }, [])
 
   // ── Mod-hold kill highlight ──
   // Hold Cmd/Ctrl for 300ms to pulse the focused tile red, hinting that
@@ -1972,7 +988,7 @@ export default function Canvas() {
         }, 300)
       } else if (killHighlight || modTimerRef.current) {
         // Any other key cancels or we're past the highlight
-        // Don't clear killHighlight here — let keyup handle it
+        // Don't clear killHighlight here -- let keyup handle it
         clearTimer()
       }
     }
@@ -1997,43 +1013,31 @@ export default function Canvas() {
     }
   }, [focusedId, killHighlight])
 
-  // ── Tile rename ──
-
-  const renameTile = useCallback((sessionId: string, newLabel: string) => {
-    setAllNodes(nds => nds.map(n => {
-      const data = n.data as Record<string, unknown>
-      if (data.sessionId === sessionId) {
-        return { ...n, data: { ...data, label: newLabel } }
-      }
-      return n
-    }))
-    const node = allNodesRef.current.find(
-      n => (n.data as Record<string, unknown>).sessionId === sessionId
-    )
-    if (node?.type === 'terminal') {
-      window.terminal.rename(sessionId, newLabel)
-    } else if (node?.type === 'notes') {
-      window.note.save(sessionId, { label: newLabel })
-    } else if (node?.type === 'draw') {
-      window.draw.save(sessionId, { label: newLabel })
-    }
-  }, [])
-
   // ── Context + render ──
 
   const focusCtx = useMemo(
-    () => ({ focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools, renameTile }),
-    [focusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, toggleDevTools, hasDevTools, renameTile]
+    () => ({
+      focusedId,
+      setFocusedId: useCanvasStore.getState().setFocusedId,
+      killTerminal: useCanvasStore.getState().killTile,
+      killHighlight,
+      toggleDiffViewer: useCanvasStore.getState().toggleDiffViewer,
+      hasDiffViewer: useCanvasStore.getState().hasDiffViewer,
+      toggleDevTools: useCanvasStore.getState().toggleDevTools,
+      hasDevTools: useCanvasStore.getState().hasDevTools,
+      renameTile: useCanvasStore.getState().renameTile
+    }),
+    [focusedId, killHighlight]
   )
 
   const navigateToNote = useCallback(
     (noteId: string) => {
       const wsId = tileWorkspaceMap.get(noteId)
       if (wsId) {
-        handleFocusProcess(wsId, noteId)
+        useCanvasStore.getState().focusProcess(wsId, noteId)
       }
     },
-    [tileWorkspaceMap, handleFocusProcess]
+    [tileWorkspaceMap]
   )
 
   const pomodoroCtx = useMemo(
@@ -2067,9 +1071,9 @@ export default function Canvas() {
           ? direction === 1 ? 0 : tileIds.length - 1
           : (currentIndex + direction + tileIds.length) % tileIds.length
 
-      focusTerminal(tileIds[nextIndex])
+      useCanvasStore.getState().focusTile(tileIds[nextIndex])
     },
-    [visibleNodes, tileWorkspaceMap, activeWorkspaceId, focusedId, focusTerminal]
+    [visibleNodes, tileWorkspaceMap, activeWorkspaceId, focusedId]
   )
 
   const hotkeyActions = useMemo<Record<HotkeyAction, () => void>>(
@@ -2079,27 +1083,29 @@ export default function Canvas() {
       toggleMinimap: () => {
         updateSettings({ canvas: { ...settings.canvas, minimapEnabled: !settings.canvas.minimapEnabled } })
       },
-      newTerminal: () => addTerminal(),
-      newBrowser: () => addBrowser(),
-      newNote: addNote,
-      newDraw: addDraw,
+      newTerminal: () => useCanvasStore.getState().addTerminalAt(),
+      newBrowser: () => useCanvasStore.getState().addBrowserAt(),
+      newNote: () => useCanvasStore.getState().addNoteAt(),
+      newDraw: () => useCanvasStore.getState().addDrawAt(),
       openSettings: () => setSettingsOpen(true),
       cycleFocusForward: () => cycleFocus(1),
       cycleFocusBackward: () => cycleFocus(-1),
       killFocused: () => {
-        if (!focusedId) return
-        const node = allNodesRef.current.find(
-          (n) => (n.data as Record<string, unknown>).sessionId === focusedId
+        const currentFocusedId = useCanvasStore.getState().focusedId
+        if (!currentFocusedId) return
+        const node = useCanvasStore.getState().allNodes.find(
+          (n) => (n.data as Record<string, unknown>).sessionId === currentFocusedId
         )
         if (node?.type === 'notes') {
-          closeNote(focusedId)
+          useCanvasStore.getState().closeNote(currentFocusedId)
         } else {
-          killTerminal(focusedId)
+          useCanvasStore.getState().killTile(currentFocusedId)
         }
       },
       openInIde: async () => {
-        if (!focusedId) return
-        const status = await window.terminal.getStatus(focusedId)
+        const currentFocusedId = useCanvasStore.getState().focusedId
+        if (!currentFocusedId) return
+        const status = await window.terminal.getStatus(currentFocusedId)
         if (!status) return
         const worktree = status.metadata?.worktree as { path?: string } | undefined
         const targetPath = worktree?.path || status.cwd
@@ -2109,7 +1115,7 @@ export default function Canvas() {
       },
       togglePomodoro
     }),
-    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, addTerminal, addBrowser, addNote, cycleFocus, focusedId, closeNote, killTerminal, togglePomodoro]
+    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, cycleFocus, togglePomodoro]
   )
 
   useHotkeys(settings.hotkeys, hotkeyActions)
@@ -2124,7 +1130,7 @@ export default function Canvas() {
   const ctrlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Assignments follow the Process Panel display order:
-  // terminals → browsers (active workspace) → notes
+  // terminals -> browsers (active workspace) -> notes
   const jumpAssignments = useMemo(() => {
     if (!jumpMode) return new Map<string, string>()
     const terminals = visibleNodes.filter((n) => n.type === 'terminal')
@@ -2165,7 +1171,7 @@ export default function Canvas() {
         return
       }
 
-      // Any other key while timer is pending → cancel (it's a Ctrl+X combo)
+      // Any other key while timer is pending -> cancel (it's a Ctrl+X combo)
       if (!jumpMode) {
         clearTimer()
         return
@@ -2178,7 +1184,7 @@ export default function Canvas() {
           if (key === pressed) {
             e.preventDefault()
             e.stopPropagation()
-            focusTerminal(sessionId)
+            useCanvasStore.getState().focusTile(sessionId)
             return
           }
         }
@@ -2206,7 +1212,7 @@ export default function Canvas() {
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [jumpMode, jumpAssignments, focusTerminal])
+  }, [jumpMode, jumpAssignments])
 
   // ── Option-hold workspace jump hints ──
   // Hold Option/Alt for 300ms to show workspace badges in the Workspace Panel.
@@ -2243,14 +1249,14 @@ export default function Canvas() {
         return
       }
 
-      // Any other key while timer is pending → cancel
+      // Any other key while timer is pending -> cancel
       if (!wsJumpMode) {
         clearTimer()
         return
       }
 
       // In workspace jump mode: Alt+key switches workspace
-      // On macOS, Alt+letter produces special characters (e.g., å for Alt+A),
+      // On macOS, Alt+letter produces special characters (e.g., a for Alt+A),
       // so use event.code to get the physical key.
       if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && e.code) {
         const code = e.code
@@ -2262,7 +1268,7 @@ export default function Canvas() {
           if (key === pressed) {
             e.preventDefault()
             e.stopPropagation()
-            handleSelectWorkspace(wsId)
+            useCanvasStore.getState().selectWorkspace(wsId)
             return
           }
         }
@@ -2290,7 +1296,7 @@ export default function Canvas() {
       window.removeEventListener('keyup', onKeyUp)
       window.removeEventListener('blur', onBlur)
     }
-  }, [wsJumpMode, wsJumpAssignments, handleSelectWorkspace])
+  }, [wsJumpMode, wsJumpAssignments])
 
   return (
     <PomodoroContext.Provider value={pomodoroCtx}>
@@ -2310,7 +1316,7 @@ export default function Canvas() {
           </div>
           <div className="titlebar-no-drag flex items-center gap-2">
             <PomodoroWidget pomodoro={pomodoro} expanded={pomodoroExpanded} onToggle={togglePomodoro} />
-            <NotificationCenter onFocusTerminal={focusTerminal} />
+            <NotificationCenter onFocusTerminal={(id) => useCanvasStore.getState().focusTile(id)} />
             <button
               onClick={() => setSettingsOpen(true)}
               className="rounded p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
@@ -2379,13 +1385,13 @@ export default function Canvas() {
             tileWorkspaceMap={tileWorkspaceMap}
             nodes={allNodes}
             focusedId={focusedId}
-            onSelect={handleSelectWorkspace}
-            onFocusProcess={handleFocusProcess}
-            onAdd={handleAddWorkspace}
-            onRemove={handleRemoveWorkspace}
-            onRename={handleRenameWorkspace}
-            onSetPath={handleSetWorkspacePath}
-            onSetDefaultUrl={handleSetDefaultUrl}
+            onSelect={(id) => useCanvasStore.getState().selectWorkspace(id)}
+            onFocusProcess={(wsId, sid) => useCanvasStore.getState().focusProcess(wsId, sid)}
+            onAdd={() => useCanvasStore.getState().addWorkspace()}
+            onRemove={(id) => useCanvasStore.getState().removeWorkspace(id)}
+            onRename={(id, name) => useCanvasStore.getState().renameWorkspace(id, name)}
+            onSetPath={(id) => useCanvasStore.getState().setWorkspacePath(id)}
+            onSetDefaultUrl={(id, url) => useCanvasStore.getState().setWorkspaceDefaultUrl(id, url)}
             open={workspacePanelOpen}
             onToggle={toggleWorkspacePanel}
             jumpHints={wsJumpAssignments}
@@ -2394,25 +1400,25 @@ export default function Canvas() {
           <OffscreenIndicators
             nodes={visibleNodes}
             focusedId={focusedId}
-            onFocus={focusTerminal}
+            onFocus={(id) => useCanvasStore.getState().focusTile(id)}
           />
 
           <ProcessPanel
             nodes={visibleNodes}
             edges={visibleEdges}
             focusedId={focusedId}
-            onFocus={focusTerminal}
-            onFocusProcess={handleFocusProcess}
-            onKill={killTerminal}
-            onCloseNote={closeNote}
-            onDeleteNote={deleteNote}
-            onAddTerminal={addTerminal}
-            onAddBrowser={addBrowser}
-            onAddNote={addNote}
-            onAddDraw={addDraw}
-            onCloseDraw={closeDraw}
-            onDeleteDraw={deleteDraw}
-            onSpawnTemplate={spawnTemplate}
+            onFocus={(id) => useCanvasStore.getState().focusTile(id)}
+            onFocusProcess={(wsId, sid) => useCanvasStore.getState().focusProcess(wsId, sid)}
+            onKill={(id) => useCanvasStore.getState().killTile(id)}
+            onCloseNote={(id) => useCanvasStore.getState().closeNote(id)}
+            onDeleteNote={(id) => useCanvasStore.getState().deleteNote(id)}
+            onAddTerminal={() => useCanvasStore.getState().addTerminalAt()}
+            onAddBrowser={() => useCanvasStore.getState().addBrowserAt()}
+            onAddNote={() => useCanvasStore.getState().addNoteAt()}
+            onAddDraw={() => useCanvasStore.getState().addDrawAt()}
+            onCloseDraw={(id) => useCanvasStore.getState().closeDraw(id)}
+            onDeleteDraw={(id) => useCanvasStore.getState().deleteDraw(id)}
+            onSpawnTemplate={(tmpl, origin) => useCanvasStore.getState().spawnTemplate(tmpl, origin)}
             open={panelOpen}
             onToggle={togglePanel}
             tileWorkspaceMap={tileWorkspaceMap}
@@ -2420,7 +1426,7 @@ export default function Canvas() {
             activeWorkspaceId={activeWorkspaceId}
             jumpHints={jumpAssignments}
           />
-          <NotificationToast onFocusTerminal={focusTerminal} />
+          <NotificationToast onFocusTerminal={(id) => useCanvasStore.getState().focusTile(id)} />
 
           {/* Right-click context menu */}
           {contextMenu && (
@@ -2431,8 +1437,8 @@ export default function Canvas() {
             >
               <button
                 onClick={() => {
-                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 640, 400, settings.canvas.tileGap)
-                  addTerminalAt(safePos)
+                  const safePos = snapToGrid(contextMenu.flowPos, useCanvasStore.getState().allNodes, 640, 400, settings.canvas.tileGap)
+                  useCanvasStore.getState().addTerminalAt(safePos)
                   setContextMenu(null)
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
@@ -2442,8 +1448,8 @@ export default function Canvas() {
               </button>
               <button
                 onClick={() => {
-                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 800, 600, settings.canvas.tileGap)
-                  addBrowserAt(safePos)
+                  const safePos = snapToGrid(contextMenu.flowPos, useCanvasStore.getState().allNodes, 800, 600, settings.canvas.tileGap)
+                  useCanvasStore.getState().addBrowserAt(safePos)
                   setContextMenu(null)
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
@@ -2453,8 +1459,8 @@ export default function Canvas() {
               </button>
               <button
                 onClick={() => {
-                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 400, 400, settings.canvas.tileGap)
-                  addNoteAt(safePos)
+                  const safePos = snapToGrid(contextMenu.flowPos, useCanvasStore.getState().allNodes, 400, 400, settings.canvas.tileGap)
+                  useCanvasStore.getState().addNoteAt(safePos)
                   setContextMenu(null)
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
@@ -2464,8 +1470,8 @@ export default function Canvas() {
               </button>
               <button
                 onClick={() => {
-                  const safePos = snapToGrid(contextMenu.flowPos, allNodes, 800, 600, settings.canvas.tileGap)
-                  addDrawAt(safePos)
+                  const safePos = snapToGrid(contextMenu.flowPos, useCanvasStore.getState().allNodes, 800, 600, settings.canvas.tileGap)
+                  useCanvasStore.getState().addDrawAt(safePos)
                   setContextMenu(null)
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
@@ -2483,7 +1489,7 @@ export default function Canvas() {
                     <button
                       key={tmpl.id}
                       onClick={() => {
-                        spawnTemplate(tmpl, contextMenu.flowPos)
+                        useCanvasStore.getState().spawnTemplate(tmpl, contextMenu.flowPos)
                         setContextMenu(null)
                       }}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
