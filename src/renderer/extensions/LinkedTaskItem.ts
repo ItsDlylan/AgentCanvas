@@ -1,5 +1,45 @@
 import TaskItem from '@tiptap/extension-task-item'
 import { getRenderedAttributes } from '@tiptap/core'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+
+/* ── Drag-reorder state ── */
+
+interface DragInfo {
+  sourceLi: HTMLElement
+  sourcePos: number
+  ghost: HTMLElement
+}
+
+let drag: DragInfo | null = null
+
+function clearDropIndicators() {
+  document.querySelectorAll('.drop-above, .drop-below').forEach((el) => {
+    el.classList.remove('drop-above', 'drop-below')
+  })
+}
+
+function taskItemLi(target: HTMLElement): HTMLElement | null {
+  return target.closest('ul[data-type="taskList"] > li') as HTMLElement | null
+}
+
+function taskItemLiAtPoint(x: number, y: number): HTMLElement | null {
+  const el = document.elementFromPoint(x, y)
+  if (!el) return null
+  return taskItemLi(el as HTMLElement)
+}
+
+/** Resolve the ProseMirror position of a taskItem <li> via posAtDOM,
+ *  searching up the resolved depth chain to find the taskItem node. */
+function taskItemPosFromDom(view: import('@tiptap/pm/view').EditorView, li: HTMLElement): number | null {
+  const pos = view.posAtDOM(li, 0)
+  const resolved = view.state.doc.resolve(pos)
+  for (let d = resolved.depth; d > 0; d--) {
+    if (resolved.node(d).type.name === 'taskItem') {
+      return resolved.before(d)
+    }
+  }
+  return null
+}
 
 /**
  * Extends the default TipTap TaskItem with:
@@ -32,15 +72,129 @@ export const LinkedTaskItem = TaskItem.extend({
     }
   },
 
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: new PluginKey('taskItemDrag'),
+        props: {
+          handleDOMEvents: {
+            mousedown(view, event) {
+              const target = event.target as HTMLElement
+              if (!target.closest('.task-drag-handle')) return false
+
+              event.preventDefault()
+              event.stopPropagation()
+
+              const li = taskItemLi(target)
+              if (!li) return true
+
+              const nodePos = taskItemPosFromDom(view, li)
+              if (nodePos === null) return true
+
+              // Create a floating ghost clone that follows the cursor
+              const ghost = li.cloneNode(true) as HTMLElement
+              const liRect = li.getBoundingClientRect()
+              ghost.className = 'task-drag-ghost'
+              ghost.style.width = liRect.width + 'px'
+              ghost.style.position = 'fixed'
+              ghost.style.left = liRect.left + 'px'
+              ghost.style.top = liRect.top + 'px'
+              ghost.style.pointerEvents = 'none'
+              ghost.style.zIndex = '9999'
+              document.body.appendChild(ghost)
+
+              const offsetX = event.clientX - liRect.left
+              const offsetY = event.clientY - liRect.top
+
+              li.classList.add('dragging')
+              drag = { sourceLi: li, sourcePos: nodePos, ghost }
+
+              const onMove = (e: MouseEvent) => {
+                if (!drag) return
+                // Move ghost to follow cursor
+                drag.ghost.style.left = (e.clientX - offsetX) + 'px'
+                drag.ghost.style.top = (e.clientY - offsetY) + 'px'
+
+                clearDropIndicators()
+                const hoverLi = taskItemLiAtPoint(e.clientX, e.clientY)
+                if (!hoverLi || hoverLi === drag.sourceLi) return
+                const rect = hoverLi.getBoundingClientRect()
+                const midY = rect.top + rect.height / 2
+                hoverLi.classList.add(e.clientY < midY ? 'drop-above' : 'drop-below')
+              }
+
+              const onUp = (e: MouseEvent) => {
+                document.removeEventListener('mousemove', onMove)
+                document.removeEventListener('mouseup', onUp)
+                if (!drag) return
+
+                drag.ghost.remove()
+                drag.sourceLi.classList.remove('dragging')
+                const dropLi = taskItemLiAtPoint(e.clientX, e.clientY)
+                clearDropIndicators()
+
+                if (!dropLi || dropLi === drag.sourceLi) {
+                  drag = null
+                  return
+                }
+
+                const srcPos = drag.sourcePos
+                const targetNodePos = taskItemPosFromDom(view, dropLi)
+                drag = null
+
+                if (targetNodePos === null) return
+                if (srcPos === targetNodePos) return
+
+                const { state } = view
+                const sourceNode = state.doc.nodeAt(srcPos)
+                if (!sourceNode) return
+                const targetNode = state.doc.nodeAt(targetNodePos)
+                if (!targetNode) return
+
+                const sourceEnd = srcPos + sourceNode.nodeSize
+                const rect = dropLi.getBoundingClientRect()
+                const dropAbove = e.clientY < rect.top + rect.height / 2
+                const insertPos = dropAbove ? targetNodePos : targetNodePos + targetNode.nodeSize
+
+                if (insertPos === srcPos || insertPos === sourceEnd) return
+
+                const { tr } = state
+                tr.delete(srcPos, sourceEnd)
+                const mappedInsert = tr.mapping.map(insertPos)
+                tr.insert(mappedInsert, sourceNode)
+                view.dispatch(tr)
+              }
+
+              document.addEventListener('mousemove', onMove)
+              document.addEventListener('mouseup', onUp)
+              return true
+            }
+          }
+        }
+      })
+    ]
+  },
+
   addNodeView() {
     return ({ node, HTMLAttributes, getPos, editor }) => {
       // Build the base NodeView elements (same structure as original TaskItem)
       const listItem = document.createElement('li')
+      const dragHandle = document.createElement('span')
       const checkboxWrapper = document.createElement('label')
       const checkboxStyler = document.createElement('span')
       const checkbox = document.createElement('input')
       const content = document.createElement('div')
       const linkBtn = document.createElement('button')
+
+      // --- Drag handle (visual only — events handled by ProseMirror plugin) ---
+      dragHandle.className = 'task-drag-handle'
+      dragHandle.contentEditable = 'false'
+      dragHandle.innerHTML =
+        '<svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor">' +
+        '<circle cx="3" cy="2" r="1.2"/><circle cx="7" cy="2" r="1.2"/>' +
+        '<circle cx="3" cy="7" r="1.2"/><circle cx="7" cy="7" r="1.2"/>' +
+        '<circle cx="3" cy="12" r="1.2"/><circle cx="7" cy="12" r="1.2"/>' +
+        '</svg>'
 
       checkboxWrapper.contentEditable = 'false'
       checkbox.type = 'checkbox'
@@ -149,7 +303,7 @@ export const LinkedTaskItem = TaskItem.extend({
       })
 
       checkboxWrapper.append(checkbox, checkboxStyler)
-      listItem.append(checkboxWrapper, content, linkBtn)
+      listItem.append(dragHandle, checkboxWrapper, content, linkBtn)
 
       let prevRenderedAttributeKeys = new Set(Object.keys(HTMLAttributes))
 

@@ -361,6 +361,65 @@
   background: #1e3a5f;
 }
 
+/* Drag handle for reordering task items */
+.notes-tile-body .tiptap ul[data-type="taskList"] li .task-drag-handle {
+  opacity: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  cursor: grab;
+  color: #3f3f46;
+  padding: 0 2px;
+  margin-left: -4px;
+  margin-right: -2px;
+  border-radius: 3px;
+  user-select: none;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li:hover .task-drag-handle {
+  opacity: 1;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li .task-drag-handle:hover {
+  color: #71717a;
+  background: #27272a;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li .task-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Floating ghost that follows the cursor during drag */
+.task-drag-ghost {
+  background: #18181b;
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  opacity: 0.9;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 6px;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #e4e4e7;
+}
+
+/* Drag-in-progress states */
+.notes-tile-body .tiptap ul[data-type="taskList"] li.dragging {
+  opacity: 0.2;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li.drop-above {
+  box-shadow: 0 -2px 0 0 #3b82f6;
+}
+
+.notes-tile-body .tiptap ul[data-type="taskList"] li.drop-below {
+  box-shadow: 0 2px 0 0 #3b82f6;
+}
+
 .notes-tile-body .tiptap p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   color: #52525b;
