@@ -180,12 +180,21 @@ export async function transcribe(
 
     console.log(`[whisper] Raw stdout: ${JSON.stringify(stdout.slice(0, 500))}`)
 
-    // Parse output — whisper.cpp with --no-timestamps outputs plain text after a blank line
+    // Parse output — strip whisper.cpp metadata, artifacts, and blank audio markers
     const text = stdout
       .split('\n')
       .map(line => line.trim())
-      .filter(line => line && !line.startsWith('whisper_') && !line.startsWith('ggml_') && !line.startsWith('main:') && !line.startsWith('system_info') && line !== '[BLANK_AUDIO]')
+      .filter(line =>
+        line &&
+        !line.startsWith('whisper_') &&
+        !line.startsWith('ggml_') &&
+        !line.startsWith('main:') &&
+        !line.startsWith('system_info')
+      )
       .join(' ')
+      .replace(/\[BLANK_AUDIO\]/g, '')
+      .replace(/>>/g, '')
+      .replace(/\s+/g, ' ')
       .trim()
 
     console.log(`[whisper] Parsed text: "${text}"`)
