@@ -114,7 +114,13 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       }
 
       setTranscript('Transcribing...')
-      console.log(`[Voice] Sending ${audio.length} samples (${(audio.length / 16000).toFixed(1)}s) to Whisper`)
+      // Check audio has content before sending
+      let peak = 0
+      for (let i = 0; i < audio.length; i++) {
+        const abs = Math.abs(audio[i])
+        if (abs > peak) peak = abs
+      }
+      console.log(`[Voice] Sending ${audio.length} samples (${(audio.length / 16000).toFixed(1)}s), peak: ${peak.toFixed(4)}`)
       const result = await window.voice.transcribe(audio, settings.sttProvider)
       console.log('[Voice] Whisper result:', JSON.stringify(result))
       const text = result.text.trim()
