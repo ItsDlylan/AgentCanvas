@@ -555,8 +555,9 @@ export interface VoiceAPI {
 
 const voiceAPI: VoiceAPI = {
   transcribe: (audio, provider) => {
-    // Send as raw bytes (Buffer) — Array.from(Float32Array) loses data through context bridge + IPC
-    const buf = Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength)
+    // Copy raw bytes into a standalone Buffer (not a view into a pooled ArrayBuffer)
+    const bytes = new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength)
+    const buf = Buffer.from(bytes)
     return ipcRenderer.invoke('voice:transcribe', { audio: buf, provider })
   },
   loadModel: (model) => ipcRenderer.invoke('voice:load-model', { model }),
