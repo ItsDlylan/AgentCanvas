@@ -39,7 +39,13 @@ export async function createVAD(
 ): Promise<VADInstance> {
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
+  // Resolve asset paths — in dev, Vite serves from public/; in prod, from app resources
+  const basePath = import.meta.env.DEV ? '/vad/' : './vad/'
+
   const vadOptions: Partial<RealTimeVADOptions> = {
+    baseAssetPath: basePath,
+    onnxWASMBasePath: basePath,
+    model: 'legacy',
     positiveSpeechThreshold: opts.positiveSpeechThreshold,
     negativeSpeechThreshold: opts.negativeSpeechThreshold,
     preSpeechPadFrames: opts.preSpeechPadFrames,

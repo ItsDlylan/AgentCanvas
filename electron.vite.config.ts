@@ -16,6 +16,7 @@ export default defineConfig({
   },
   renderer: {
     plugins: [tailwindcss()],
+    publicDir: resolve('src/renderer/public'),
     resolve: {
       alias: {
         '@': resolve('src/renderer')
