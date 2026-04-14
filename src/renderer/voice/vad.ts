@@ -2,7 +2,7 @@
 // Wraps @ricky0123/vad-web's MicVAD for speech boundary detection.
 // Fires callbacks when speech starts/ends with the captured audio segment.
 
-import { MicVAD, type RealTimeVADOptions } from '@ricky0123/vad-web'
+import { MicVAD, ort, type RealTimeVADOptions } from '@ricky0123/vad-web'
 
 export interface VADCallbacks {
   onSpeechStart?: () => void
@@ -41,6 +41,12 @@ export async function createVAD(
 
   // Resolve asset paths — in dev, Vite serves from public/; in prod, from app resources
   const basePath = import.meta.env.DEV ? '/vad/' : './vad/'
+
+  // Disable multi-threaded WASM — avoids needing to serve ort-wasm-simd-threaded.mjs
+  // as a module (Vite's public dir can't serve importable JS modules).
+  // Single-threaded is fine for the small Silero VAD model.
+  ort.env.wasm.numThreads = 1
+  ort.env.wasm.wasmPaths = basePath
 
   const vadOptions: Partial<RealTimeVADOptions> = {
     baseAssetPath: basePath,
