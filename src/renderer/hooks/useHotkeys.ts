@@ -137,6 +137,7 @@ export function useHotkeys(
       // Don't intercept when an input/textarea/select is focused (e.g. settings fields)
       const tag = (event.target as HTMLElement)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if ((event.target as HTMLElement)?.isContentEditable) return
 
       for (const [action, binding] of Object.entries(resolved)) {
         if (matchesHotkey(event, binding)) {
