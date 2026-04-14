@@ -29,7 +29,9 @@ const MODEL_SIZES_MB: Record<WhisperModel, number> = {
 }
 
 function getModelsDir(): string {
-  const dir = join(app.getPath('userData'), 'models')
+  // Use ~/.agentcanvas/models/ instead of Application Support — whisper.cpp's
+  // shell command doesn't quote paths, so spaces in the path break it.
+  const dir = join(app.getPath('home'), '.agentcanvas', 'models')
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
   return dir
 }
