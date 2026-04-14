@@ -266,27 +266,35 @@ export const LinkedTaskItem = TaskItem.extend({
         e.stopPropagation()
         const taskText = content.textContent?.trim() || ''
 
-        if (node.attrs.linkedNoteId) {
+        // Read fresh state from the document — the `node` closure can become
+        // stale when ProseMirror recycles NodeViews via update().
+        if (typeof getPos !== 'function') return
+        const pos = getPos()
+        if (typeof pos !== 'number') return
+        const freshNode = editor.state.doc.nodeAt(pos)
+        if (!freshNode) return
+
+        if (freshNode.attrs.linkedNoteId) {
           listItem.dispatchEvent(
             new CustomEvent('task:navigate-note', {
-              detail: { linkedNoteId: node.attrs.linkedNoteId },
+              detail: { linkedNoteId: freshNode.attrs.linkedNoteId },
               bubbles: true
             })
           )
         } else {
           // Assign a stable taskId directly via getPos() before dispatching
-          let taskId = node.attrs.taskId as string | null
-          if (!taskId && typeof getPos === 'function') {
+          let taskId = freshNode.attrs.taskId as string | null
+          if (!taskId) {
             taskId = crypto.randomUUID()
             editor
               .chain()
               .focus(undefined, { scrollIntoView: false })
               .command(({ tr }) => {
-                const pos = getPos()
-                if (typeof pos !== 'number') return false
-                const currentNode = tr.doc.nodeAt(pos)
+                const currentPos = getPos()
+                if (typeof currentPos !== 'number') return false
+                const currentNode = tr.doc.nodeAt(currentPos)
                 if (!currentNode) return false
-                tr.setNodeMarkup(pos, undefined, { ...currentNode.attrs, taskId })
+                tr.setNodeMarkup(currentPos, undefined, { ...currentNode.attrs, taskId })
                 return true
               })
               .run()
