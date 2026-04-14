@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import type { VoiceMode, VoiceSettings } from '@/voice/types'
+import type { VoiceMode, VoiceSettings, VoiceAction } from '@/voice/types'
 import { createVAD, type VADInstance } from '@/voice/vad'
+import { matchCommand } from '@/voice/command-router'
+import { executeAction } from '@/voice/action-executor'
 
 export interface UseVoiceReturn {
   mode: VoiceMode
@@ -20,6 +22,11 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   const vadRef = useRef<VADInstance | null>(null)
   const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const modelReady = useRef(false)
+  const modeRef = useRef<VoiceMode>(mode)
+  modeRef.current = mode
+
+  // Pending destructive action waiting for confirmation
+  const pendingAction = useRef<VoiceAction | null>(null)
 
   // Ensure Whisper model is downloaded before first transcription
   useEffect(() => {
@@ -45,6 +52,52 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     }
   }, [mode, transcript, error])
 
+  const processCommand = useCallback((text: string) => {
+    const result = matchCommand(text, modeRef.current)
+
+    if (!result) {
+      // No command matched — just show the transcript
+      setTranscript(text)
+      setMode('idle')
+      return
+    }
+
+    // Handle confirmation responses
+    if (result.action.type === 'confirm.yes') {
+      const pending = pendingAction.current
+      pendingAction.current = null
+      if (pending) {
+        const execResult = executeAction(pending)
+        setTranscript(execResult.message)
+      }
+      setMode('idle')
+      return
+    }
+    if (result.action.type === 'confirm.no') {
+      pendingAction.current = null
+      setTranscript('Cancelled')
+      setMode('idle')
+      return
+    }
+
+    // Destructive actions need confirmation
+    if (result.action.destructive) {
+      pendingAction.current = result.action
+      setTranscript(`${result.normalized}?`)
+      setMode('confirming')
+      return
+    }
+
+    // Non-destructive: execute immediately
+    const execResult = executeAction(result.action)
+    setTranscript(execResult.message)
+    if (!execResult.ok) {
+      setError(execResult.message)
+      setTranscript(null)
+    }
+    setMode('idle')
+  }, [])
+
   const transcribeAudio = useCallback(async (audio: Float32Array) => {
     setMode('processing')
     try {
@@ -68,34 +121,35 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
         setMode('idle')
         return
       }
-      setTranscript(text)
-      setMode('idle')
+
+      // Route through command system
+      processCommand(text)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Transcription failed')
       setMode('idle')
     }
-  }, [settings.sttProvider, settings.whisperModel])
+  }, [settings.sttProvider, settings.whisperModel, processCommand])
 
   const startListening = useCallback(async () => {
-    if (mode !== 'idle') return
+    if (mode !== 'idle' && mode !== 'confirming') return
 
     setError(null)
-    setTranscript(null)
-    setMode('listening')
+    if (mode !== 'confirming') setTranscript(null)
+    setMode(mode === 'confirming' ? 'confirming' : 'listening')
+
+    // For confirming mode, start listening for yes/no
+    if (mode === 'confirming') {
+      setMode('listening')
+    }
 
     try {
-      // Create VAD if not already active
       if (!vadRef.current) {
         vadRef.current = await createVAD({
-          onSpeechStart: () => {
-            // Visual feedback is already handled by mode === 'listening'
-          },
+          onSpeechStart: () => {},
           onSpeechEnd: (audio) => {
             transcribeAudio(audio)
           },
-          onVADMisfire: () => {
-            // Speech was too short to be meaningful
-          }
+          onVADMisfire: () => {}
         })
       }
       vadRef.current.start()
@@ -109,22 +163,27 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     if (vadRef.current) {
       vadRef.current.pause()
     }
-    // If we were just listening (no speech detected), go back to idle
     if (mode === 'listening') {
-      setMode('idle')
+      setMode(pendingAction.current ? 'confirming' : 'idle')
     }
   }, [mode])
 
   const confirm = useCallback(() => {
     if (mode === 'confirming') {
-      // Will be wired to action executor in M2
+      const pending = pendingAction.current
+      pendingAction.current = null
+      if (pending) {
+        const result = executeAction(pending)
+        setTranscript(result.message)
+      }
       setMode('idle')
     }
   }, [mode])
 
   const cancel = useCallback(() => {
     if (mode === 'confirming') {
-      setTranscript(null)
+      pendingAction.current = null
+      setTranscript('Cancelled')
       setMode('idle')
     }
   }, [mode])
