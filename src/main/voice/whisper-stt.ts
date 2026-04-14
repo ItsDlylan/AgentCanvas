@@ -136,20 +136,31 @@ export async function transcribe(
     throw new Error(`Model '${model}' not downloaded. Call voice:load-model first.`)
   }
 
-  // Write audio to temp WAV file — keep it for debugging
+  const float32 = new Float32Array(audioSamples)
+
+  // Find peak amplitude
+  let peak = 0
+  for (let i = 0; i < float32.length; i++) {
+    const abs = Math.abs(float32[i])
+    if (abs > peak) peak = abs
+  }
+
+  // Normalize quiet audio so Whisper can hear it — scale peak to ~0.9
+  if (peak > 0.001 && peak < 0.5) {
+    const gain = 0.9 / peak
+    console.log(`[whisper] Normalizing audio: peak ${peak.toFixed(4)} → gain ${gain.toFixed(1)}x`)
+    for (let i = 0; i < float32.length; i++) {
+      float32[i] = Math.max(-1, Math.min(1, float32[i] * gain))
+    }
+  }
+
+  // Write audio to temp WAV file
   const tmpDir = app.getPath('temp')
   const tmpFile = join(tmpDir, `whisper-debug.wav`)
-  const float32 = new Float32Array(audioSamples)
   const wavBuffer = float32ToWav(float32)
   writeFileSync(tmpFile, wavBuffer)
 
-  // Verify audio isn't silent
-  let maxSample = 0
-  for (let i = 0; i < float32.length; i++) {
-    const abs = Math.abs(float32[i])
-    if (abs > maxSample) maxSample = abs
-  }
-  console.log(`[whisper] WAV: ${wavBuffer.length} bytes, peak: ${maxSample.toFixed(4)}, file: ${tmpFile}`)
+  console.log(`[whisper] WAV: ${wavBuffer.length} bytes, original peak: ${peak.toFixed(4)}, file: ${tmpFile}`)
 
   try {
     // Use whisper-node
