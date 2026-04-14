@@ -538,6 +538,34 @@ const diffAPI: DiffAPI = {
 
 contextBridge.exposeInMainWorld('diff', diffAPI)
 
+// Voice API
+export interface VoiceModelStatus {
+  model: string
+  downloaded: boolean
+  sizeMB: number
+  path: string | null
+}
+
+export interface VoiceAPI {
+  transcribe: (audio: Float32Array, provider?: string) => Promise<{ text: string; durationMs: number }>
+  loadModel: (model: string) => Promise<{ ok: boolean; error?: string }>
+  getModelStatus: () => Promise<VoiceModelStatus[]>
+  onModelProgress: (callback: (model: string, progress: number) => void) => () => void
+}
+
+const voiceAPI: VoiceAPI = {
+  transcribe: (audio, provider) => ipcRenderer.invoke('voice:transcribe', { audio: Array.from(audio), provider }),
+  loadModel: (model) => ipcRenderer.invoke('voice:load-model', { model }),
+  getModelStatus: () => ipcRenderer.invoke('voice:model-status'),
+  onModelProgress: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, model: string, progress: number) => callback(model, progress)
+    ipcRenderer.on('voice:model-progress', handler)
+    return () => ipcRenderer.removeListener('voice:model-progress', handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('voice', voiceAPI)
+
 // Debug APIs
 contextBridge.exposeInMainWorld('debug', {
   profile: (durationMs = 3000) => ipcRenderer.invoke('debug:profile', durationMs),

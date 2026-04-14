@@ -1,0 +1,79 @@
+// ── Voice Activity Detection wrapper ──────────────────────
+// Wraps @ricky0123/vad-web's MicVAD for speech boundary detection.
+// Fires callbacks when speech starts/ends with the captured audio segment.
+
+import { MicVAD, type RealTimeVADOptions } from '@ricky0123/vad-web'
+
+export interface VADCallbacks {
+  onSpeechStart?: () => void
+  onSpeechEnd?: (audio: Float32Array) => void
+  onVADMisfire?: () => void
+}
+
+export interface VADInstance {
+  start: () => void
+  pause: () => void
+  destroy: () => void
+  listening: boolean
+}
+
+export interface VADOptions {
+  positiveSpeechThreshold?: number
+  negativeSpeechThreshold?: number
+  preSpeechPadFrames?: number
+  redemptionFrames?: number
+  minSpeechFrames?: number
+}
+
+const DEFAULT_OPTIONS: VADOptions = {
+  positiveSpeechThreshold: 0.8,
+  negativeSpeechThreshold: 0.3,
+  preSpeechPadFrames: 3,
+  redemptionFrames: 8,
+  minSpeechFrames: 3
+}
+
+export async function createVAD(
+  callbacks: VADCallbacks,
+  options: VADOptions = {}
+): Promise<VADInstance> {
+  const opts = { ...DEFAULT_OPTIONS, ...options }
+
+  const vadOptions: Partial<RealTimeVADOptions> = {
+    positiveSpeechThreshold: opts.positiveSpeechThreshold,
+    negativeSpeechThreshold: opts.negativeSpeechThreshold,
+    preSpeechPadFrames: opts.preSpeechPadFrames,
+    redemptionFrames: opts.redemptionFrames,
+    minSpeechFrames: opts.minSpeechFrames,
+    onSpeechStart: () => {
+      callbacks.onSpeechStart?.()
+    },
+    onSpeechEnd: (audio: Float32Array) => {
+      callbacks.onSpeechEnd?.(audio)
+    },
+    onVADMisfire: () => {
+      callbacks.onVADMisfire?.()
+    }
+  }
+
+  const micVAD = await MicVAD.new(vadOptions)
+  let isListening = false
+
+  return {
+    start: () => {
+      micVAD.start()
+      isListening = true
+    },
+    pause: () => {
+      micVAD.pause()
+      isListening = false
+    },
+    destroy: () => {
+      micVAD.destroy()
+      isListening = false
+    },
+    get listening() {
+      return isListening
+    }
+  }
+}

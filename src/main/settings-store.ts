@@ -67,6 +67,25 @@ export interface WorkspaceTemplate {
   tiles: TemplateTile[]
 }
 
+export interface VoiceSettings {
+  enabled: boolean
+  activationMode: 'push-to-talk' | 'wake-word' | 'always'
+  sttProvider: 'whisper' | 'vosk' | 'web-speech'
+  whisperModel: 'tiny' | 'base' | 'small'
+  pushToTalkHotkey: string
+  wakeWord: string
+  audioFeedback: boolean
+  language: string
+  llmEndpoint: string | null
+  llmModel: string | null
+  ambientMonitoring: {
+    onWaiting: boolean
+    onError: boolean
+    onExit: boolean
+    onNotification: boolean
+  }
+}
+
 export type HotkeyAction =
   | 'toggleProcessPanel'
   | 'toggleWorkspacePanel'
@@ -81,6 +100,7 @@ export type HotkeyAction =
   | 'killFocused'
   | 'openInIde'
   | 'togglePomodoro'
+  | 'toggleVoice'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -99,6 +119,7 @@ export interface Settings {
   hotkeys: HotkeySettings
   templates: WorkspaceTemplate[]
   notifications: NotificationSettings
+  voice: VoiceSettings
 }
 
 // ── Defaults ─────────────────────────────────────────────
@@ -149,7 +170,8 @@ export const DEFAULT_SETTINGS: Settings = {
     cycleFocusBackward: 'Ctrl+Shift+Tab',
     killFocused: 'Mod+D',
     openInIde: 'Mod+Shift+O',
-    togglePomodoro: 'Mod+P'
+    togglePomodoro: 'Mod+P',
+    toggleVoice: 'Mod+Shift+V'
   },
   templates: [
     {
@@ -185,6 +207,24 @@ export const DEFAULT_SETTINGS: Settings = {
     enabled: true,
     soundEnabled: true,
     nativeWhenUnfocused: true
+  },
+  voice: {
+    enabled: false,
+    activationMode: 'push-to-talk',
+    sttProvider: 'whisper',
+    whisperModel: 'tiny',
+    pushToTalkHotkey: 'Mod+Shift+V',
+    wakeWord: 'canvas',
+    audioFeedback: true,
+    language: 'en',
+    llmEndpoint: null,
+    llmModel: null,
+    ambientMonitoring: {
+      onWaiting: true,
+      onError: true,
+      onExit: false,
+      onNotification: false
+    }
   }
 }
 

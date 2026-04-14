@@ -45,6 +45,8 @@ import { useSettings } from '@/hooks/useSettings'
 import { useHotkeys } from '@/hooks/useHotkeys'
 import type { HotkeyAction } from '@/types/settings'
 import { SettingsPage } from './SettingsPage'
+import { VoiceIndicator } from './VoiceIndicator'
+import { useVoice } from '@/hooks/useVoice'
 import { useCanvasStore, snapToGrid } from '@/store/canvas-store'
 
 const nodeTypes: NodeTypes = {
@@ -154,6 +156,9 @@ export default function Canvas() {
   const pomodoro = usePomodoro()
   const [pomodoroExpanded, setPomodoroExpanded] = useState(false)
   const togglePomodoro = useCallback(() => setPomodoroExpanded((o) => !o), [])
+
+  // ── Voice ──
+  const voice = useVoice(settings.voice)
 
   // ── Store state subscriptions ──
   const allNodes = useCanvasStore(s => s.allNodes)
@@ -1113,9 +1118,13 @@ export default function Canvas() {
           window.ide.open(targetPath)
         }
       },
-      togglePomodoro
+      togglePomodoro,
+      toggleVoice: () => {
+        if (voice.mode === 'idle') voice.startListening()
+        else voice.stopListening()
+      }
     }),
-    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, cycleFocus, togglePomodoro]
+    [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, cycleFocus, togglePomodoro, voice]
   )
 
   useHotkeys(settings.hotkeys, hotkeyActions)
@@ -1370,6 +1379,15 @@ export default function Canvas() {
               className="!rounded-lg !border-zinc-700 !bg-zinc-800 [&>button]:!border-zinc-700 [&>button]:!bg-zinc-800 [&>button]:!fill-zinc-400 [&>button:hover]:!bg-zinc-700"
             />
             <PanDetector />
+            {settings.voice.enabled && (
+              <VoiceIndicator
+                mode={voice.mode}
+                transcript={voice.transcript}
+                error={voice.error}
+                onConfirm={voice.confirm}
+                onCancel={voice.cancel}
+              />
+            )}
             {settings.canvas.minimapEnabled && (
               <CanvasMiniMap
                 position={settings.canvas.minimapPosition}

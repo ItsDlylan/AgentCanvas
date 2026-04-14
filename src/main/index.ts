@@ -619,6 +619,24 @@ ipcMain.handle('debug:profile', async (_event, durationMs: number) => {
   return result
 })
 
+// ── Voice IPC Handlers ────────────────────────────────────
+import { transcribe, downloadModel, getModelStatus } from './voice/whisper-stt'
+
+ipcMain.handle('voice:transcribe', async (_event, { audio, provider }: { audio: number[]; provider?: string }) => {
+  // For now, only whisper is implemented. vosk and web-speech will be added later.
+  return transcribe(audio)
+})
+
+ipcMain.handle('voice:load-model', async (_event, { model }: { model: string }) => {
+  return downloadModel(model as 'tiny' | 'base' | 'small', (progress) => {
+    mainWindow?.webContents.send('voice:model-progress', model, progress)
+  })
+})
+
+ipcMain.handle('voice:model-status', async () => {
+  return getModelStatus()
+})
+
 // ── Batched PTY Output ────────────────────────────────────
 // Buffer PTY data per session and flush every 4ms to avoid
 // flooding the IPC channel (Solo uses the same 4ms interval).

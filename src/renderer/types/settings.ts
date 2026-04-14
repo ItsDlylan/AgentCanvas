@@ -65,6 +65,25 @@ export interface WorkspaceTemplate {
   tiles: TemplateTile[]
 }
 
+export interface VoiceSettings {
+  enabled: boolean
+  activationMode: 'push-to-talk' | 'wake-word' | 'always'
+  sttProvider: 'whisper' | 'vosk' | 'web-speech'
+  whisperModel: 'tiny' | 'base' | 'small'
+  pushToTalkHotkey: string
+  wakeWord: string
+  audioFeedback: boolean
+  language: string
+  llmEndpoint: string | null
+  llmModel: string | null
+  ambientMonitoring: {
+    onWaiting: boolean
+    onError: boolean
+    onExit: boolean
+    onNotification: boolean
+  }
+}
+
 export type HotkeyAction =
   | 'toggleProcessPanel'
   | 'toggleWorkspacePanel'
@@ -78,6 +97,7 @@ export type HotkeyAction =
   | 'killFocused'
   | 'openInIde'
   | 'togglePomodoro'
+  | 'toggleVoice'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -96,4 +116,5 @@ export interface Settings {
   hotkeys: HotkeySettings
   templates: WorkspaceTemplate[]
   notifications: NotificationSettings
+  voice: VoiceSettings
 }

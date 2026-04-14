@@ -29,10 +29,24 @@ const FALLBACK: Settings = {
     cycleFocusForward: 'Ctrl+Tab',
     cycleFocusBackward: 'Ctrl+Shift+Tab',
     killFocused: 'Mod+D',
-    openInIde: 'Mod+Shift+O'
+    openInIde: 'Mod+Shift+O',
+    toggleVoice: 'Mod+Shift+V'
   },
   templates: [],
-  notifications: { enabled: true, soundEnabled: true, nativeWhenUnfocused: true }
+  notifications: { enabled: true, soundEnabled: true, nativeWhenUnfocused: true },
+  voice: {
+    enabled: false,
+    activationMode: 'push-to-talk' as const,
+    sttProvider: 'whisper' as const,
+    whisperModel: 'tiny' as const,
+    pushToTalkHotkey: 'Mod+Shift+V',
+    wakeWord: 'canvas',
+    audioFeedback: true,
+    language: 'en',
+    llmEndpoint: null,
+    llmModel: null,
+    ambientMonitoring: { onWaiting: true, onError: true, onExit: false, onNotification: false }
+  }
 }
 
 // ── Deep partial merge ───────────────────────────────────
