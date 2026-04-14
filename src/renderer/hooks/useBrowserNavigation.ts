@@ -44,6 +44,19 @@ export function getWebContentsId(sessionId: string): number | undefined {
   return webContentsIds.get(sessionId)
 }
 
+// Pub/sub for requesting a new browser tile from a terminal (e.g. link click)
+type BrowserOpenHandler = (terminalId: string, url: string) => void
+let browserOpenHandler: BrowserOpenHandler | null = null
+
+export function onBrowserOpenRequest(handler: BrowserOpenHandler): () => void {
+  browserOpenHandler = handler
+  return () => { browserOpenHandler = null }
+}
+
+export function requestBrowserOpen(terminalId: string, url: string): void {
+  browserOpenHandler?.(terminalId, url)
+}
+
 const cdpPorts = new Map<string, number>()
 
 export function registerCdpPort(sessionId: string, port: number): () => void {

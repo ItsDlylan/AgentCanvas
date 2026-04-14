@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { requestBrowserOpen } from '@/hooks/useBrowserNavigation'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { isGlobalHotkey } from '@/hooks/useHotkeys'
 import type { HotkeySettings } from '@/types/settings'
@@ -103,7 +104,9 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
     })
 
     const fitAddon = new FitAddon()
-    const webLinksAddon = new WebLinksAddon()
+    const webLinksAddon = new WebLinksAddon((_event, uri) => {
+      requestBrowserOpen(sessionId, uri)
+    })
 
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)

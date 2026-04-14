@@ -38,7 +38,7 @@ import { OffscreenIndicators } from './OffscreenIndicators'
 import { CanvasBackground } from './CanvasBackground'
 import { FocusedTerminalContext } from '@/hooks/useFocusedTerminal'
 import { PanDetector } from './PanDetector'
-import { navigateBrowser, reloadBrowser } from '@/hooks/useBrowserNavigation'
+import { navigateBrowser, reloadBrowser, onBrowserOpenRequest } from '@/hooks/useBrowserNavigation'
 import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug'
 import { PerformanceOverlay } from './PerformanceOverlay'
 import { PomodoroWidget } from './PomodoroWidget'
@@ -1368,6 +1368,13 @@ export default function Canvas() {
       addBrowserForTerminal(terminalId, url, reservationId, width, height)
     })
     return unsub
+  }, [addBrowserForTerminal])
+
+  // Open a browser tile when a link is clicked in a terminal
+  useEffect(() => {
+    return onBrowserOpenRequest((terminalId, url) => {
+      addBrowserForTerminal(terminalId, url)
+    })
   }, [addBrowserForTerminal])
 
   // Handle Cmd+R / Ctrl+R / F5 — globalShortcut in the main process intercepts
