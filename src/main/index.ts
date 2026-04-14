@@ -622,9 +622,11 @@ ipcMain.handle('debug:profile', async (_event, durationMs: number) => {
 // ── Voice IPC Handlers ────────────────────────────────────
 import { transcribe, downloadModel, getModelStatus } from './voice/whisper-stt'
 
-ipcMain.handle('voice:transcribe', async (_event, { audio, provider }: { audio: number[]; provider?: string }) => {
-  // For now, only whisper is implemented. vosk and web-speech will be added later.
-  return transcribe(audio)
+ipcMain.handle('voice:transcribe', async (_event, { audio, provider }: { audio: Buffer; provider?: string }) => {
+  // Decode raw bytes back to float32 samples
+  const float32 = new Float32Array(audio.buffer, audio.byteOffset, audio.byteLength / 4)
+  const samples = Array.from(float32)
+  return transcribe(samples)
 })
 
 ipcMain.handle('voice:load-model', async (_event, { model }: { model: string }) => {
