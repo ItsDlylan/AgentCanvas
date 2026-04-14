@@ -165,23 +165,28 @@ export async function transcribe(
   console.log(`[whisper] WAV: ${wavBuffer.length} bytes written, file size on disk: ${stat.size}, peak: ${peak.toFixed(4)}, file: ${tmpFile}`)
 
   try {
-    // Use whisper-node
-    const { whisper } = await import('whisper-node')
-    console.log(`[whisper] Running whisper.cpp on ${tmpFile}`)
-    const result: TranscriptSegment[] | undefined = await whisper(tmpFile, {
-      modelPath,
-      whisperOptions: {
-        language: 'en',
-        word_timestamps: false
-      }
+    // Call whisper.cpp directly — whisper-node's wrapper silently drops output
+    const whisperBin = join(__dirname, '..', '..', '..', 'node_modules', 'whisper-node', 'lib', 'whisper.cpp', 'main')
+    const cmd = `"${whisperBin}" -l en -m "${modelPath}" -f "${tmpFile}" --no-timestamps`
+    console.log(`[whisper] Running: ${cmd}`)
+
+    const stdout = execSync(cmd, {
+      timeout: 30000,
+      encoding: 'utf-8',
+      cwd: join(__dirname, '..', '..', '..', 'node_modules', 'whisper-node', 'lib', 'whisper.cpp')
     })
 
-    console.log(`[whisper] Raw result:`, JSON.stringify(result))
+    console.log(`[whisper] Raw stdout: ${JSON.stringify(stdout.slice(0, 500))}`)
 
-    const text = result
-      ? result.map((s) => s.speech).join(' ').trim()
-      : ''
+    // Parse output — whisper.cpp with --no-timestamps outputs plain text after a blank line
+    const text = stdout
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('whisper_') && !line.startsWith('ggml_') && !line.startsWith('main:') && !line.startsWith('system_info') && line !== '[BLANK_AUDIO]')
+      .join(' ')
+      .trim()
 
+    console.log(`[whisper] Parsed text: "${text}"`)
     return { text, durationMs: Date.now() - startTime }
   } catch (err) {
     console.error('[whisper] Error:', err)
