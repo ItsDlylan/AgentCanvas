@@ -4,7 +4,7 @@ import { formatHotkey, captureHotkey, DEFAULT_HOTKEYS } from '@/hooks/useHotkeys
 import { DEVICE_PRESETS } from '@/constants/devicePresets'
 import { v4 as uuid } from 'uuid'
 
-type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates' | 'notifications'
+type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates' | 'notifications' | 'voice'
 
 interface SettingsPageProps {
   onClose: () => void
@@ -18,7 +18,8 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'canvas', label: 'Canvas' },
   { id: 'hotkeys', label: 'Hotkeys' },
   { id: 'templates', label: 'Templates' },
-  { id: 'notifications', label: 'Notifications' }
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'voice', label: 'Voice' }
 ]
 
 // ── Shared input components ──────────────────────────────
@@ -955,6 +956,110 @@ function NotificationsSection({ settings, update }: { settings: Settings; update
   )
 }
 
+// ── Voice settings ───────────────────────────────────────
+
+function VoiceSection({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }) {
+  const v = settings.voice ?? { enabled: false, activationMode: 'push-to-talk', sttProvider: 'whisper', whisperModel: 'tiny', pushToTalkHotkey: 'Mod+Shift+V', wakeWord: 'hey_jarvis', audioFeedback: true, language: 'en', inputDeviceId: null, llmEndpoint: null, llmModel: null, ambientMonitoring: { onWaiting: true, onError: true, onExit: false, onNotification: false } }
+  const [devices, setDevices] = useState<Array<{ deviceId: string; label: string }>>([])
+
+  useEffect(() => {
+    // Request mic permission first (needed to get device labels)
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        stream.getTracks().forEach((t) => t.stop())
+        return navigator.mediaDevices.enumerateDevices()
+      })
+      .then((all) => {
+        const audioInputs = all
+          .filter((d) => d.kind === 'audioinput')
+          .map((d) => ({ deviceId: d.deviceId, label: d.label || `Mic ${d.deviceId.slice(0, 8)}` }))
+        setDevices(audioInputs)
+      })
+      .catch(() => {})
+  }, [])
+
+  return (
+    <div>
+      <h2 className="mb-4 text-sm font-semibold text-zinc-200">Voice</h2>
+      <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
+        <SettingRow label="Enable Voice" description="Enable voice commands via microphone">
+          <Toggle value={v.enabled} onChange={(val) => update({ voice: { ...v, enabled: val } })} />
+        </SettingRow>
+
+        <SettingRow label="Input Device" description="Microphone to use for voice commands">
+          <SelectInput
+            value={v.inputDeviceId ?? ''}
+            onChange={(val) => update({ voice: { ...v, inputDeviceId: val || null } })}
+            options={[
+              { value: '', label: 'System Default' },
+              ...devices.map((d) => ({ value: d.deviceId, label: d.label }))
+            ]}
+          />
+        </SettingRow>
+
+        <SettingRow label="Activation Mode" description="How voice listening is triggered">
+          <SelectInput
+            value={v.activationMode}
+            onChange={(val) => update({ voice: { ...v, activationMode: val as 'push-to-talk' | 'wake-word' | 'always' } })}
+            options={[
+              { value: 'push-to-talk', label: 'Push to Talk' },
+              { value: 'wake-word', label: 'Wake Word' },
+              { value: 'always', label: 'Always On' }
+            ]}
+          />
+        </SettingRow>
+
+        {v.activationMode === 'wake-word' && (
+          <SettingRow label="Wake Word" description="Say this to activate voice commands">
+            <SelectInput
+              value={v.wakeWord}
+              onChange={(val) => update({ voice: { ...v, wakeWord: val } })}
+              options={[
+                { value: 'hey_jarvis', label: 'Hey Jarvis' },
+                { value: 'alexa', label: 'Alexa' },
+                { value: 'hey_mycroft', label: 'Hey Mycroft' },
+                { value: 'hey_rhasspy', label: 'Hey Rhasspy' }
+              ]}
+            />
+          </SettingRow>
+        )}
+
+        <SettingRow label="STT Provider" description="Speech-to-text engine for transcription">
+          <SelectInput
+            value={v.sttProvider}
+            onChange={(val) => update({ voice: { ...v, sttProvider: val as 'whisper' | 'vosk' | 'web-speech' } })}
+            options={[
+              { value: 'whisper', label: 'Whisper (local)' },
+              { value: 'vosk', label: 'Vosk (local)' },
+              { value: 'web-speech', label: 'Web Speech API' }
+            ]}
+          />
+        </SettingRow>
+
+        {v.sttProvider === 'whisper' && (
+          <SettingRow label="Whisper Model" description="Larger models are more accurate but slower">
+            <SelectInput
+              value={v.whisperModel}
+              onChange={(val) => update({ voice: { ...v, whisperModel: val as 'tiny' | 'base' | 'small' } })}
+              options={[
+                { value: 'tiny', label: 'Tiny (75 MB, fastest)' },
+                { value: 'base', label: 'Base (142 MB)' },
+                { value: 'small', label: 'Small (466 MB, most accurate)' }
+              ]}
+            />
+          </SettingRow>
+        )}
+
+        <SettingRow label="Push-to-Talk Hotkey" description="Keyboard shortcut to activate voice">
+          <span className="rounded border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-300">
+            {v.pushToTalkHotkey}
+          </span>
+        </SettingRow>
+      </div>
+    </div>
+  )
+}
+
 // ── Main settings page ───────────────────────────────────
 
 function SettingsPageComponent({ onClose }: SettingsPageProps) {
@@ -1028,6 +1133,7 @@ function SettingsPageComponent({ onClose }: SettingsPageProps) {
           {activeCategory === 'hotkeys' && <HotkeysSection settings={settings} update={update} />}
           {activeCategory === 'templates' && <TemplatesSection settings={settings} update={update} />}
           {activeCategory === 'notifications' && <NotificationsSection settings={settings} update={update} />}
+          {activeCategory === 'voice' && <VoiceSection settings={settings} update={update} />}
         </div>
       </div>
     </div>

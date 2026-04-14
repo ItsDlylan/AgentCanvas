@@ -6,6 +6,7 @@ import { executeAction } from '@/voice/action-executor'
 import { buildContext } from '@/voice/context-builder'
 import { useCanvasStore } from '@/store/canvas-store'
 import { defaultTileWidth, defaultTileHeight } from '@/store/canvas-store'
+import { createActivationController, type ActivationController } from '@/voice/activation-modes'
 import type { NumberedTile } from '@/components/VoiceNumberOverlay'
 
 export interface UseVoiceReturn {
@@ -35,6 +36,9 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   const [numberedTiles, setNumberedTiles] = useState<NumberedTile[]>([])
   const numberMapRef = useRef<Map<number, string>>(new Map())
 
+  // Activation controller (manages VAD + audio stream lifecycle per mode)
+  const controllerRef = useRef<ActivationController | null>(null)
+  // Fallback VAD ref for push-to-talk (backward compat)
   const vadRef = useRef<VADInstance | null>(null)
   const cleanupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const modelReady = useRef(false)
@@ -43,6 +47,9 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
 
   // Pending destructive action waiting for confirmation
   const pendingAction = useRef<VoiceAction | null>(null)
+
+  // Track activation mode to detect changes
+  const activationModeRef = useRef(settings.activationMode)
 
   // Ensure Whisper model is downloaded before first transcription
   useEffect(() => {
@@ -67,6 +74,81 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       if (cleanupTimerRef.current) clearTimeout(cleanupTimerRef.current)
     }
   }, [mode, transcript, error])
+
+  // ── Wake word event listener ──
+  useEffect(() => {
+    if (!settings.enabled || settings.activationMode !== 'wake-word') return
+
+    const unsubscribe = window.voice.onWakeWordDetected(() => {
+      setMode('listening')
+      setTranscript(null)
+      setError(null)
+      // The activation controller handles starting VAD on wake
+      controllerRef.current?.handleWakeEvent()
+    })
+
+    return unsubscribe
+  }, [settings.enabled, settings.activationMode])
+
+  // ── Initialize activation controller for wake-word and always-on modes ──
+  useEffect(() => {
+    if (!settings.enabled) return
+    if (settings.activationMode === 'push-to-talk') return
+
+    // Activation mode changed — rebuild controller
+    if (controllerRef.current && activationModeRef.current !== settings.activationMode) {
+      controllerRef.current.destroy()
+      controllerRef.current = null
+    }
+    activationModeRef.current = settings.activationMode
+
+    const initController = async () => {
+      // For wake-word mode, ensure models are loaded
+      if (settings.activationMode === 'wake-word') {
+        const result = await window.voice.startWakeWordEngine(settings.wakeWord)
+        if (!result.ok) {
+          setError(result.error ?? 'Wake word engine failed to start')
+          return
+        }
+      }
+
+      const controller = createActivationController(settings.activationMode, {
+        onSpeechStart: () => {},
+        onSpeechEnd: (audio) => {
+          transcribeAudio(audio)
+        },
+        onVADMisfire: () => {},
+        onWakeWordDetected: () => {
+          setMode('listening')
+          setTranscript(null)
+        }
+      }, settings.inputDeviceId)
+
+      controllerRef.current = controller
+
+      try {
+        await controller.start()
+        if (settings.activationMode === 'always-on') {
+          setMode('listening')
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to start voice')
+      }
+    }
+
+    initController()
+
+    return () => {
+      if (controllerRef.current) {
+        controllerRef.current.destroy()
+        controllerRef.current = null
+      }
+      if (settings.activationMode === 'wake-word') {
+        window.voice.stopWakeWordEngine()
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.enabled, settings.activationMode, settings.wakeWord])
 
   const dismissOverlay = useCallback(() => {
     setNumberOverlayActive(false)
@@ -127,7 +209,6 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     if (!instance) return
 
     const viewport = instance.getViewport()
-    // We need the DOM element dimensions to calculate visible area
     const flowEl = document.querySelector('.react-flow') as HTMLElement
     if (!flowEl) return
     const { width, height } = flowEl.getBoundingClientRect()
@@ -156,9 +237,10 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     const result = matchCommand(text, modeRef.current, context)
 
     if (!result) {
-      // No command matched — just show the transcript
       setTranscript(text)
       setMode('idle')
+      // Notify controller that transcription is done (for always-on restart)
+      controllerRef.current?.handleTranscriptionComplete()
       return
     }
 
@@ -171,12 +253,14 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
         setTranscript(execResult.message)
       }
       setMode('idle')
+      controllerRef.current?.handleTranscriptionComplete()
       return
     }
     if (result.action.type === 'confirm.no') {
       pendingAction.current = null
       setTranscript('Cancelled')
       setMode('idle')
+      controllerRef.current?.handleTranscriptionComplete()
       return
     }
 
@@ -196,6 +280,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       activateNumberOverlay()
       setTranscript(execResult.message)
       setMode('idle')
+      controllerRef.current?.handleTranscriptionComplete()
       return
     }
     if (execResult.overlay === 'grid') {
@@ -203,6 +288,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       setNumberOverlayActive(false)
       setTranscript(execResult.message)
       setMode('idle')
+      controllerRef.current?.handleTranscriptionComplete()
       return
     }
     if (execResult.selectedNumber !== undefined) {
@@ -211,6 +297,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       } else if (gridOverlayActive) {
         selectGridRegion(execResult.selectedNumber)
       }
+      controllerRef.current?.handleTranscriptionComplete()
       return
     }
 
@@ -220,6 +307,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       setTranscript(null)
     }
     setMode('idle')
+    controllerRef.current?.handleTranscriptionComplete()
   }, [activateNumberOverlay, handleNumberSelection, selectGridRegion, numberOverlayActive, gridOverlayActive])
 
   const transcribeAudio = useCallback(async (audio: Float32Array) => {
@@ -232,6 +320,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
         if (!dl.ok) {
           setError(dl.error ?? 'Model download failed')
           setMode('idle')
+          controllerRef.current?.handleTranscriptionComplete()
           return
         }
         modelReady.current = true
@@ -243,6 +332,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       if (!text) {
         setTranscript(null)
         setMode('idle')
+        controllerRef.current?.handleTranscriptionComplete()
         return
       }
 
@@ -251,9 +341,11 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Transcription failed')
       setMode('idle')
+      controllerRef.current?.handleTranscriptionComplete()
     }
   }, [settings.sttProvider, settings.whisperModel, processCommand])
 
+  // ── Push-to-talk start/stop (original behavior) ──
   const startListening = useCallback(async () => {
     if (mode !== 'idle' && mode !== 'confirming') return
 
@@ -261,11 +353,11 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     if (mode !== 'confirming') setTranscript(null)
     setMode(mode === 'confirming' ? 'confirming' : 'listening')
 
-    // For confirming mode, start listening for yes/no
     if (mode === 'confirming') {
       setMode('listening')
     }
 
+    // Hotkey always works as manual push-to-talk regardless of activation mode
     try {
       if (!vadRef.current) {
         vadRef.current = await createVAD({
@@ -274,7 +366,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
             transcribeAudio(audio)
           },
           onVADMisfire: () => {}
-        })
+        }, {}, settings.inputDeviceId)
       }
       vadRef.current.start()
     } catch (err) {
@@ -301,6 +393,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
         setTranscript(result.message)
       }
       setMode('idle')
+      controllerRef.current?.handleTranscriptionComplete()
     }
   }, [mode])
 
@@ -309,15 +402,20 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       pendingAction.current = null
       setTranscript('Cancelled')
       setMode('idle')
+      controllerRef.current?.handleTranscriptionComplete()
     }
   }, [mode])
 
-  // Cleanup VAD on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (vadRef.current) {
         vadRef.current.destroy()
         vadRef.current = null
+      }
+      if (controllerRef.current) {
+        controllerRef.current.destroy()
+        controllerRef.current = null
       }
     }
   }, [])

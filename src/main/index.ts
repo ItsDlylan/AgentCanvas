@@ -642,6 +642,73 @@ ipcMain.handle('voice:model-status', async () => {
   return getModelStatus()
 })
 
+// ── Wake Word IPC Handlers ────────────────────────────────
+import {
+  processAudioFrame,
+  loadWakeWordEngine,
+  unloadWakeWordEngine,
+  downloadWakeWordModels,
+  getWakeWordModelStatus,
+  isWakeWordReady
+} from './voice/wake-word'
+
+let wakeWordActive = false
+let wakeWordErrorLogged = false
+let lastDetectionTime = 0
+const DETECTION_COOLDOWN_MS = 3000 // 3s debounce between detections
+
+ipcMain.on('wake-word:audio-frame', async (_event, frame: Buffer) => {
+  if (!wakeWordActive) return
+
+  try {
+    // Reconstruct Float32Array from Buffer
+    const aligned = new ArrayBuffer(frame.byteLength)
+    new Uint8Array(aligned).set(new Uint8Array(frame))
+    const samples = new Float32Array(aligned)
+
+    const probability = await processAudioFrame(samples)
+    if (probability !== null && probability > 0.25) {
+      const now = Date.now()
+      if (now - lastDetectionTime > DETECTION_COOLDOWN_MS) {
+        lastDetectionTime = now
+        console.log(`[wake-word] Detected! probability=${probability.toFixed(3)}`)
+        mainWindow?.webContents.send('wake-word:detected')
+      }
+    }
+  } catch (err) {
+    if (!wakeWordErrorLogged) {
+      console.error('[wake-word] Frame processing error:', (err as Error).message)
+      wakeWordErrorLogged = true
+    }
+  }
+})
+
+ipcMain.handle('wake-word:load-model', async (_event, { wakeWord }: { wakeWord: string }) => {
+  return downloadWakeWordModels(wakeWord)
+})
+
+ipcMain.handle('wake-word:start', async (_event, { wakeWord }: { wakeWord: string }) => {
+  if (!isWakeWordReady(wakeWord)) {
+    const dl = await downloadWakeWordModels(wakeWord)
+    if (!dl.ok) return dl
+  }
+  const result = await loadWakeWordEngine(wakeWord)
+  if (result.ok) {
+    wakeWordActive = true
+    wakeWordErrorLogged = false
+  }
+  return result
+})
+
+ipcMain.on('wake-word:stop', () => {
+  wakeWordActive = false
+  unloadWakeWordEngine()
+})
+
+ipcMain.handle('wake-word:model-status', async () => {
+  return getWakeWordModelStatus()
+})
+
 // ── Batched PTY Output ────────────────────────────────────
 // Buffer PTY data per session and flush every 4ms to avoid
 // flooding the IPC channel (Solo uses the same 4ms interval).

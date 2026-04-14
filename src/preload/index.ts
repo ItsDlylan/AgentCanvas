@@ -551,6 +551,13 @@ export interface VoiceAPI {
   loadModel: (model: string) => Promise<{ ok: boolean; error?: string }>
   getModelStatus: () => Promise<VoiceModelStatus[]>
   onModelProgress: (callback: (model: string, progress: number) => void) => () => void
+  // Wake word
+  sendAudioFrame: (frame: Float32Array) => void
+  loadWakeWordModel: (wakeWord: string) => Promise<{ ok: boolean; error?: string }>
+  startWakeWordEngine: (wakeWord: string) => Promise<{ ok: boolean; error?: string }>
+  stopWakeWordEngine: () => void
+  onWakeWordDetected: (callback: () => void) => () => void
+  getWakeWordModelStatus: () => Promise<Array<{ model: string; downloaded: boolean }>>
 }
 
 const voiceAPI: VoiceAPI = {
@@ -566,7 +573,21 @@ const voiceAPI: VoiceAPI = {
     const handler = (_event: Electron.IpcRendererEvent, model: string, progress: number) => callback(model, progress)
     ipcRenderer.on('voice:model-progress', handler)
     return () => ipcRenderer.removeListener('voice:model-progress', handler)
-  }
+  },
+  // Wake word
+  sendAudioFrame: (frame) => {
+    const bytes = new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength)
+    ipcRenderer.send('wake-word:audio-frame', Buffer.from(bytes))
+  },
+  loadWakeWordModel: (wakeWord) => ipcRenderer.invoke('wake-word:load-model', { wakeWord }),
+  startWakeWordEngine: (wakeWord) => ipcRenderer.invoke('wake-word:start', { wakeWord }),
+  stopWakeWordEngine: () => { ipcRenderer.send('wake-word:stop') },
+  onWakeWordDetected: (callback) => {
+    const handler = () => callback()
+    ipcRenderer.on('wake-word:detected', handler)
+    return () => ipcRenderer.removeListener('wake-word:detected', handler)
+  },
+  getWakeWordModelStatus: () => ipcRenderer.invoke('wake-word:model-status')
 }
 
 contextBridge.exposeInMainWorld('voice', voiceAPI)

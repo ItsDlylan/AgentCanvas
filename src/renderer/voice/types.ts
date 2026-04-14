@@ -11,6 +11,7 @@ export interface VoiceSettings {
   wakeWord: string
   audioFeedback: boolean
   language: string
+  inputDeviceId: string | null
   llmEndpoint: string | null
   llmModel: string | null
   ambientMonitoring: {
@@ -80,9 +81,10 @@ export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   sttProvider: 'whisper',
   whisperModel: 'tiny',
   pushToTalkHotkey: 'Mod+Shift+V',
-  wakeWord: 'canvas',
+  wakeWord: 'hey_jarvis',
   audioFeedback: true,
   language: 'en',
+  inputDeviceId: null,
   llmEndpoint: null,
   llmModel: null,
   ambientMonitoring: {

@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { TerminalAPI, BrowserAPI, WorkspaceAPI, NoteAPI, AttachmentAPI, DrawAPI, SettingsAPI, IdeAPI, TerminalTilesAPI, BrowserTilesAPI, DiffAPI, EdgeAPI, PomodoroAPI, NotifyAPI } from '../preload/index'
+import type { TerminalAPI, BrowserAPI, WorkspaceAPI, NoteAPI, AttachmentAPI, DrawAPI, SettingsAPI, IdeAPI, TerminalTilesAPI, BrowserTilesAPI, DiffAPI, EdgeAPI, PomodoroAPI, NotifyAPI, VoiceAPI } from '../preload/index'
 
 declare global {
   interface Window {
@@ -18,6 +18,7 @@ declare global {
     edges: EdgeAPI
     pomodoro: PomodoroAPI
     notify: NotifyAPI
+    voice: VoiceAPI
   }
 
   namespace JSX {

@@ -35,7 +35,8 @@ const DEFAULT_OPTIONS: VADOptions = {
 
 export async function createVAD(
   callbacks: VADCallbacks,
-  options: VADOptions = {}
+  options: VADOptions = {},
+  deviceId?: string | null
 ): Promise<VADInstance> {
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
@@ -44,11 +45,26 @@ export async function createVAD(
   // from node_modules — intercepted at the root path.
   const basePath = import.meta.env.DEV ? '/vad/' : './vad/'
 
+  // Build audio constraints with optional device selection
+  const audioConstraints: MediaTrackConstraints = {
+    channelCount: 1,
+    echoCancellation: true,
+    autoGainControl: true,
+    noiseSuppression: true,
+    ...(deviceId ? { deviceId: { exact: deviceId } } : {})
+  }
+
+  const getStream = async () => {
+    return navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+  }
+
   const vadOptions: Partial<RealTimeVADOptions> = {
     baseAssetPath: basePath,
     onnxWASMBasePath: '/',
     model: 'legacy',
     submitUserSpeechOnPause: true,
+    getStream,
+    resumeStream: getStream,
     positiveSpeechThreshold: opts.positiveSpeechThreshold,
     negativeSpeechThreshold: opts.negativeSpeechThreshold,
     preSpeechPadFrames: opts.preSpeechPadFrames,

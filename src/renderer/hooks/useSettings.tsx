@@ -40,9 +40,10 @@ const FALLBACK: Settings = {
     sttProvider: 'whisper' as const,
     whisperModel: 'tiny' as const,
     pushToTalkHotkey: 'Mod+Shift+V',
-    wakeWord: 'canvas',
+    wakeWord: 'hey_jarvis',
     audioFeedback: true,
     language: 'en',
+    inputDeviceId: null,
     llmEndpoint: null,
     llmModel: null,
     ambientMonitoring: { onWaiting: true, onError: true, onExit: false, onNotification: false }
