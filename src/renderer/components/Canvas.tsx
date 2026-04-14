@@ -69,6 +69,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
 }
 
 function minimapNodeColor(node: Node): string {
+  if ((node.data as Record<string, unknown>)?.isBackground) return 'transparent'
   return MINIMAP_NODE_COLORS[node.type ?? ''] ?? '#71717a'
 }
 
