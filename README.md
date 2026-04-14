@@ -330,6 +330,7 @@ Plus custom environment variables configured in Settings > Terminal.
 - **feat:** Comprehensive element editing for draw tile
 - **feat:** Allow workspaces to set a default browser URL
 - **feat:** macOS DMG packaging and app icon — first downloadable release (v0.1.0)
+- **feat:** Clicking a link in a terminal opens a browser tile on the canvas
 - **fix:** Prevent terminal scroll jumping to middle on Enter
 - **fix:** Prevent shortcuts from firing while typing in note tiles
 - **fix:** Hide other-workspace browsers from minimap
