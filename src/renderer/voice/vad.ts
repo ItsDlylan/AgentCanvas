@@ -26,10 +26,10 @@ export interface VADOptions {
 }
 
 const DEFAULT_OPTIONS: VADOptions = {
-  positiveSpeechThreshold: 0.8,
-  negativeSpeechThreshold: 0.3,
-  preSpeechPadFrames: 3,
-  redemptionFrames: 8,
+  positiveSpeechThreshold: 0.5,
+  negativeSpeechThreshold: 0.15,
+  preSpeechPadFrames: 5,
+  redemptionFrames: 12,
   minSpeechFrames: 3
 }
 
@@ -48,6 +48,7 @@ export async function createVAD(
     baseAssetPath: basePath,
     onnxWASMBasePath: '/',
     model: 'legacy',
+    submitUserSpeechOnPause: true,
     positiveSpeechThreshold: opts.positiveSpeechThreshold,
     negativeSpeechThreshold: opts.negativeSpeechThreshold,
     preSpeechPadFrames: opts.preSpeechPadFrames,
