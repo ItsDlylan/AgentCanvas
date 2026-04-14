@@ -555,7 +555,15 @@ export interface VoiceAPI {
 
 const voiceAPI: VoiceAPI = {
   transcribe: (audio, provider) => {
-    // Copy raw bytes into a standalone Buffer (not a view into a pooled ArrayBuffer)
+    // Debug: check if data survived context bridge
+    let peak = 0
+    for (let i = 0; i < audio.length; i++) {
+      const abs = Math.abs(audio[i])
+      if (abs > peak) peak = abs
+    }
+    console.log(`[preload] audio peak: ${peak.toFixed(4)}, length: ${audio.length}, type: ${audio.constructor.name}`)
+
+    // Copy raw bytes into a standalone Buffer
     const bytes = new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength)
     const buf = Buffer.from(bytes)
     return ipcRenderer.invoke('voice:transcribe', { audio: buf, provider })
