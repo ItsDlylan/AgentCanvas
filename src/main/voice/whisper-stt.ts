@@ -129,8 +129,6 @@ export async function transcribe(
 ): Promise<{ text: string; durationMs: number }> {
   const startTime = Date.now()
 
-  console.log(`[whisper] Received ${audioSamples.length} samples, first 5: [${audioSamples.slice(0, 5).map(v => v.toFixed(4)).join(', ')}]`)
-
   const modelPath = getModelPath(model)
   if (!existsSync(modelPath)) {
     throw new Error(`Model '${model}' not downloaded. Call voice:load-model first.`)
@@ -148,7 +146,6 @@ export async function transcribe(
   // Normalize quiet audio so Whisper can hear it — scale peak to ~0.9
   if (peak > 0.001 && peak < 0.5) {
     const gain = 0.9 / peak
-    console.log(`[whisper] Normalizing audio: peak ${peak.toFixed(4)} → gain ${gain.toFixed(1)}x`)
     for (let i = 0; i < float32.length; i++) {
       float32[i] = Math.max(-1, Math.min(1, float32[i] * gain))
     }
@@ -159,26 +156,17 @@ export async function transcribe(
   const wavBuffer = float32ToWav(float32)
   writeFileSync(tmpFile, wavBuffer)
 
-  // Verify file was written correctly
-  const { statSync } = require('fs') as typeof import('fs')
-  const stat = statSync(tmpFile)
-  console.log(`[whisper] WAV: ${wavBuffer.length} bytes written, file size on disk: ${stat.size}, peak: ${peak.toFixed(4)}, file: ${tmpFile}`)
-
   try {
     // Call whisper.cpp directly — whisper-node's wrapper silently drops output
     const appRoot = app.getAppPath()
     const whisperDir = join(appRoot, 'node_modules', 'whisper-node', 'lib', 'whisper.cpp')
     const whisperBin = join(whisperDir, 'main')
     const args = ['-l', 'en', '-m', modelPath, '-f', tmpFile, '--no-timestamps']
-    console.log(`[whisper] Running: ${whisperBin} ${args.join(' ')}`)
-
     const stdout = execFileSync(whisperBin, args, {
       timeout: 30000,
       encoding: 'utf-8',
       cwd: whisperDir
     })
-
-    console.log(`[whisper] Raw stdout: ${JSON.stringify(stdout.slice(0, 500))}`)
 
     // Parse output — strip whisper.cpp metadata, artifacts, and blank audio markers
     const text = stdout
@@ -197,7 +185,6 @@ export async function transcribe(
       .replace(/\s+/g, ' ')
       .trim()
 
-    console.log(`[whisper] Parsed text: "${text}"`)
     return { text, durationMs: Date.now() - startTime }
   } catch (err) {
     console.error('[whisper] Error:', err)
