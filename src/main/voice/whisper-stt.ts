@@ -5,7 +5,7 @@
 import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
-import { execSync } from 'child_process'
+import { execFileSync } from 'child_process'
 import { randomUUID } from 'crypto'
 
 type WhisperModel = 'tiny' | 'base' | 'small'
@@ -166,14 +166,16 @@ export async function transcribe(
 
   try {
     // Call whisper.cpp directly — whisper-node's wrapper silently drops output
-    const whisperBin = join(__dirname, '..', '..', '..', 'node_modules', 'whisper-node', 'lib', 'whisper.cpp', 'main')
-    const cmd = `"${whisperBin}" -l en -m "${modelPath}" -f "${tmpFile}" --no-timestamps`
-    console.log(`[whisper] Running: ${cmd}`)
+    const appRoot = app.getAppPath()
+    const whisperDir = join(appRoot, 'node_modules', 'whisper-node', 'lib', 'whisper.cpp')
+    const whisperBin = join(whisperDir, 'main')
+    const args = ['-l', 'en', '-m', modelPath, '-f', tmpFile, '--no-timestamps']
+    console.log(`[whisper] Running: ${whisperBin} ${args.join(' ')}`)
 
-    const stdout = execSync(cmd, {
+    const stdout = execFileSync(whisperBin, args, {
       timeout: 30000,
       encoding: 'utf-8',
-      cwd: join(__dirname, '..', '..', '..', 'node_modules', 'whisper-node', 'lib', 'whisper.cpp')
+      cwd: whisperDir
     })
 
     console.log(`[whisper] Raw stdout: ${JSON.stringify(stdout.slice(0, 500))}`)
