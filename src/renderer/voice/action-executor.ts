@@ -2,6 +2,7 @@
 // Maps VoiceAction types to Zustand store callbacks.
 // Handles confirmation flow for destructive actions.
 // Maintains undo stack for reversible actions.
+// Uses pre-resolved sessionIds from context when available.
 
 import type { VoiceAction, UndoableAction } from './types'
 import { useCanvasStore } from '@/store/canvas-store'
@@ -17,6 +18,13 @@ export interface ExecuteResult {
 
 export function executeAction(action: VoiceAction): ExecuteResult {
   const store = useCanvasStore.getState()
+
+  // If context resolution found ambiguity, report it
+  if (action.params.ambiguous && action.params.candidates) {
+    const candidates = action.params.candidates as Array<{ label: string; type: string }>
+    const list = candidates.map((c) => `${c.label} (${c.type})`).join(', ')
+    return { ok: false, message: `Which one? ${list}` }
+  }
 
   switch (action.type) {
     // ── Tile spawning (immediate) ──
@@ -42,36 +50,53 @@ export function executeAction(action: VoiceAction): ExecuteResult {
     }
 
     case 'tile.rename': {
-      const { focusedId } = store
-      if (!focusedId) return { ok: false, message: 'No tile focused' }
+      const targetId = (action.params.sessionId as string) ?? store.focusedId
+      if (!targetId) return { ok: false, message: 'No tile focused' }
       const label = action.params.label as string
       const oldNode = store.allNodes.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === focusedId
+        (n) => (n.data as Record<string, unknown>).sessionId === targetId
       )
       const oldLabel = oldNode ? (oldNode.data as Record<string, unknown>).label as string : ''
-      store.renameTile(focusedId, label)
-      pushUndo(action, () => store.renameTile(focusedId, oldLabel))
+      store.renameTile(targetId, label)
+      pushUndo(action, () => store.renameTile(targetId, oldLabel))
       return { ok: true, message: `Renamed to "${label}"` }
     }
 
     // ── Tile destruction (requires confirmation) ──
 
     case 'tile.closeFocused': {
-      const { focusedId } = store
-      if (!focusedId) return { ok: false, message: 'No tile focused' }
+      const targetId = (action.params.sessionId as string) ?? store.focusedId
+      if (!targetId) return { ok: false, message: 'No tile focused' }
       const node = store.allNodes.find(
-        (n) => (n.data as Record<string, unknown>).sessionId === focusedId
+        (n) => (n.data as Record<string, unknown>).sessionId === targetId
       )
-      const label = node ? (node.data as Record<string, unknown>).label as string : focusedId
+      const label = node ? (node.data as Record<string, unknown>).label as string : targetId
       if (node?.type === 'notes') {
-        store.closeNote(focusedId)
+        store.closeNote(targetId)
       } else {
-        store.killTile(focusedId)
+        store.killTile(targetId)
       }
       return { ok: true, message: `Closed "${label}"` }
     }
 
     case 'tile.closeByLabel': {
+      // Use pre-resolved sessionId if available
+      if (action.params.sessionId) {
+        const sid = action.params.sessionId as string
+        const node = store.allNodes.find(
+          (n) => (n.data as Record<string, unknown>).sessionId === sid
+        )
+        if (!node) return { ok: false, message: 'Tile not found' }
+        const label = (node.data as Record<string, unknown>).label as string
+        if (node.type === 'notes') {
+          store.closeNote(sid)
+        } else {
+          store.killTile(sid)
+        }
+        return { ok: true, message: `Closed "${label}"` }
+      }
+
+      // Fallback: search by label text
       const label = (action.params.label as string).toLowerCase()
       const node = store.allNodes.find((n) => {
         const l = (n.data as Record<string, unknown>).label as string
@@ -98,6 +123,15 @@ export function executeAction(action: VoiceAction): ExecuteResult {
     }
 
     case 'navigate.tile': {
+      // Use pre-resolved sessionId if available
+      if (action.params.sessionId) {
+        const sid = action.params.sessionId as string
+        const resolvedLabel = (action.params.resolvedLabel as string) ?? sid
+        store.focusTile(sid)
+        return { ok: true, message: `Focused "${resolvedLabel}"` }
+      }
+
+      // Fallback: search by label text
       const label = (action.params.label as string).toLowerCase()
       const node = store.allNodes.find((n) => {
         const l = (n.data as Record<string, unknown>).label as string
@@ -125,25 +159,35 @@ export function executeAction(action: VoiceAction): ExecuteResult {
 
     case 'agent.approve':
     case 'agent.reject': {
-      const { focusedId } = store
-      if (!focusedId) return { ok: false, message: 'No terminal focused' }
+      const targetId = (action.params.sessionId as string) ?? store.focusedId
+      if (!targetId) return { ok: false, message: 'No terminal focused' }
       const input = action.type === 'agent.approve' ? 'y\n' : 'n\n'
-      window.terminal.write(focusedId, input)
+      window.terminal.write(targetId, input)
       return { ok: true, message: action.type === 'agent.approve' ? 'Approved' : 'Rejected' }
     }
 
     case 'agent.interrupt': {
-      const { focusedId } = store
-      if (!focusedId) return { ok: false, message: 'No terminal focused' }
-      window.terminal.write(focusedId, '\x03')
+      const targetId = (action.params.sessionId as string) ?? store.focusedId
+      if (!targetId) return { ok: false, message: 'No terminal focused' }
+      window.terminal.write(targetId, '\x03')
       return { ok: true, message: 'Interrupted' }
     }
 
     case 'agent.sendInput': {
-      const { focusedId } = store
-      if (!focusedId) return { ok: false, message: 'No terminal focused' }
-      window.terminal.write(focusedId, (action.params.text as string) + '\n')
+      const targetId = (action.params.sessionId as string) ?? store.focusedId
+      if (!targetId) return { ok: false, message: 'No terminal focused' }
+      window.terminal.write(targetId, (action.params.text as string) + '\n')
       return { ok: true, message: 'Sent' }
+    }
+
+    case 'agent.tellTo': {
+      // Target resolved by agent-resolver via context
+      const targetId = action.params.sessionId as string
+      if (!targetId) return { ok: false, message: 'Could not find that agent' }
+      const message = action.params.message as string
+      window.terminal.write(targetId, message + '\n')
+      const label = (action.params.resolvedLabel as string) ?? targetId
+      return { ok: true, message: `Sent to "${label}"` }
     }
 
     // ── Queries ──

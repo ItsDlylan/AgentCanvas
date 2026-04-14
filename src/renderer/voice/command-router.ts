@@ -1,12 +1,15 @@
 // ── Command router ────────────────────────────────────────
 // Routes normalized transcripts through pattern tiers to produce VoiceActions.
 // Tier 1: Regex pattern matching (<50ms)
-// Tier 2: Levenshtein fuzzy matching (future)
+// Tier 2: Levenshtein fuzzy matching (<5ms)
 // Tier 3: Local LLM via Ollama/LM Studio (future)
 
-import type { VoiceAction, VoiceMode } from './types'
+import type { VoiceAction, VoiceMode, VoiceContext } from './types'
 import { normalize } from './normalize'
 import { patterns } from './patterns'
+import { resolveTarget, type ResolveResult } from './context-builder'
+import { resolveAgent } from './agent-resolver'
+import { fuzzyMatch } from './levenshtein'
 
 export interface MatchResult {
   action: VoiceAction
@@ -21,9 +24,27 @@ const CONFIRM_PATTERNS: Array<{ pattern: RegExp; response: 'yes' | 'no' }> = [
   { pattern: /^(?:no|reject|deny|cancel|nevermind|stop)$/, response: 'no' }
 ]
 
+// Canonical command strings for Tier 2 fuzzy matching
+// Built from the first pattern of each entry (with regex anchors/groups stripped)
+const COMMAND_CORPUS = buildCommandCorpus()
+
+function buildCommandCorpus(): Array<{ text: string; patternIndex: number }> {
+  return patterns.map((p, i) => {
+    // Convert the first regex to a plain string by stripping regex syntax
+    const raw = p.patterns[0].source
+      .replace(/^\^/, '')
+      .replace(/\$$/, '')
+      .replace(/\(\?:([^)]+)\)/g, (_m, group) => group.split('|')[0])
+      .replace(/\(\.?\+\)/g, '...')
+      .replace(/\\/g, '')
+    return { text: raw, patternIndex: i }
+  })
+}
+
 export function matchCommand(
   transcript: string,
-  mode: VoiceMode
+  mode: VoiceMode,
+  context?: VoiceContext
 ): MatchResult | null {
   const raw = transcript
   const normalized = normalize(transcript)
@@ -60,22 +81,87 @@ export function matchCommand(
       const match = normalized.match(regex)
       if (match) {
         const params = pattern.extract ? pattern.extract(match) : {}
-        return {
-          action: {
-            type: pattern.action,
-            params,
-            destructive: pattern.destructive ?? false
-          },
-          raw,
-          normalized,
-          tier: 1
+        const action: VoiceAction = {
+          type: pattern.action,
+          params,
+          destructive: pattern.destructive ?? false
         }
+
+        // Resolve context references in params if context is available
+        if (context) {
+          resolveActionParams(action, context)
+        }
+
+        return { action, raw, normalized, tier: 1 }
       }
     }
   }
 
-  // Tier 2: Levenshtein fuzzy matching (future — M3)
+  // Tier 2: Levenshtein fuzzy matching against command corpus
+  const fuzzyResult = fuzzyMatch(
+    normalized,
+    COMMAND_CORPUS,
+    (c) => c.text,
+    0.3
+  )
+
+  if (fuzzyResult) {
+    const pattern = patterns[fuzzyResult.item.patternIndex]
+    const action: VoiceAction = {
+      type: pattern.action,
+      params: {},
+      destructive: pattern.destructive ?? false
+    }
+
+    if (context) {
+      resolveActionParams(action, context)
+    }
+
+    return { action, raw, normalized, tier: 2 }
+  }
+
   // Tier 3: Local LLM (future — M9)
 
   return null
+}
+
+// ── Context resolution ───────────────────────────────────
+// Enriches action params with resolved tile IDs from context.
+
+function resolveActionParams(action: VoiceAction, context: VoiceContext): void {
+  const { type, params } = action
+
+  // Resolve label-based targets to sessionIds
+  if (params.label && typeof params.label === 'string') {
+    const result = resolveTarget(params.label, context)
+    applyResolution(action, result)
+  }
+
+  // Resolve agent targets for "tell X to Y"
+  if (type === 'agent.tellTo' && params.target && typeof params.target === 'string') {
+    const result = resolveAgent(params.target, context)
+    applyResolution(action, result)
+  }
+
+  // "close this" / "close focused" — resolve focused tile
+  if ((type === 'tile.closeFocused' || type === 'tile.rename') && !params.sessionId) {
+    if (context.focusedTileId) {
+      params.sessionId = context.focusedTileId
+    }
+  }
+}
+
+function applyResolution(action: VoiceAction, result: ResolveResult): void {
+  if (result.resolved && result.tiles?.length) {
+    action.params.sessionId = result.tiles[0].sessionId
+    action.params.resolvedLabel = result.tiles[0].label
+    action.targets = result.tiles.map((t) => t.sessionId)
+  } else if (result.reason === 'ambiguous' && result.candidates) {
+    action.params.ambiguous = true
+    action.params.candidates = result.candidates.map((t) => ({
+      sessionId: t.sessionId,
+      label: t.label,
+      type: t.type
+    }))
+  }
 }

@@ -3,6 +3,7 @@ import type { VoiceMode, VoiceSettings, VoiceAction } from '@/voice/types'
 import { createVAD, type VADInstance } from '@/voice/vad'
 import { matchCommand } from '@/voice/command-router'
 import { executeAction } from '@/voice/action-executor'
+import { buildContext } from '@/voice/context-builder'
 
 export interface UseVoiceReturn {
   mode: VoiceMode
@@ -53,7 +54,8 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   }, [mode, transcript, error])
 
   const processCommand = useCallback((text: string) => {
-    const result = matchCommand(text, modeRef.current)
+    const context = buildContext()
+    const result = matchCommand(text, modeRef.current, context)
 
     if (!result) {
       // No command matched — just show the transcript
