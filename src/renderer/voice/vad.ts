@@ -39,12 +39,14 @@ export async function createVAD(
 ): Promise<VADInstance> {
   const opts = { ...DEFAULT_OPTIONS, ...options }
 
-  // VAD model + worklet are served from public/vad/ as static assets.
-  // ONNX Runtime WASM files resolve through Vite's node_modules serving — do NOT override onnxWASMBasePath.
+  // VAD model + worklet served from public/vad/.
+  // ONNX Runtime WASM files (.mjs + .wasm) served by the serveOnnxWasm Vite plugin
+  // from node_modules — intercepted at the root path.
   const basePath = import.meta.env.DEV ? '/vad/' : './vad/'
 
   const vadOptions: Partial<RealTimeVADOptions> = {
     baseAssetPath: basePath,
+    onnxWASMBasePath: '/',
     model: 'legacy',
     positiveSpeechThreshold: opts.positiveSpeechThreshold,
     negativeSpeechThreshold: opts.negativeSpeechThreshold,
