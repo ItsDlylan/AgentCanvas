@@ -40,3 +40,37 @@ curl -s -X POST $AGENT_CANVAS_API/api/notify \
 ```
 
 Levels: `info` (default), `success`, `warning`, `error`. Error notifications are sticky (no auto-dismiss).
+
+### Spawning terminal tiles (agent orchestration)
+
+Spawn a worker terminal tile linked to the current terminal. The new tile appears in a radial fan layout with a purple edge connecting it to the source terminal.
+
+```bash
+curl -s -X POST $AGENT_CANVAS_API/api/terminal/spawn \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"label\": \"Security Reviewer\",
+    \"cwd\": \"$(pwd)\",
+    \"command\": \"claude -p 'Review src/auth for vulnerabilities'\",
+    \"linkedTerminalId\": \"$AGENT_CANVAS_TERMINAL_ID\",
+    \"metadata\": {
+      \"team\": { \"role\": \"security-reviewer\", \"teamName\": \"code-review\" }
+    }
+  }"
+```
+
+Parameters:
+- **`label`** — Tile name displayed in the header
+- **`cwd`** — Working directory for the new terminal
+- **`command`** — Command to auto-run after the shell initializes
+- **`linkedTerminalId`** — Source terminal ID for edge + radial positioning
+- **`width`** / **`height`** — Tile dimensions (default 640x400)
+- **`metadata`** — Arbitrary metadata; `metadata.team` enables team visual styling (purple ring, role badge)
+
+Write to an existing terminal:
+
+```bash
+curl -s -X POST $AGENT_CANVAS_API/api/terminal/write \
+  -H 'Content-Type: application/json' \
+  -d "{\"terminalId\": \"<id>\", \"data\": \"ls -la\\n\"}"
+```

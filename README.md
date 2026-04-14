@@ -323,6 +323,13 @@ Plus custom environment variables configured in Settings > Terminal.
 
 ## Changelog
 
+### 2026-04-14
+
+- **feat:** Agent orchestration workspace — `POST /api/terminal/spawn` lets agents programmatically spawn worker terminal tiles with radial fan layout, purple team edges, auto-type commands, and team role badges (Lead/Worker)
+- **feat:** Gold crown badge on orchestrator terminal tiles (`metadata.team.isLead`)
+- **feat:** `POST /api/terminal/write` endpoint to send commands to any terminal tile
+- **feat:** Passive team detection via file watcher on `~/.claude/teams/` for Claude Code Agent Teams integration
+
 ### 2026-04-13 / 04-14
 
 - **feat:** Persistent browser sessions and Chrome extension side-loading

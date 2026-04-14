@@ -235,6 +235,29 @@ function snapToGrid(
   return best ?? { x: 100, y: 100 + existingNodes.length * stepY }
 }
 
+/** Compute radial position for the Nth worker tile around a source tile. */
+function radialPosition(
+  source: { x: number; y: number; width: number; height: number },
+  index: number,
+  total: number,
+  radius = 800
+): { x: number; y: number } {
+  // Spread workers in a semicircle to the right of the source (-70° to +70°)
+  const arcStart = -70 * (Math.PI / 180)
+  const arcEnd = 70 * (Math.PI / 180)
+  const angle = total <= 1
+    ? 0 // Single worker: directly to the right
+    : arcStart + (index / (total - 1)) * (arcEnd - arcStart)
+
+  const centerX = source.x + source.width / 2
+  const centerY = source.y + source.height / 2
+
+  return {
+    x: centerX + Math.cos(angle) * radius,
+    y: centerY + Math.sin(angle) * radius
+  }
+}
+
 // ── Jump hints overlay (Ctrl-hold to show, press letter to jump) ──
 
 // 1-9, 0, then A-Z
@@ -1376,6 +1399,101 @@ export default function Canvas() {
       addBrowserForTerminal(terminalId, url)
     })
   }, [addBrowserForTerminal])
+
+  // ── Spawn a terminal tile linked to another terminal (agent orchestration) ──
+  const addTerminalForTerminal = useCallback(
+    (info: {
+      terminalId: string; label?: string; cwd?: string; command?: string;
+      linkedTerminalId?: string; width?: number; height?: number;
+      metadata?: Record<string, unknown>
+    }) => {
+      const { terminalId: sessionId, label, cwd, command, linkedTerminalId, width = 640, height = 400, metadata } = info
+
+      const sourceNode = linkedTerminalId
+        ? allNodesRef.current.find((n) => (n.data as Record<string, unknown>).sessionId === linkedTerminalId)
+        : undefined
+
+      // Collect existing linked worker tiles for radial index
+      const existingLinked = linkedTerminalId
+        ? allNodesRef.current.filter((n) => {
+            const meta = (n.data as Record<string, unknown>).metadata as Record<string, unknown> | undefined
+            const team = meta?.team as Record<string, unknown> | undefined
+            return n.type === 'terminal' && team?.linkedTerminalId === linkedTerminalId
+          })
+        : []
+
+      const workerIndex = existingLinked.length
+      const totalWorkers = workerIndex + 1
+
+      let pos: { x: number; y: number }
+      if (sourceNode) {
+        const srcW = (sourceNode.style?.width as number) ?? 640
+        const srcH = (sourceNode.style?.height as number) ?? 400
+        const src = { x: sourceNode.position.x, y: sourceNode.position.y, width: srcW, height: srcH }
+        pos = radialPosition(src, workerIndex, totalWorkers)
+
+        // Reposition existing workers for even spacing across the arc
+        if (totalWorkers > 1) {
+          setAllNodes((nds) =>
+            nds.map((n) => {
+              const idx = existingLinked.findIndex((e) => e.id === n.id)
+              if (idx < 0) return n
+              return { ...n, position: radialPosition(src, idx, totalWorkers) }
+            })
+          )
+        }
+      } else {
+        pos = findOpenPosition(visibleNodes, width, height, 4, settings.canvas.tileGap)
+      }
+
+      tileCount++
+      const newNode: Node = {
+        id: sessionId,
+        type: 'terminal',
+        position: pos,
+        style: { width, height },
+        data: {
+          sessionId,
+          label: label || `Worker ${tileCount}`,
+          cwd: cwd || (sourceNode ? (sourceNode.data as Record<string, unknown>).cwd : undefined),
+          metadata: {
+            ...(metadata || {}),
+            team: { ...((metadata?.team as Record<string, unknown>) || {}), linkedTerminalId }
+          },
+          command
+        },
+        dragHandle: '.terminal-tile-header'
+      }
+
+      setAllNodes((nds) => [...nds, newNode])
+      const wsId = linkedTerminalId ? tileWorkspaceMapRef.current.get(linkedTerminalId) : undefined
+      setTileWorkspaceMap((prev) => new Map(prev).set(sessionId, wsId ?? activeWorkspaceIdRef.current))
+
+      // Purple edge from source → worker
+      if (sourceNode && linkedTerminalId) {
+        setAllEdges((eds) => [
+          ...eds,
+          {
+            id: `team-${linkedTerminalId}-${sessionId}`,
+            source: linkedTerminalId,
+            target: sessionId,
+            animated: true,
+            style: { stroke: '#8b5cf6', strokeWidth: 2 }
+          }
+        ])
+      }
+
+      setFocusedId(sessionId)
+    },
+    [visibleNodes, settings.canvas.tileGap]
+  )
+
+  useEffect(() => {
+    const unsub = window.terminal.onTerminalSpawn((info) => {
+      addTerminalForTerminal(info)
+    })
+    return unsub
+  }, [addTerminalForTerminal])
 
   // Handle Cmd+R / Ctrl+R / F5 — globalShortcut in the main process intercepts
   // the key at the OS level and sends IPC here. Reload the focused browser tile.

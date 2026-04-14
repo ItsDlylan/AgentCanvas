@@ -33,6 +33,11 @@ export interface TerminalAPI {
   onBrowserResize: (callback: (sessionId: string, width: number, height: number) => void) => () => void
   rename: (id: string, label: string) => Promise<void>
   onTileRename: (callback: (sessionId: string, label: string) => void) => () => void
+  onTerminalSpawn: (callback: (info: {
+    terminalId: string; label?: string; cwd?: string; command?: string;
+    linkedTerminalId?: string; width?: number; height?: number;
+    metadata?: Record<string, unknown>
+  }) => void) => () => void
 }
 
 const terminalAPI: TerminalAPI = {
@@ -106,6 +111,21 @@ const terminalAPI: TerminalAPI = {
     }
     ipcRenderer.on('canvas:tile-rename', handler)
     return () => ipcRenderer.removeListener('canvas:tile-rename', handler)
+  },
+
+  onTerminalSpawn: (callback) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      info: {
+        terminalId: string; label?: string; cwd?: string; command?: string;
+        linkedTerminalId?: string; width?: number; height?: number;
+        metadata?: Record<string, unknown>
+      }
+    ) => {
+      callback(info)
+    }
+    ipcRenderer.on('canvas:terminal-spawn', handler)
+    return () => ipcRenderer.removeListener('canvas:terminal-spawn', handler)
   }
 }
 

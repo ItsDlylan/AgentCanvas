@@ -7,11 +7,13 @@ import { EventEmitter } from 'events'
  * Local HTTP API that anything inside a terminal can call to control AgentCanvas.
  *
  * Endpoints:
- *   POST /api/browser/open   { url, terminalId? }  → spawn a browser tile
- *   POST /api/browser/close  { sessionId }          → close a browser tile
- *   POST /api/tile/rename    { sessionId, label }   → rename any tile
- *   POST /api/notify         { body, title?, level?, terminalId?, duration?, sound? } → toast notification
- *   GET  /api/status                                 → list all tiles
+ *   POST /api/browser/open      { url, terminalId? }  → spawn a browser tile
+ *   POST /api/browser/close     { sessionId }          → close a browser tile
+ *   POST /api/terminal/spawn    { label?, cwd?, command?, linkedTerminalId?, width?, height?, metadata? } → spawn a terminal tile
+ *   POST /api/terminal/write    { terminalId, data }   → write data to a terminal
+ *   POST /api/tile/rename       { sessionId, label }   → rename any tile
+ *   POST /api/notify            { body, title?, level?, terminalId?, duration?, sound? } → toast notification
+ *   GET  /api/status                                    → list all tiles
  *
  * Injected into every terminal as AGENT_CANVAS_API=http://127.0.0.1:<port>
  */
@@ -219,6 +221,42 @@ export class CanvasApi extends EventEmitter {
           return
         }
         this.emit('draw-close', { sessionId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/terminal/spawn') {
+      this.readBody(req).then((body) => {
+        const { label, cwd, command, linkedTerminalId, width, height, metadata } = body as {
+          label?: string; cwd?: string; command?: string; linkedTerminalId?: string;
+          width?: number; height?: number; metadata?: Record<string, unknown>
+        }
+        this.emit('terminal-spawn', { label, cwd, command, linkedTerminalId, width, height, metadata }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/terminal/write') {
+      this.readBody(req).then((body) => {
+        const { terminalId, data } = body as { terminalId?: string; data?: string }
+        if (!terminalId || !data) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'terminalId and data are required' }))
+          return
+        }
+        this.emit('terminal-write', { terminalId, data }, (result: unknown) => {
           res.writeHead(200)
           res.end(JSON.stringify(result))
         })

@@ -15,6 +15,7 @@ export interface TerminalNodeData {
   label: string
   cwd?: string
   metadata?: Record<string, unknown>
+  command?: string
 }
 
 const STATUS_CONFIG: Record<TerminalStatus, { dot: string; text: string; label: string }> = {
@@ -32,7 +33,7 @@ function shortenPath(path: string): string {
 
 function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
-  const { sessionId, label, cwd: initialCwd, metadata: initialMetadata } = data as unknown as TerminalNodeData
+  const { sessionId, label, cwd: initialCwd, metadata: initialMetadata, command } = data as unknown as TerminalNodeData
   const { focusedId, setFocusedId, killTerminal, killHighlight, toggleDiffViewer, hasDiffViewer, renameTile } = useFocusedTerminal()
   const showingDiff = hasDiffViewer(sessionId)
   const { settings } = useSettings()
@@ -47,6 +48,7 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
   const status = statusInfo?.status ?? 'running'
   const cwd = statusInfo?.cwd
   const cfg = STATUS_CONFIG[status]
+  const teamMeta = statusInfo?.metadata?.team as { isLead?: boolean; role?: string; teamName?: string; linkedTerminalId?: string } | undefined
 
   const appearance = {
     terminalFontFamily: settings.appearance.terminalFontFamily,
@@ -57,7 +59,7 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
     scrollback: settings.terminal.scrollback
   }
 
-  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, metadata: initialMetadata, appearance, hotkeys: settings.hotkeys, onExit: killTerminal })
+  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, metadata: initialMetadata, command, appearance, hotkeys: settings.hotkeys, onExit: killTerminal })
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)
@@ -131,9 +133,11 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
       className={`terminal-tile ${
         isFocused && killHighlight
           ? 'ring-1 ring-red-500/80 shadow-[0_0_25px_rgba(239,68,68,0.3)] animate-pulse'
-          : isFocused
-            ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
-            : ''
+          : isFocused && teamMeta
+            ? 'ring-1 ring-purple-500/60 shadow-[0_0_20px_rgba(139,92,246,0.15)]'
+            : isFocused
+              ? 'ring-1 ring-blue-500/60 shadow-[0_0_20px_rgba(59,130,246,0.15)]'
+              : ''
       }`}
       style={{ width: '100%', height: '100%', pointerEvents: isPanning ? 'none' : 'auto' }}
       onMouseDown={handleFocus}
@@ -142,10 +146,17 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
         minWidth={300}
         minHeight={200}
         isVisible={isFocused}
-        color="#3b82f6"
+        color={teamMeta ? '#8b5cf6' : '#3b82f6'}
         onResizeStart={onResizeStart}
         onResizeEnd={onResizeEnd}
       />
+
+      {/* Crown badge for orchestrator/lead */}
+      {teamMeta?.isLead && (
+        <div className="absolute -top-3 -left-3 z-50 pointer-events-none">
+          <span className="text-xl drop-shadow-[0_0_6px_rgba(234,179,8,0.5)]">👑</span>
+        </div>
+      )}
 
       {/* Dimension overlay during resize */}
       {isResizing && width != null && height != null && (
@@ -157,10 +168,10 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
       )}
 
       {/* Header */}
-      <div className={`terminal-tile-header ${isFocused ? 'border-b-blue-500/30' : ''}`}>
+      <div className={`terminal-tile-header ${isFocused ? (teamMeta ? 'border-b-purple-500/30' : 'border-b-blue-500/30') : ''}`}>
         <div className="flex flex-col gap-0.5">
           <div className="flex items-center gap-2">
-            <span className={`h-2 w-2 shrink-0 rounded-full ${isFocused ? 'bg-blue-400' : cfg.dot}`} />
+            <span className={`h-2 w-2 shrink-0 rounded-full ${isFocused ? (teamMeta ? 'bg-purple-400' : 'bg-blue-400') : cfg.dot}`} />
             <EditableLabel
               label={label}
               onRename={(newLabel) => renameTile(sessionId, newLabel)}
@@ -180,6 +191,16 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
             >
               {(statusInfo.metadata.worktree as { branch?: string }).branch}
             </span>
+          )}
+          {teamMeta && (
+            <div className="pl-4 flex items-center gap-1.5">
+              <span className={`text-[10px] font-medium ${teamMeta.isLead ? 'text-purple-400' : 'text-violet-400'}`}>
+                {teamMeta.isLead ? 'Lead' : teamMeta.role || 'Worker'}
+              </span>
+              {teamMeta.teamName && (
+                <span className="text-[10px] text-zinc-600">{teamMeta.teamName}</span>
+              )}
+            </div>
           )}
         </div>
         <div className="flex items-center gap-1">

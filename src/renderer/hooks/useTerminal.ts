@@ -21,6 +21,7 @@ interface UseTerminalOptions {
   label: string
   cwd?: string
   metadata?: Record<string, unknown>
+  command?: string
   appearance?: TerminalAppearance
   hotkeys?: HotkeySettings
   onReady?: () => void
@@ -37,7 +38,7 @@ interface UseTerminalOptions {
  * the PTY keeps running, the next mount replays the scrollback buffer from
  * the main process so no history is lost.
  */
-export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotkeys, onReady, onExit }: UseTerminalOptions) {
+export function useTerminal({ sessionId, label, cwd, metadata, command, appearance, hotkeys, onReady, onExit }: UseTerminalOptions) {
   const containerRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -257,6 +258,13 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
 
       window.terminal.resize(sessionId, term.cols, term.rows)
       onReady?.()
+
+      // Auto-type command for programmatically spawned terminals
+      if (command && !result.isReconnect) {
+        setTimeout(() => {
+          if (!cancelled) window.terminal.write(sessionId, command + '\n')
+        }, 500)
+      }
     })()
 
     return () => {

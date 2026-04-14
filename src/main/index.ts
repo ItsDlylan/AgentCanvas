@@ -22,6 +22,7 @@ import { loadPomodoro, savePomodoro } from './pomodoro-store'
 import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-store'
 import { DiffService } from './diff-service'
 import { loadExtensions, getLoadedExtensions, getExtensionsDir } from './extension-loader'
+import { TeamWatcher } from './team-watcher'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -36,6 +37,7 @@ const browserManager = new BrowserManager()
 const cdpProxy = new CdpProxy()
 const canvasApi = new CanvasApi()
 const diffService = new DiffService()
+const teamWatcher = new TeamWatcher()
 let mainWindow: BrowserWindow | null = null
 let canvasApiPort = 0
 
@@ -768,6 +770,29 @@ canvasApi.on('draw-close', (info: { sessionId: string }, reply: (result: unknown
   reply({ ok: true })
 })
 
+canvasApi.on('terminal-spawn', (info: {
+  label?: string; cwd?: string; command?: string; linkedTerminalId?: string;
+  width?: number; height?: number; metadata?: Record<string, unknown>
+}, reply: (result: unknown) => void) => {
+  const terminalId = crypto.randomUUID()
+  mainWindow?.webContents.send('canvas:terminal-spawn', {
+    terminalId,
+    label: info.label,
+    cwd: info.cwd,
+    command: info.command,
+    linkedTerminalId: info.linkedTerminalId,
+    width: info.width,
+    height: info.height,
+    metadata: info.metadata
+  })
+  reply({ ok: true, terminalId })
+})
+
+canvasApi.on('terminal-write', (info: { terminalId: string; data: string }, reply: (result: unknown) => void) => {
+  terminalManager.write(info.terminalId, info.data)
+  reply({ ok: true })
+})
+
 canvasApi.on('notify', (info: {
   id: string; title?: string; body: string; level: string;
   terminalId?: string; duration: number; sound: boolean; timestamp: number
@@ -800,6 +825,25 @@ canvasApi.on('status-request', (reply: (data: unknown) => void) => {
   const browsers = browserManager.listSessions()
   reply({ terminals, browsers })
 })
+
+// ── Team Watcher (passive detection of Claude Code Agent Teams) ──
+
+teamWatcher.on('teammate-added', ({ teamName, member }: { teamName: string; member: { name: string; agentId: string; agentType?: string } }) => {
+  mainWindow?.webContents.send('canvas:terminal-spawn', {
+    terminalId: crypto.randomUUID(),
+    label: member.name,
+    metadata: {
+      team: {
+        role: member.agentType || 'worker',
+        teamName,
+        isLead: false,
+        agentId: member.agentId
+      }
+    }
+  })
+})
+
+teamWatcher.start()
 
 // ── Custom Protocol ──────────────────────────────────────
 
@@ -937,5 +981,6 @@ app.on('window-all-closed', () => {
   browserManager.destroyAll()
   cdpProxy.destroyAll()
   canvasApi.stop()
+  teamWatcher.stop()
   if (process.platform !== 'darwin') app.quit()
 })
