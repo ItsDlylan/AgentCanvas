@@ -27,9 +27,9 @@ export interface VADOptions {
 
 const DEFAULT_OPTIONS: VADOptions = {
   positiveSpeechThreshold: 0.5,
-  negativeSpeechThreshold: 0.15,
-  preSpeechPadFrames: 5,
-  redemptionFrames: 12,
+  negativeSpeechThreshold: 0.35,
+  preSpeechPadFrames: 1,
+  redemptionFrames: 8,
   minSpeechFrames: 3
 }
 
@@ -54,13 +54,22 @@ export async function createVAD(
     preSpeechPadFrames: opts.preSpeechPadFrames,
     redemptionFrames: opts.redemptionFrames,
     minSpeechFrames: opts.minSpeechFrames,
+    onFrameProcessed: (probs) => {
+      // Debug: log speech probability every ~500ms (every 16th frame at 30fps)
+      if (Math.random() < 0.06) {
+        console.log(`[VAD] speech prob: ${probs.isSpeech.toFixed(3)}`)
+      }
+    },
     onSpeechStart: () => {
+      console.log('[VAD] speech start')
       callbacks.onSpeechStart?.()
     },
     onSpeechEnd: (audio: Float32Array) => {
+      console.log(`[VAD] speech end — ${audio.length} samples (${(audio.length / 16000).toFixed(1)}s)`)
       callbacks.onSpeechEnd?.(audio)
     },
     onVADMisfire: () => {
+      console.log('[VAD] misfire (speech too short)')
       callbacks.onVADMisfire?.()
     }
   }
