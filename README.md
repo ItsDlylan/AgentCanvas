@@ -5,6 +5,12 @@ An infinite canvas Electron app for spawning terminal and browser tiles side by 
 <!-- Add a hero screenshot of the full canvas with terminals and browsers open -->
 ![AgentCanvas Screenshot](docs/screenshots/canvas-overview.png)
 
+## Download
+
+Download the latest release for macOS from the [Releases page](https://github.com/ItsDlylan/AgentCanvas/releases).
+
+> **Note:** The app is not code-signed. On first launch, right-click the app and select **Open**, then click **Open** again in the dialog.
+
 ## Features
 
 ### Terminal Tiles
@@ -139,6 +145,20 @@ npm run dev
 ```bash
 npm run build
 npm run preview  # preview the production build
+```
+
+### Package (macOS DMG)
+
+```bash
+npm run dist:mac
+```
+
+This creates a DMG installer in `dist/`. To upload a release to GitHub:
+
+```bash
+git tag v0.1.0
+git push origin --tags
+gh release create v0.1.0 dist/*.dmg --title "AgentCanvas v0.1.0" --notes "Initial release"
 ```
 
 ### Optional: Claude Code Stop Hook

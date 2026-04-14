@@ -3,11 +3,17 @@
   "version": "0.1.0",
   "description": "Infinite canvas for spawning terminal agents",
   "main": "./out/main/index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ItsDlylan/AgentCanvas.git"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
     "setup:claude-hook": "bash scripts/setup-claude-hook.sh",
     "test:notifications": "bash scripts/test-notifications.sh"
   },
@@ -54,8 +60,38 @@
   "build": {
     "appId": "com.agentcanvas.app",
     "productName": "AgentCanvas",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "out/**/*",
+      "node_modules/node-pty/**/*",
+      "node_modules/ws/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
     "mac": {
-      "target": "dir"
+      "category": "public.app-category.developer-tools",
+      "icon": "resources/icon.icns",
+      "darkModeSupport": true,
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["arm64", "x64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["arm64", "x64"]
+        }
+      ]
+    },
+    "dmg": {
+      "contents": [
+        { "x": 130, "y": 220 },
+        { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+      ]
     }
   }
 }
