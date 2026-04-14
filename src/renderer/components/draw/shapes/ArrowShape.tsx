@@ -2,30 +2,18 @@
  * Arrow rendering with binding recalculation.
  * Arrows connect shapes via normalized anchor points.
  */
-import { Shape as KonvaShape, Text as KonvaText, Group } from 'react-konva'
+import { Shape as KonvaShape, Text as KonvaText, Group, Circle } from 'react-konva'
 import rough from 'roughjs'
 import type { Arrow, Shape } from '@/lib/draw-types'
+import { resolveBinding, findNearestBinding } from '@/lib/draw-types'
 
 interface ArrowShapeProps {
   arrow: Arrow
   shapes: Shape[]
   isSelected: boolean
   onSelect: (id: string) => void
-}
-
-/** Resolve a binding to absolute coordinates */
-function resolveBinding(
-  binding: { shapeId: string; anchor: { x: number; y: number } } | null,
-  fallback: { x: number; y: number },
-  shapes: Shape[]
-): { x: number; y: number } {
-  if (!binding) return fallback
-  const shape = shapes.find((s) => s.id === binding.shapeId)
-  if (!shape) return fallback
-  return {
-    x: shape.x + shape.width * binding.anchor.x,
-    y: shape.y + shape.height * binding.anchor.y
-  }
+  onDoubleClick: (id: string) => void
+  updateArrow: (id: string, updates: Partial<Arrow>) => void
 }
 
 /** Draw an arrowhead at the end point */
@@ -53,7 +41,7 @@ function drawArrowHead(
   ctx.stroke()
 }
 
-export function ArrowShapeComponent({ arrow, shapes, isSelected, onSelect }: ArrowShapeProps) {
+export function ArrowShapeComponent({ arrow, shapes, isSelected, onSelect, onDoubleClick, updateArrow }: ArrowShapeProps) {
   const start = resolveBinding(arrow.startBinding, arrow.startPoint, shapes)
   const end = resolveBinding(arrow.endBinding, arrow.endPoint, shapes)
 
@@ -92,6 +80,8 @@ export function ArrowShapeComponent({ arrow, shapes, isSelected, onSelect }: Arr
         }}
         onClick={() => onSelect(arrow.id)}
         onTap={() => onSelect(arrow.id)}
+        onDblClick={() => onDoubleClick(arrow.id)}
+        onDblTap={() => onDoubleClick(arrow.id)}
       />
 
       {/* Arrow label */}
@@ -109,6 +99,48 @@ export function ArrowShapeComponent({ arrow, shapes, isSelected, onSelect }: Arr
           fill="#a1a1aa"
           listening={false}
         />
+      )}
+
+      {/* Endpoint drag handles when selected */}
+      {isSelected && (
+        <>
+          <Circle
+            x={start.x}
+            y={start.y}
+            radius={6}
+            fill="#3b82f6"
+            stroke="#1d4ed8"
+            strokeWidth={2}
+            draggable
+            onDragEnd={(e) => {
+              const newX = e.target.x()
+              const newY = e.target.y()
+              const newBinding = findNearestBinding(newX, newY, shapes)
+              updateArrow(arrow.id, {
+                startPoint: { x: newX, y: newY },
+                startBinding: newBinding
+              })
+            }}
+          />
+          <Circle
+            x={end.x}
+            y={end.y}
+            radius={6}
+            fill="#3b82f6"
+            stroke="#1d4ed8"
+            strokeWidth={2}
+            draggable
+            onDragEnd={(e) => {
+              const newX = e.target.x()
+              const newY = e.target.y()
+              const newBinding = findNearestBinding(newX, newY, shapes)
+              updateArrow(arrow.id, {
+                endPoint: { x: newX, y: newY },
+                endBinding: newBinding
+              })
+            }}
+          />
+        </>
       )}
     </Group>
   )

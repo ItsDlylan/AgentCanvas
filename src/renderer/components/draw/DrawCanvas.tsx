@@ -3,9 +3,10 @@
  * Handles rendering all shapes, arrows, freehand, grid, and interaction.
  */
 import { useCallback, useRef, useEffect, useState } from 'react'
-import { Stage, Layer, Rect, Line } from 'react-konva'
+import { Stage, Layer, Rect, Line, Transformer } from 'react-konva'
 import type Konva from 'konva'
-import type { DrawingState, Shape, Arrow, FreehandStroke, Camera } from '@/lib/draw-types'
+import type { DrawingState, Shape, Arrow, FreehandStroke, Camera, TextShape } from '@/lib/draw-types'
+import { resolveBinding } from '@/lib/draw-types'
 import { RoughShapeComponent } from './shapes/RoughShape'
 import { ArrowShapeComponent } from './shapes/ArrowShape'
 import { FreehandShapeComponent } from './shapes/FreehandShape'
@@ -17,9 +18,13 @@ interface DrawCanvasProps {
   height: number
   selectedIds: Set<string>
   setSelectedIds: (ids: Set<string>) => void
+  editingId: string | null
+  setEditingId: (id: string | null) => void
   addShape: (shape: Shape) => void
   updateShape: (id: string, updates: Partial<Shape>) => void
+  updateArrow: (id: string, updates: Partial<Arrow>) => void
   addArrow: (arrow: Arrow) => void
+  updateFreehand: (id: string, updates: Partial<FreehandStroke>) => void
   addFreehand: (stroke: FreehandStroke) => void
   deleteSelected: () => void
   updateCamera: (camera: Camera) => void
@@ -37,9 +42,13 @@ export function DrawCanvas({
   height,
   selectedIds,
   setSelectedIds,
+  editingId,
+  setEditingId,
   addShape,
   updateShape,
+  updateArrow,
   addArrow,
+  updateFreehand,
   addFreehand,
   deleteSelected,
   updateCamera,
@@ -49,6 +58,10 @@ export function DrawCanvas({
   const stageRef = useRef<Konva.Stage>(null)
   const middleDragRef = useRef<{ startX: number; startY: number; camX: number; camY: number } | null>(null)
   const [gridSnap, setGridSnap] = useState(false)
+  const transformerRef = useRef<Konva.Transformer>(null)
+  const shapeNodesRef = useRef<Map<string, Konva.Group>>(new Map())
+  const editingIdRef = useRef(editingId)
+  editingIdRef.current = editingId
 
   // Camera lives in a ref to avoid re-rendering all shapes on pan/zoom.
   // Only the Stage transform + CSS grid background need updating.
@@ -142,9 +155,24 @@ export function DrawCanvas({
     }
   }, [applyCamera, updateCamera])
 
+  // Attach Transformer to selected shape nodes
+  useEffect(() => {
+    if (!transformerRef.current) return
+    const selectedNodes: Konva.Group[] = []
+    selectedIds.forEach((id) => {
+      const node = shapeNodesRef.current.get(id)
+      if (node) selectedNodes.push(node)
+    })
+    transformerRef.current.nodes(selectedNodes)
+    transformerRef.current.getLayer()?.batchDraw()
+  }, [selectedIds, state.shapes])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Suppress all shortcuts during inline text editing
+      if (editingIdRef.current) return
+
       if (e.key === 'Delete' || e.key === 'Backspace') {
         deleteSelected()
         e.preventDefault()
@@ -179,6 +207,35 @@ export function DrawCanvas({
     updateShape(id, { x, y })
   }, [updateShape])
 
+  const handleDoubleClick = useCallback((id: string) => {
+    setEditingId(id)
+  }, [setEditingId])
+
+  const registerShapeRef = useCallback((id: string, node: Konva.Group | null) => {
+    if (node) {
+      shapeNodesRef.current.set(id, node)
+    } else {
+      shapeNodesRef.current.delete(id)
+    }
+  }, [])
+
+  const handleTransformEnd = useCallback((id: string, node: Konva.Group) => {
+    const scaleX = node.scaleX()
+    const scaleY = node.scaleY()
+    const shape = state.shapes.find((s) => s.id === id)
+    if (!shape) return
+    updateShape(id, {
+      x: node.x(),
+      y: node.y(),
+      width: Math.max(20, shape.width * scaleX),
+      height: Math.max(20, shape.height * scaleY),
+      rotation: node.rotation()
+    })
+    // Reset scale — dimensions are now baked into width/height
+    node.scaleX(1)
+    node.scaleY(1)
+  }, [updateShape, state.shapes])
+
   const handleStageClick = useCallback((e: Konva.KonvaEventObject<MouseEvent>) => {
     // Only deselect if clicking empty stage area
     if (e.target === e.target.getStage()) {
@@ -205,11 +262,12 @@ export function DrawCanvas({
             middleDragRef.current = { startX: e.evt.clientX, startY: e.evt.clientY, camX: cam.x, camY: cam.y }
             return
           }
-          // Left click → tool action (or deselect on empty stage in select mode)
-          if (e.evt.button === 0) {
-            if (tools.activeTool !== 'select' || e.target !== e.target.getStage()) {
-              tools.onPointerDown(stageRef.current!, e)
-            }
+          // Left click → tool action (skip in select mode — shapes handle their
+          // own selection via onClick, and deselect on empty space is handled by
+          // handleStageClick. Calling onPointerDown here in select mode would
+          // deselect and break Transformer resize drags.)
+          if (e.evt.button === 0 && tools.activeTool !== 'select') {
+            tools.onPointerDown(stageRef.current!, e)
           }
         }}
         onMouseMove={(e) => {
@@ -247,8 +305,29 @@ export function DrawCanvas({
               isSelected={selectedIds.has(shape.id)}
               onSelect={handleShapeSelect}
               onDragEnd={handleShapeDragEnd}
+              onDoubleClick={handleDoubleClick}
+              registerRef={registerShapeRef}
+              onTransformEnd={handleTransformEnd}
             />
           ))}
+          <Transformer
+            ref={transformerRef}
+            rotateEnabled={true}
+            enabledAnchors={['top-left', 'top-center', 'top-right', 'middle-left', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']}
+            boundBoxFunc={(_oldBox, newBox) => {
+              if (Math.abs(newBox.width) < 20 || Math.abs(newBox.height) < 20) {
+                return _oldBox
+              }
+              return newBox
+            }}
+            borderStroke="#3b82f6"
+            borderStrokeWidth={1.5}
+            borderDash={[6, 3]}
+            anchorFill="#3b82f6"
+            anchorStroke="#1d4ed8"
+            anchorSize={8}
+            anchorCornerRadius={2}
+          />
         </Layer>
 
         {/* Arrows layer */}
@@ -260,6 +339,8 @@ export function DrawCanvas({
               shapes={state.shapes}
               isSelected={selectedIds.has(arrow.id)}
               onSelect={handleShapeSelect}
+              onDoubleClick={handleDoubleClick}
+              updateArrow={updateArrow}
             />
           ))}
         </Layer>
@@ -318,6 +399,84 @@ export function DrawCanvas({
           )}
         </Layer>
       </Stage>
+
+      {/* Inline text edit overlay */}
+      {editingId && (() => {
+        const shape = state.shapes.find((s) => s.id === editingId)
+        const arrow = state.arrows.find((a) => a.id === editingId)
+        if (!shape && !arrow) return null
+
+        const cam = cameraRef.current
+        let screenX: number, screenY: number, screenW: number, screenH: number
+        let currentText: string
+        let fontSize = 14
+
+        if (shape) {
+          screenX = shape.x * cam.zoom + cam.x
+          screenY = shape.y * cam.zoom + cam.y
+          screenW = shape.width * cam.zoom
+          screenH = shape.height * cam.zoom
+          currentText = shape.type === 'text' ? (shape as TextShape).text : shape.label
+          if (shape.type === 'text') fontSize = (shape as TextShape).fontSize
+        } else {
+          const start = resolveBinding(arrow!.startBinding, arrow!.startPoint, state.shapes)
+          const end = resolveBinding(arrow!.endBinding, arrow!.endPoint, state.shapes)
+          const midX = (start.x + end.x) / 2
+          const midY = (start.y + end.y) / 2
+          screenX = midX * cam.zoom + cam.x - 60
+          screenY = midY * cam.zoom + cam.y - 15
+          screenW = 120
+          screenH = 30
+          currentText = arrow!.label
+          fontSize = 11
+        }
+
+        return (
+          <textarea
+            autoFocus
+            defaultValue={currentText}
+            style={{
+              position: 'absolute',
+              left: screenX,
+              top: screenY,
+              width: screenW,
+              height: screenH,
+              fontSize: `${fontSize * cam.zoom}px`,
+              fontFamily: 'ui-monospace, monospace',
+              color: '#e4e4e7',
+              background: 'rgba(9, 9, 11, 0.95)',
+              border: '1px solid #3b82f6',
+              borderRadius: 4,
+              padding: '4px 8px',
+              resize: 'none',
+              outline: 'none',
+              textAlign: 'center',
+              zIndex: 10,
+              lineHeight: 1.4
+            }}
+            onBlur={(e) => {
+              const val = e.target.value
+              if (shape) {
+                const fieldKey = shape.type === 'text' ? 'text' : 'label'
+                updateShape(shape.id, { [fieldKey]: val } as Partial<Shape>)
+              } else if (arrow) {
+                updateArrow(arrow.id, { label: val })
+              }
+              setEditingId(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                ;(e.target as HTMLTextAreaElement).blur()
+              }
+              if (e.key === 'Escape') {
+                setEditingId(null)
+              }
+              e.stopPropagation()
+            }}
+          />
+        )
+      })()}
 
       {/* Toolbar overlay */}
       <DrawToolbarOverlay

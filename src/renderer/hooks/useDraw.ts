@@ -13,6 +13,7 @@ export function useDraw({ drawId }: { drawId: string }) {
   const [state, setState] = useState<DrawingState>(createEmptyDrawingState)
   const [loaded, setLoaded] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [editingId, setEditingId] = useState<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const drawIdRef = useRef(drawId)
   drawIdRef.current = drawId
@@ -143,8 +144,22 @@ export function useDraw({ drawId }: { drawId: string }) {
     }))
   }, [updateState])
 
+  const updateArrow = useCallback((id: string, updates: Partial<Arrow>) => {
+    updateState((prev) => ({
+      ...prev,
+      arrows: prev.arrows.map((a) => (a.id === id ? { ...a, ...updates } : a))
+    }))
+  }, [updateState])
+
   const addArrow = useCallback((arrow: Arrow) => {
     updateState((prev) => ({ ...prev, arrows: [...prev.arrows, arrow] }))
+  }, [updateState])
+
+  const updateFreehand = useCallback((id: string, updates: Partial<FreehandStroke>) => {
+    updateState((prev) => ({
+      ...prev,
+      freehand: prev.freehand.map((f) => (f.id === id ? { ...f, ...updates } : f))
+    }))
   }, [updateState])
 
   const addFreehand = useCallback((stroke: FreehandStroke) => {
@@ -193,9 +208,13 @@ export function useDraw({ drawId }: { drawId: string }) {
     loaded,
     selectedIds,
     setSelectedIds,
+    editingId,
+    setEditingId,
     addShape,
     updateShape,
+    updateArrow,
     addArrow,
+    updateFreehand,
     addFreehand,
     deleteSelected,
     updateCamera,

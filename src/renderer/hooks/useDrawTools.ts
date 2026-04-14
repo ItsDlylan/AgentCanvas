@@ -5,7 +5,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { v4 as uuid } from 'uuid'
 import type { DrawTool, Shape, Arrow, FreehandStroke, ArrowBinding, Camera } from '@/lib/draw-types'
-import { DEFAULT_SHAPE_STYLE, DEFAULT_ARROW_STYLE } from '@/lib/draw-types'
+import { DEFAULT_SHAPE_STYLE, DEFAULT_ARROW_STYLE, findNearestBinding } from '@/lib/draw-types'
 import type Konva from 'konva'
 
 interface UseDrawToolsOptions {
@@ -37,39 +37,6 @@ function screenToCanvas(screenX: number, screenY: number, camera: Camera): { x: 
     x: (screenX - camera.x) / camera.zoom,
     y: (screenY - camera.y) / camera.zoom
   }
-}
-
-/** Find the nearest shape edge anchor point for arrow binding */
-function findNearestBinding(
-  x: number,
-  y: number,
-  shapes: Shape[],
-  threshold = 30
-): ArrowBinding | null {
-  let best: ArrowBinding | null = null
-  let bestDist = threshold
-
-  for (const shape of shapes) {
-    // Check 4 anchor points: top, bottom, left, right
-    const anchors = [
-      { ax: 0.5, ay: 0 },   // top
-      { ax: 0.5, ay: 1 },   // bottom
-      { ax: 0, ay: 0.5 },   // left
-      { ax: 1, ay: 0.5 }    // right
-    ]
-
-    for (const { ax, ay } of anchors) {
-      const px = shape.x + shape.width * ax
-      const py = shape.y + shape.height * ay
-      const d = Math.hypot(x - px, y - py)
-      if (d < bestDist) {
-        bestDist = d
-        best = { shapeId: shape.id, anchor: { x: ax, y: ay } }
-      }
-    }
-  }
-
-  return best
 }
 
 export function useDrawTools({

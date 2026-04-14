@@ -3,8 +3,10 @@
  * Each shape type gets its own rough drawing function while sharing the Konva
  * interactivity layer (drag, select, transform, events).
  */
+import { useCallback, useEffect, useRef } from 'react'
 import { Shape as KonvaShape, Text as KonvaText, Group } from 'react-konva'
 import rough from 'roughjs'
+import type Konva from 'konva'
 import type { Shape, ShapeType } from '@/lib/draw-types'
 
 interface RoughShapeProps {
@@ -12,6 +14,9 @@ interface RoughShapeProps {
   isSelected: boolean
   onSelect: (id: string) => void
   onDragEnd: (id: string, x: number, y: number) => void
+  onDoubleClick: (id: string) => void
+  registerRef: (id: string, node: Konva.Group | null) => void
+  onTransformEnd: (id: string, node: Konva.Group) => void
 }
 
 /** Stable numeric seed from shape ID so RoughJS draws identically on every frame */
@@ -85,12 +90,26 @@ function drawRoughShape(
   }
 }
 
-export function RoughShapeComponent({ shape, isSelected, onSelect, onDragEnd }: RoughShapeProps) {
+export function RoughShapeComponent({ shape, isSelected, onSelect, onDragEnd, onDoubleClick, registerRef, onTransformEnd }: RoughShapeProps) {
   const isText = shape.type === 'text'
   const isDBTable = shape.type === 'dbTable'
+  const groupRef = useRef<Konva.Group>(null)
+
+  // Register/unregister the Group node ref for the Transformer
+  useEffect(() => {
+    registerRef(shape.id, groupRef.current)
+    return () => registerRef(shape.id, null)
+  }, [shape.id, registerRef])
+
+  const handleTransformEnd = useCallback(() => {
+    if (groupRef.current) {
+      onTransformEnd(shape.id, groupRef.current)
+    }
+  }, [shape.id, onTransformEnd])
 
   return (
     <Group
+      ref={groupRef}
       x={shape.x}
       y={shape.y}
       width={shape.width}
@@ -100,7 +119,10 @@ export function RoughShapeComponent({ shape, isSelected, onSelect, onDragEnd }: 
       draggable
       onClick={() => onSelect(shape.id)}
       onTap={() => onSelect(shape.id)}
+      onDblClick={() => onDoubleClick(shape.id)}
+      onDblTap={() => onDoubleClick(shape.id)}
       onDragEnd={(e) => onDragEnd(shape.id, e.target.x(), e.target.y())}
+      onTransformEnd={handleTransformEnd}
     >
       {/* Rough drawn shape */}
       {!isText && (
@@ -133,22 +155,6 @@ export function RoughShapeComponent({ shape, isSelected, onSelect, onDragEnd }: 
           fontFamily={isText && 'fontFamily' in shape ? shape.fontFamily : 'ui-monospace, monospace'}
           fill="#e4e4e7"
           padding={8}
-          listening={false}
-        />
-      )}
-
-      {/* Selection ring */}
-      {isSelected && (
-        <KonvaShape
-          width={shape.width}
-          height={shape.height}
-          sceneFunc={(ctx) => {
-            ctx._context.strokeStyle = '#3b82f6'
-            ctx._context.lineWidth = 2
-            ctx._context.setLineDash([6, 3])
-            ctx._context.strokeRect(-3, -3, shape.width + 6, shape.height + 6)
-            ctx._context.setLineDash([])
-          }}
           listening={false}
         />
       )}

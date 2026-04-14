@@ -1,7 +1,7 @@
 /**
  * Freehand stroke rendering using perfect-freehand.
  */
-import { Shape as KonvaShape } from 'react-konva'
+import { Shape as KonvaShape, Rect as KonvaRect, Group } from 'react-konva'
 import getStroke from 'perfect-freehand'
 import type { FreehandStroke } from '@/lib/draw-types'
 
@@ -39,21 +39,45 @@ export function FreehandShapeComponent({ stroke, isSelected, onSelect }: Freehan
 
   const path = getSvgPathFromStroke(outlinePoints)
 
+  // Compute bounding box for selection indicator
+  const xs = stroke.points.map((p) => p[0])
+  const ys = stroke.points.map((p) => p[1])
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+
   return (
-    <KonvaShape
-      opacity={stroke.opacity}
-      sceneFunc={(ctx) => {
-        const p = new Path2D(path)
-        ctx._context.fillStyle = isSelected ? '#3b82f6' : stroke.stroke
-        ctx._context.fill(p)
-      }}
-      hitFunc={(ctx) => {
-        const p = new Path2D(path)
-        ctx._context.fillStyle = '#000'
-        ctx._context.fill(p)
-      }}
-      onClick={() => onSelect(stroke.id)}
-      onTap={() => onSelect(stroke.id)}
-    />
+    <Group>
+      <KonvaShape
+        opacity={stroke.opacity}
+        sceneFunc={(ctx) => {
+          const p = new Path2D(path)
+          ctx._context.fillStyle = isSelected ? '#3b82f6' : stroke.stroke
+          ctx._context.fill(p)
+        }}
+        hitFunc={(ctx) => {
+          const p = new Path2D(path)
+          ctx._context.fillStyle = '#000'
+          ctx._context.fill(p)
+        }}
+        onClick={() => onSelect(stroke.id)}
+        onTap={() => onSelect(stroke.id)}
+      />
+
+      {/* Bounding box selection indicator */}
+      {isSelected && (
+        <KonvaRect
+          x={minX - 4}
+          y={minY - 4}
+          width={maxX - minX + 8}
+          height={maxY - minY + 8}
+          stroke="#3b82f6"
+          strokeWidth={1.5}
+          dash={[6, 3]}
+          listening={false}
+        />
+      )}
+    </Group>
   )
 }

@@ -131,3 +131,50 @@ export function createEmptyDrawingState(): DrawingState {
     camera: createDefaultCamera()
   }
 }
+
+/** Resolve an arrow binding to absolute coordinates */
+export function resolveBinding(
+  binding: ArrowBinding | null,
+  fallback: { x: number; y: number },
+  shapes: Shape[]
+): { x: number; y: number } {
+  if (!binding) return fallback
+  const shape = shapes.find((s) => s.id === binding.shapeId)
+  if (!shape) return fallback
+  return {
+    x: shape.x + shape.width * binding.anchor.x,
+    y: shape.y + shape.height * binding.anchor.y
+  }
+}
+
+/** Find the nearest shape edge anchor point for arrow binding */
+export function findNearestBinding(
+  x: number,
+  y: number,
+  shapes: Shape[],
+  threshold = 30
+): ArrowBinding | null {
+  let best: ArrowBinding | null = null
+  let bestDist = threshold
+
+  for (const shape of shapes) {
+    const anchors = [
+      { ax: 0.5, ay: 0 },   // top
+      { ax: 0.5, ay: 1 },   // bottom
+      { ax: 0, ay: 0.5 },   // left
+      { ax: 1, ay: 0.5 }    // right
+    ]
+
+    for (const { ax, ay } of anchors) {
+      const px = shape.x + shape.width * ax
+      const py = shape.y + shape.height * ay
+      const d = Math.hypot(x - px, y - py)
+      if (d < bestDist) {
+        bestDist = d
+        best = { shapeId: shape.id, anchor: { x: ax, y: ay } }
+      }
+    }
+  }
+
+  return best
+}

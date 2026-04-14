@@ -30,9 +30,13 @@ function DrawTileComponent({ data, width, height }: NodeProps) {
     loaded,
     selectedIds,
     setSelectedIds,
+    editingId,
+    setEditingId,
     addShape,
     updateShape,
+    updateArrow,
     addArrow,
+    updateFreehand,
     addFreehand,
     deleteSelected,
     updateCamera,
@@ -164,9 +168,13 @@ function DrawTileComponent({ data, width, height }: NodeProps) {
             height={canvasHeight}
             selectedIds={selectedIds}
             setSelectedIds={setSelectedIds}
+            editingId={editingId}
+            setEditingId={setEditingId}
             addShape={addShape}
             updateShape={updateShape}
+            updateArrow={updateArrow}
             addArrow={addArrow}
+            updateFreehand={updateFreehand}
             addFreehand={addFreehand}
             deleteSelected={deleteSelected}
             updateCamera={updateCamera}
