@@ -49,7 +49,9 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
       fitAddonRef.current.fit()
       const term = terminalRef.current
       if (term) {
-        if (autoScrollRef.current) {
+        const isAtBottom = autoScrollRef.current || term.buffer.active.viewportY >= term.buffer.active.baseY
+        if (isAtBottom) {
+          autoScrollRef.current = true
           requestAnimationFrame(() => term.scrollToBottom())
         }
         window.terminal.resize(sessionId, term.cols, term.rows)
@@ -177,10 +179,10 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
         // Scrolling up — disable immediately before any rAF can snap back
         autoScrollRef.current = false
       } else if (e.deltaY > 0) {
-        // Scrolling down — re-enable when user reaches the bottom
-        requestAnimationFrame(() => {
-          autoScrollRef.current = term.buffer.active.viewportY >= term.buffer.active.baseY
-        })
+        // Scrolling down — re-enable when user reaches the bottom.
+        // Synchronous read: xterm updates viewportY during wheel processing
+        // (smoothScrollDuration is 0), so no rAF deferral needed.
+        autoScrollRef.current = term.buffer.active.viewportY >= term.buffer.active.baseY
       }
     }
     container.addEventListener('wheel', onContainerWheel, { passive: true })
@@ -200,7 +202,9 @@ export function useTerminal({ sessionId, label, cwd, metadata, appearance, hotke
     unsubData = window.terminal.onData((id, data) => {
       if (id !== sessionId) return
       if (live) {
-        if (autoScrollRef.current) {
+        const isAtBottom = autoScrollRef.current || term.buffer.active.viewportY >= term.buffer.active.baseY
+        if (isAtBottom) {
+          autoScrollRef.current = true
           term.write(data)
           scheduleScroll()
         } else {
