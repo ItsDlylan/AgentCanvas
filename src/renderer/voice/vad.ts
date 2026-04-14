@@ -2,7 +2,8 @@
 // Wraps @ricky0123/vad-web's MicVAD for speech boundary detection.
 // Fires callbacks when speech starts/ends with the captured audio segment.
 
-import { MicVAD, ort, type RealTimeVADOptions } from '@ricky0123/vad-web'
+import { MicVAD, type RealTimeVADOptions } from '@ricky0123/vad-web'
+import * as ort from 'onnxruntime-web'
 
 export interface VADCallbacks {
   onSpeechStart?: () => void
