@@ -392,6 +392,12 @@ function BrowserSection({ settings, update }: { settings: Settings; update: (pat
     }))
   ]
 
+  const [extensions, setExtensions] = useState<Array<{ id: string; name: string; version: string }>>([])
+
+  useEffect(() => {
+    window.browser.listExtensions().then(setExtensions)
+  }, [])
+
   return (
     <div>
       <h2 className="mb-4 text-sm font-semibold text-zinc-200">Browser</h2>
@@ -409,6 +415,25 @@ function BrowserSection({ settings, update }: { settings: Settings; update: (pat
             onChange={(v) => update({ browser: { ...settings.browser, defaultDevicePreset: v } })}
             options={presetOptions}
           />
+        </SettingRow>
+        <SettingRow label="Extensions" description="Place unpacked Chrome extensions in the extensions folder and restart">
+          <div className="flex flex-col items-end gap-2">
+            {extensions.length > 0 ? (
+              <div className="text-xs text-zinc-400 space-y-1">
+                {extensions.map((ext) => (
+                  <div key={ext.id}>{ext.name} <span className="text-zinc-600">v{ext.version}</span></div>
+                ))}
+              </div>
+            ) : (
+              <span className="text-xs text-zinc-600">No extensions loaded</span>
+            )}
+            <button
+              onClick={() => window.browser.openExtensionsDir()}
+              className="rounded bg-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-600"
+            >
+              Open Extensions Folder
+            </button>
+          </div>
         </SettingRow>
       </div>
     </div>

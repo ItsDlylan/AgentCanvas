@@ -131,6 +131,8 @@ export interface BrowserAPI {
   attachCdp: (sessionId: string, webContentsId: number, linkedTerminalId?: string) => Promise<{ port?: number; error?: string }>
   detachCdp: (sessionId: string) => Promise<void>
   sendCdpCommand: (sessionId: string, method: string, params: Record<string, unknown>) => Promise<unknown>
+  listExtensions: () => Promise<Array<{ id: string; name: string; path: string; version: string }>>
+  openExtensionsDir: () => Promise<void>
 }
 
 const browserAPI: BrowserAPI = {
@@ -161,7 +163,9 @@ const browserAPI: BrowserAPI = {
   detachCdp: (sessionId) =>
     ipcRenderer.invoke('browser:detachCdp', { sessionId }),
   sendCdpCommand: (sessionId, method, params) =>
-    ipcRenderer.invoke('browser:cdpCommand', { sessionId, method, params })
+    ipcRenderer.invoke('browser:cdpCommand', { sessionId, method, params }),
+  listExtensions: () => ipcRenderer.invoke('browser:extensions'),
+  openExtensionsDir: () => ipcRenderer.invoke('browser:openExtensionsDir')
 }
 
 contextBridge.exposeInMainWorld('browser', browserAPI)

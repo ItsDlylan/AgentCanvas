@@ -274,6 +274,7 @@ function BrowserTileComponent({ id: nodeId, data, width, height }: NodeProps) {
         <webview
           ref={webviewRef}
           src={startUrl}
+          partition="persist:agentcanvas"
           style={{ width: '100%', height: '100%', pointerEvents: !isBackground && (isFocused || devToolsIsFocused) ? 'auto' : 'none' }}
         />
       </div>

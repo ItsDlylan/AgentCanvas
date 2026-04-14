@@ -21,6 +21,7 @@ import { loadEdges, saveEdges } from './edge-store'
 import { loadPomodoro, savePomodoro } from './pomodoro-store'
 import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-store'
 import { DiffService } from './diff-service'
+import { loadExtensions, getLoadedExtensions, getExtensionsDir } from './extension-loader'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -243,6 +244,16 @@ ipcMain.handle('browser:detachCdp', (_event, { sessionId }) => {
 
 ipcMain.handle('browser:cdpCommand', async (_event, { sessionId, method, params }) => {
   return cdpProxy.sendCommand(sessionId, method, params)
+})
+
+ipcMain.handle('browser:extensions', () => {
+  return getLoadedExtensions().map(ext => ({
+    id: ext.id, name: ext.name, path: ext.path, version: ext.version
+  }))
+})
+
+ipcMain.handle('browser:openExtensionsDir', () => {
+  shell.openPath(getExtensionsDir())
 })
 
 // ── Workspace IPC Handlers ───────────────────────────────
@@ -856,6 +867,9 @@ app.whenReady().then(async () => {
   // Ensure ~/AgentCanvas/tmp/ exists for note/draw storage
   ensureNoteDir()
   ensureDrawDir()
+
+  // Load Chrome extensions into the persistent browser session
+  await loadExtensions()
 
   // Start the local control API before creating the window/terminals
   canvasApiPort = await canvasApi.start()
