@@ -963,17 +963,29 @@ function VoiceSection({ settings, update }: { settings: Settings; update: (patch
   const [devices, setDevices] = useState<Array<{ deviceId: string; label: string }>>([])
 
   useEffect(() => {
-    // Request mic permission first (needed to get device labels)
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then((stream) => {
-        stream.getTracks().forEach((t) => t.stop())
-        return navigator.mediaDevices.enumerateDevices()
-      })
+    // Try enumerateDevices first — if permission was already granted in this session,
+    // labels will be populated without needing a fresh getUserMedia call.
+    // Only request mic access if labels come back blank (permission not yet granted).
+    navigator.mediaDevices.enumerateDevices()
       .then((all) => {
-        const audioInputs = all
-          .filter((d) => d.kind === 'audioinput')
-          .map((d) => ({ deviceId: d.deviceId, label: d.label || `Mic ${d.deviceId.slice(0, 8)}` }))
-        setDevices(audioInputs)
+        const audioInputs = all.filter((d) => d.kind === 'audioinput')
+        const hasLabels = audioInputs.some((d) => d.label)
+        if (hasLabels) {
+          setDevices(audioInputs.map((d) => ({ deviceId: d.deviceId, label: d.label || `Mic ${d.deviceId.slice(0, 8)}` })))
+          return
+        }
+        // No labels — need a brief getUserMedia to unlock device labels
+        return navigator.mediaDevices.getUserMedia({ audio: true })
+          .then((stream) => {
+            stream.getTracks().forEach((t) => t.stop())
+            return navigator.mediaDevices.enumerateDevices()
+          })
+          .then((all2) => {
+            const inputs = (all2 ?? all)
+              .filter((d) => d.kind === 'audioinput')
+              .map((d) => ({ deviceId: d.deviceId, label: d.label || `Mic ${d.deviceId.slice(0, 8)}` }))
+            setDevices(inputs)
+          })
       })
       .catch(() => {})
   }, [])
