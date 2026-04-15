@@ -1111,6 +1111,121 @@ function VoiceSection({ settings, update }: { settings: Settings; update: (patch
           <LLMDiscoverButton endpoint={v.llmEndpoint} model={v.llmModel} />
         </SettingRow>
       </div>
+
+      <VoiceCommandReference />
+    </div>
+  )
+}
+
+function VoiceCommandReference() {
+  const [expanded, setExpanded] = useState<'builtin' | 'llm' | null>(null)
+
+  return (
+    <div className="mt-6">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Command Reference</h3>
+
+      {/* Built-in commands */}
+      <button
+        onClick={() => setExpanded(expanded === 'builtin' ? null : 'builtin')}
+        className="flex w-full items-center justify-between rounded-t-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2.5 text-left text-xs font-medium text-zinc-300 hover:bg-zinc-800/50"
+      >
+        <span>Built-in Commands (no LLM required)</span>
+        <span className="text-zinc-600">{expanded === 'builtin' ? '−' : '+'}</span>
+      </button>
+      {expanded === 'builtin' && (
+        <div className="border-x border-b border-zinc-800 bg-zinc-950/50 px-4 py-3">
+          <CommandGroup title="Tiles">
+            <Cmd phrase="open terminal" note="Also: spawn/new terminal" />
+            <Cmd phrase="open browser" note="Also: open browser to [url]" />
+            <Cmd phrase="create note" note="Also: new/open note" />
+            <Cmd phrase="create draw" note="Also: new/open draw" />
+            <Cmd phrase="close this" note="Closes focused tile (confirms)" />
+            <Cmd phrase="close [name]" note="Close tile by label (confirms)" />
+            <Cmd phrase="rename to [name]" note="Renames focused tile" />
+          </CommandGroup>
+          <CommandGroup title="Navigation">
+            <Cmd phrase="go to [tile name]" note="Focus a tile by label" />
+            <Cmd phrase="go to workspace [name]" note="Switch workspace" />
+            <Cmd phrase="zoom in / zoom out" />
+            <Cmd phrase="zoom to fit" note="Also: fit view, show everything" />
+            <Cmd phrase="show numbers" note="Number overlay for tile selection" />
+            <Cmd phrase="show grid" note="3x3 grid for viewport navigation" />
+            <Cmd phrase="focus [1-9]" note="Select numbered tile/grid region" />
+          </CommandGroup>
+          <CommandGroup title="Agent Control">
+            <Cmd phrase="approve / yes / accept" note="Send approval to focused terminal" />
+            <Cmd phrase="reject / no / deny" note="Send rejection" />
+            <Cmd phrase="stop / interrupt" note="Send Ctrl+C (confirms)" />
+            <Cmd phrase="send [text]" note="Send text to focused terminal" />
+            <Cmd phrase="send [text] to [target]" note="Send to specific tile (confirms)" />
+            <Cmd phrase="tell [agent] to [message]" note="Direct an agent (confirms)" />
+            <Cmd phrase="tell all [group] to [message]" note="Broadcast to group (confirms)" />
+          </CommandGroup>
+          <CommandGroup title="Dictation">
+            <Cmd phrase="start dictation" note="All speech goes to a new note" />
+            <Cmd phrase="stop dictation" note="Also: end dictation" />
+            <Cmd phrase="start standup" note="Dated standup note + dictation" />
+            <Cmd phrase="end standup" />
+          </CommandGroup>
+          <CommandGroup title="Workflows">
+            <Cmd phrase="start [template name]" note="Spawn a workspace template" />
+            <Cmd phrase="set up [template name]" note="Also: launch [name]" />
+          </CommandGroup>
+          <CommandGroup title="Queries">
+            <Cmd phrase="status" note="Tile count summary" />
+            <Cmd phrase="whats [name] doing" note="Query tile status" />
+            <Cmd phrase="any errors" />
+            <Cmd phrase="unread" note="Jump to last unread notification" />
+            <Cmd phrase="mark all read" />
+          </CommandGroup>
+          <CommandGroup title="Other">
+            <Cmd phrase="undo" note="Undo last reversible action" />
+          </CommandGroup>
+        </div>
+      )}
+
+      {/* LLM commands */}
+      <button
+        onClick={() => setExpanded(expanded === 'llm' ? null : 'llm')}
+        className={`flex w-full items-center justify-between border border-zinc-800 bg-zinc-900/50 px-4 py-2.5 text-left text-xs font-medium text-zinc-300 hover:bg-zinc-800/50 ${expanded === 'builtin' ? '' : 'rounded-t-lg'} ${expanded === 'llm' ? '' : 'rounded-b-lg'}`}
+      >
+        <span>Natural Language (requires local LLM)</span>
+        <span className="text-zinc-600">{expanded === 'llm' ? '−' : '+'}</span>
+      </button>
+      {expanded === 'llm' && (
+        <div className="rounded-b-lg border-x border-b border-zinc-800 bg-zinc-950/50 px-4 py-3">
+          <p className="mb-3 text-[10px] text-zinc-500">
+            With a local LLM (Ollama or LM Studio), you can speak natural compound commands.
+            These are interpreted by the LLM and presented for confirmation before executing.
+          </p>
+          <CommandGroup title="Examples">
+            <Cmd phrase="Set up a code review with three agents for auth" note="Spawns 3 named terminals with prompts" />
+            <Cmd phrase="Open a browser to GitHub and a terminal side by side" note="Multi-tile spawn" />
+            <Cmd phrase="Rename this to API Server and zoom to fit" note="Multi-step action" />
+            <Cmd phrase="Tell all review agents to wrap up and summarize" note="Broadcast with natural language" />
+            <Cmd phrase="Close all the note tiles" note="Batch operation" />
+            <Cmd phrase="Start a debugging session with devtools" note="Context-aware workspace setup" />
+          </CommandGroup>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CommandGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-3 last:mb-0">
+      <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">{title}</div>
+      <div className="space-y-1">{children}</div>
+    </div>
+  )
+}
+
+function Cmd({ phrase, note }: { phrase: string; note?: string }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <code className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-blue-400">{phrase}</code>
+      {note && <span className="text-[10px] text-zinc-600">{note}</span>}
     </div>
   )
 }
