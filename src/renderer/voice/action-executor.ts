@@ -19,6 +19,8 @@ export interface ExecuteResult {
   overlay?: 'numbers' | 'grid'
   /** For overlay.focusNumber — the selected number */
   selectedNumber?: number
+  /** Signals a mode change (dictation, standup) */
+  modeSignal?: 'startDictation' | 'stopDictation' | 'startStandup'
 }
 
 export function executeAction(action: VoiceAction): ExecuteResult {
@@ -222,6 +224,20 @@ export function executeAction(action: VoiceAction): ExecuteResult {
       const browsers = nodes.filter((n) => n.type === 'browser').length
       const notes = nodes.filter((n) => n.type === 'notes').length
       return { ok: true, message: `${terminals} terminals, ${browsers} browsers, ${notes} notes` }
+    }
+
+    // ── Dictation / Standup ──
+
+    case 'mode.startDictation': {
+      return { ok: true, message: 'Dictation started', modeSignal: 'startDictation' }
+    }
+
+    case 'mode.stopDictation': {
+      return { ok: true, message: 'Dictation stopped', modeSignal: 'stopDictation' }
+    }
+
+    case 'mode.startStandup': {
+      return { ok: true, message: 'Standup started', modeSignal: 'startStandup' }
     }
 
     // ── Overlays ──

@@ -13,7 +13,8 @@ import type { ServerMessageResult, ServerMessagePartialResult } from 'vosk-brows
 
 const GRAMMAR_PHRASES = [
   // Mode switching
-  'start dictation', 'stop dictation',
+  'start dictation', 'stop dictation', 'end dictation',
+  'start standup', 'end standup',
   // Undo
   'undo',
   // Overlays

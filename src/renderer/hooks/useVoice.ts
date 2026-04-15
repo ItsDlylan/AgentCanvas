@@ -9,6 +9,7 @@ import { defaultTileWidth, defaultTileHeight } from '@/store/canvas-store'
 import { createActivationController, type ActivationController } from '@/voice/activation-modes'
 import { loadVoskModel, transcribeWithVosk, getVoskStatus } from '@/voice/vosk-stt'
 import { createAmbientMonitor, type AmbientMonitor } from '@/voice/ambient-monitor'
+import { createDictationNote, createStandupNote, appendToDictation, createVoiceAnnotation } from '@/voice/voice-notes'
 import type { NumberedTile } from '@/components/VoiceNumberOverlay'
 
 export interface UseVoiceReturn {
@@ -49,6 +50,9 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
 
   // Pending destructive action waiting for confirmation
   const pendingAction = useRef<VoiceAction | null>(null)
+
+  // Dictation state
+  const dictationNoteId = useRef<string | null>(null)
 
   // Track activation mode to detect changes
   const activationModeRef = useRef(settings.activationMode)
@@ -235,13 +239,26 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   }, [dismissOverlay])
 
   const processCommand = useCallback(async (text: string) => {
+    // Use dictationNoteId to detect dictation — modeRef may be 'processing' during transcription
+    const isDictating = !!dictationNoteId.current
+    const effectiveMode: VoiceMode = isDictating ? 'dictating' : modeRef.current
+
     const context = buildContext()
-    const result = await matchCommand(text, modeRef.current, context)
+    const result = await matchCommand(text, effectiveMode, context)
 
     if (!result) {
+      // In dictating mode, append speech to the dictation note
+      if (isDictating && dictationNoteId.current) {
+        appendToDictation(dictationNoteId.current, text)
+        setTranscript(text)
+        setMode('dictating')
+        // Restart VAD for next utterance
+        if (vadRef.current) vadRef.current.start()
+        return
+      }
+
       setTranscript(text)
       setMode('idle')
-      // Notify controller that transcription is done (for always-on restart)
       controllerRef.current?.handleTranscriptionComplete()
       return
     }
@@ -298,6 +315,35 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     // Non-destructive: execute immediately
     const execResult = executeAction(result.action)
 
+    // Handle mode signals (dictation/standup)
+    if (execResult.modeSignal === 'startDictation') {
+      const noteId = createDictationNote()
+      dictationNoteId.current = noteId
+      setTranscript('Dictating...')
+      setMode('dictating')
+      // Keep VAD running continuously for dictation
+      if (vadRef.current) vadRef.current.start()
+      return
+    }
+    if (execResult.modeSignal === 'startStandup') {
+      const noteId = createStandupNote()
+      dictationNoteId.current = noteId
+      setTranscript('Standup started')
+      setMode('dictating')
+      // Keep VAD running continuously for dictation
+      if (vadRef.current) vadRef.current.start()
+      return
+    }
+    if (execResult.modeSignal === 'stopDictation') {
+      dictationNoteId.current = null
+      setTranscript('Dictation stopped')
+      setMode('idle')
+      // Pause VAD — back to push-to-talk
+      if (vadRef.current) vadRef.current.pause()
+      controllerRef.current?.handleTranscriptionComplete()
+      return
+    }
+
     // Handle overlay signals
     if (execResult.overlay === 'numbers') {
       activateNumberOverlay()
@@ -334,7 +380,8 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   }, [activateNumberOverlay, handleNumberSelection, selectGridRegion, numberOverlayActive, gridOverlayActive])
 
   const transcribeAudio = useCallback(async (audio: Float32Array) => {
-    setMode('processing')
+    // Don't overwrite 'dictating' mode — keep the indicator showing dictation state
+    if (!dictationNoteId.current) setMode('processing')
     try {
       // ── Vosk fast path: try grammar-constrained recognition first ──
       if (settings.sttProvider === 'vosk') {

@@ -7,7 +7,9 @@ import type { VoiceCommandPattern } from './types'
 export const patterns: VoiceCommandPattern[] = [
   // ── Mode switching (highest priority) ──
   { patterns: [/^start dictation$/], action: 'mode.startDictation' },
-  { patterns: [/^stop dictation$/], action: 'mode.stopDictation' },
+  { patterns: [/^stop dictation$/, /^end dictation$/], action: 'mode.stopDictation' },
+  { patterns: [/^start standup$/], action: 'mode.startStandup' },
+  { patterns: [/^end standup$/], action: 'mode.stopDictation' },
 
   // ── Undo ──
   { patterns: [/^undo$/], action: 'undo' },
