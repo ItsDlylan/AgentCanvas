@@ -124,12 +124,12 @@ export function createActivationController(
       ensureVAD().then((v) => {
         v.start()
 
-        // Auto-timeout after 10s if no speech detected
+        // Auto-timeout after 5 minutes
         wakeTimeout = setTimeout(() => {
           v.pause()
           // Resume wake word monitoring
           if (audioStream && !destroyed) audioStream.start()
-        }, 10000)
+        }, 300000)
       })
     },
 

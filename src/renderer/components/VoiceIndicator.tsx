@@ -6,11 +6,12 @@ interface VoiceIndicatorProps {
   mode: VoiceMode
   transcript: string | null
   error: string | null
+  listeningSecondsLeft?: number | null
   onConfirm?: () => void
   onCancel?: () => void
 }
 
-export function VoiceIndicator({ mode, transcript, error, onConfirm, onCancel }: VoiceIndicatorProps) {
+export function VoiceIndicator({ mode, transcript, error, listeningSecondsLeft, onConfirm, onCancel }: VoiceIndicatorProps) {
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const showTranscript = useRef(false)
 
@@ -48,7 +49,7 @@ export function VoiceIndicator({ mode, transcript, error, onConfirm, onCancel }:
 
         {/* Text */}
         <span className="text-xs text-zinc-300" style={{ maxWidth: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {statusText(mode, transcript, error)}
+          {statusText(mode, transcript, error, listeningSecondsLeft)}
         </span>
 
         {/* Confirm/Cancel for confirming mode */}
@@ -128,10 +129,19 @@ function statusIcon(mode: VoiceMode, error: string | null) {
   }
 }
 
-function statusText(mode: VoiceMode, transcript: string | null, error: string | null): string {
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function statusText(mode: VoiceMode, transcript: string | null, error: string | null, secondsLeft?: number | null): string {
   if (error) return error
   switch (mode) {
-    case 'listening': return 'Listening...'
+    case 'listening': {
+      const timer = secondsLeft != null ? ` (${formatTime(secondsLeft)})` : ''
+      return `Listening...${timer}`
+    }
     case 'processing': return 'Transcribing...'
     case 'confirming': return transcript ?? 'Confirm action?'
     case 'dictating': return 'Dictating...'

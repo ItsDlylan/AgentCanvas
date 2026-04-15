@@ -29,7 +29,7 @@ const DEFAULT_OPTIONS: VADOptions = {
   positiveSpeechThreshold: 0.5,
   negativeSpeechThreshold: 0.35,
   preSpeechPadFrames: 1,
-  redemptionFrames: 8,
+  redemptionFrames: 160,
   minSpeechFrames: 3
 }
 

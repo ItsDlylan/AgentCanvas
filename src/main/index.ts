@@ -656,10 +656,11 @@ import {
 let wakeWordActive = false
 let wakeWordErrorLogged = false
 let lastDetectionTime = 0
-let consecutiveDetections = 0
-const DETECTION_THRESHOLD = 0.5
-const REQUIRED_CONSECUTIVE = 3  // Must exceed threshold N times in a row
+const DETECTION_THRESHOLD = 0.6
+const WINDOW_SIZE = 5          // Sliding window of recent classifications
+const REQUIRED_HITS = 3        // Must have N hits within the window
 const DETECTION_COOLDOWN_MS = 3000 // 3s debounce between detections
+const recentProbabilities: number[] = []
 
 ipcMain.on('wake-word:audio-frame', async (_event, frame: Buffer) => {
   if (!wakeWordActive) return
@@ -672,20 +673,20 @@ ipcMain.on('wake-word:audio-frame', async (_event, frame: Buffer) => {
 
     const probability = await processAudioFrame(samples)
     if (probability !== null) {
-      if (probability > DETECTION_THRESHOLD) {
-        consecutiveDetections++
-        if (consecutiveDetections >= REQUIRED_CONSECUTIVE) {
-          const now = Date.now()
-          if (now - lastDetectionTime > DETECTION_COOLDOWN_MS) {
-            lastDetectionTime = now
-            console.log(`[wake-word] Detected! probability=${probability.toFixed(3)} (${consecutiveDetections} consecutive)`)
-            mainWindow?.webContents.send('wake-word:detected')
-            resetDetectionBuffers()
-          }
-          consecutiveDetections = 0
+      // Sliding window: track last N classifications
+      recentProbabilities.push(probability)
+      if (recentProbabilities.length > WINDOW_SIZE) recentProbabilities.shift()
+
+      const hits = recentProbabilities.filter((p) => p > DETECTION_THRESHOLD).length
+      if (hits >= REQUIRED_HITS) {
+        const now = Date.now()
+        if (now - lastDetectionTime > DETECTION_COOLDOWN_MS) {
+          lastDetectionTime = now
+          console.log(`[wake-word] Detected! probability=${probability.toFixed(3)} (${hits}/${WINDOW_SIZE} above ${DETECTION_THRESHOLD})`)
+          mainWindow?.webContents.send('wake-word:detected')
+          resetDetectionBuffers()
+          recentProbabilities.length = 0
         }
-      } else {
-        consecutiveDetections = 0
       }
     }
   } catch (err) {
@@ -709,7 +710,7 @@ ipcMain.handle('wake-word:start', async (_event, { wakeWord }: { wakeWord: strin
   if (result.ok) {
     wakeWordActive = true
     wakeWordErrorLogged = false
-    consecutiveDetections = 0
+    recentProbabilities.length = 0
   }
   return result
 })

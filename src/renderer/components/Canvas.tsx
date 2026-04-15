@@ -1387,6 +1387,7 @@ export default function Canvas() {
                   mode={voice.mode}
                   transcript={voice.transcript}
                   error={voice.error}
+                  listeningSecondsLeft={voice.listeningSecondsLeft}
                   onConfirm={voice.confirm}
                   onCancel={voice.cancel}
                 />

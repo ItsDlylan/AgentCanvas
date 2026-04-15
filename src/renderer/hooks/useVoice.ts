@@ -16,6 +16,7 @@ export interface UseVoiceReturn {
   mode: VoiceMode
   transcript: string | null
   error: string | null
+  listeningSecondsLeft: number | null
   startListening: () => void
   stopListening: () => void
   confirm: () => void
@@ -32,6 +33,8 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   const [mode, setMode] = useState<VoiceMode>('idle')
   const [transcript, setTranscript] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [listeningSecondsLeft, setListeningSecondsLeft] = useState<number | null>(null)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Overlay state
   const [numberOverlayActive, setNumberOverlayActive] = useState(false)
@@ -54,6 +57,9 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   // Dictation state
   const dictationNoteId = useRef<string | null>(null)
 
+  // Wake word verified flag — stays true until system returns to wake monitoring
+  const wakeWordVerifiedRef = useRef(false)
+
   // Track activation mode to detect changes
   const activationModeRef = useRef(settings.activationMode)
 
@@ -68,13 +74,38 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     })
   }, [settings.enabled, settings.whisperModel])
 
-  // Clear error/transcript after display
+  // Listening countdown timer (5 min max)
   useEffect(() => {
-    if (mode === 'idle' && (transcript || error)) {
-      cleanupTimerRef.current = setTimeout(() => {
-        setTranscript(null)
-        setError(null)
-      }, 4000)
+    if (mode === 'listening') {
+      setListeningSecondsLeft(300)
+      countdownRef.current = setInterval(() => {
+        setListeningSecondsLeft((prev) => (prev !== null && prev > 0 ? prev - 1 : null))
+      }, 1000)
+    } else {
+      setListeningSecondsLeft(null)
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current)
+        countdownRef.current = null
+      }
+    }
+    return () => {
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current)
+        countdownRef.current = null
+      }
+    }
+  }, [mode])
+
+  // Clear error/transcript after display; reset wake word verification on idle
+  useEffect(() => {
+    if (mode === 'idle') {
+      wakeWordVerifiedRef.current = false
+      if (transcript || error) {
+        cleanupTimerRef.current = setTimeout(() => {
+          setTranscript(null)
+          setError(null)
+        }, 4000)
+      }
     }
     return () => {
       if (cleanupTimerRef.current) clearTimeout(cleanupTimerRef.current)
@@ -89,6 +120,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       setMode('listening')
       setTranscript(null)
       setError(null)
+      wakeWordVerifiedRef.current = true  // ONNX model already verified the wake word
       // The activation controller handles starting VAD on wake
       controllerRef.current?.handleWakeEvent()
     })
@@ -432,6 +464,33 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
         return
       }
 
+      // Wake word verification: if in wake-word mode, confirm the transcript
+      // actually contains the wake word. Rejects false triggers (coughs, noise).
+      // Skip if wake word was already verified in a prior utterance (same activation).
+      if (settings.activationMode === 'wake-word' && settings.wakeWord && !wakeWordVerifiedRef.current) {
+        const wakePhrase = settings.wakeWord.replace(/_/g, ' ').toLowerCase()
+        const wakeName = wakePhrase.split(' ').pop() ?? wakePhrase
+        const lower = text.toLowerCase()
+        if (!lower.includes(wakePhrase) && !lower.includes(wakeName)) {
+          console.log(`[voice] Wake word verification failed — transcript "${text}" does not contain "${wakeName}"`)
+          setTranscript(null)
+          setMode('idle')
+          controllerRef.current?.handleTranscriptionComplete()
+          return
+        }
+
+        // Wake word found — check if transcript is ONLY the wake word (no command)
+        wakeWordVerifiedRef.current = true
+        const stripped = lower.replace(wakePhrase, '').replace(wakeName, '').trim()
+        if (!stripped || stripped.length < 3) {
+          // Just the wake word, no command — keep VAD listening for the follow-up
+          console.log('[voice] Wake word only — waiting for command...')
+          setTranscript(null)
+          setMode('listening')
+          return
+        }
+      }
+
       // Route through command system
       processCommand(text)
     } catch (err) {
@@ -454,6 +513,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     }
 
     // Hotkey always works as manual push-to-talk regardless of activation mode
+    wakeWordVerifiedRef.current = true  // Skip wake word verification for manual trigger
     try {
       if (!vadRef.current) {
         vadRef.current = await createVAD({
@@ -539,7 +599,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   }, [])
 
   return {
-    mode, transcript, error,
+    mode, transcript, error, listeningSecondsLeft,
     startListening, stopListening, confirm, cancel,
     numberOverlayActive, gridOverlayActive, numberedTiles,
     dismissOverlay, selectGridRegion
