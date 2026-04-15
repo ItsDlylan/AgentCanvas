@@ -709,6 +709,17 @@ ipcMain.handle('wake-word:model-status', async () => {
   return getWakeWordModelStatus()
 })
 
+// ── LLM Discovery IPC Handlers ────────────────────────────
+import { discoverLLMEndpoints, getCachedDiscovery } from './voice/llm-discovery'
+
+ipcMain.handle('llm:discover', async (_event, { endpoint, model }: { endpoint?: string; model?: string } = {}) => {
+  return discoverLLMEndpoints(endpoint, model)
+})
+
+ipcMain.handle('llm:status', async () => {
+  return getCachedDiscovery()
+})
+
 // ── Batched PTY Output ────────────────────────────────────
 // Buffer PTY data per session and flush every 4ms to avoid
 // flooding the IPC channel (Solo uses the same 4ms interval).

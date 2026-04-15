@@ -558,6 +558,9 @@ export interface VoiceAPI {
   stopWakeWordEngine: () => void
   onWakeWordDetected: (callback: () => void) => () => void
   getWakeWordModelStatus: () => Promise<Array<{ model: string; downloaded: boolean }>>
+  // LLM
+  discoverLLM: (endpoint?: string, model?: string) => Promise<{ endpoints: Array<{ provider: string; baseUrl: string; models: string[] }>; defaultEndpoint: { provider: string; baseUrl: string; models: string[] } | null }>
+  getLLMStatus: () => Promise<{ endpoints: Array<{ provider: string; baseUrl: string; models: string[] }>; defaultEndpoint: { provider: string; baseUrl: string; models: string[] } | null } | null>
 }
 
 const voiceAPI: VoiceAPI = {
@@ -587,7 +590,10 @@ const voiceAPI: VoiceAPI = {
     ipcRenderer.on('wake-word:detected', handler)
     return () => ipcRenderer.removeListener('wake-word:detected', handler)
   },
-  getWakeWordModelStatus: () => ipcRenderer.invoke('wake-word:model-status')
+  getWakeWordModelStatus: () => ipcRenderer.invoke('wake-word:model-status'),
+  // LLM
+  discoverLLM: (endpoint?: string, model?: string) => ipcRenderer.invoke('llm:discover', { endpoint, model }),
+  getLLMStatus: () => ipcRenderer.invoke('llm:status')
 }
 
 contextBridge.exposeInMainWorld('voice', voiceAPI)

@@ -2,7 +2,7 @@
 // Routes normalized transcripts through pattern tiers to produce VoiceActions.
 // Tier 1: Regex pattern matching (<50ms)
 // Tier 2: Levenshtein fuzzy matching (<5ms)
-// Tier 3: Local LLM via Ollama/LM Studio (future)
+// Tier 3: Local LLM via Ollama/LM Studio (1-5s)
 
 import type { VoiceAction, VoiceMode, VoiceContext } from './types'
 import { normalize } from './normalize'
@@ -10,12 +10,15 @@ import { patterns } from './patterns'
 import { resolveTarget, type ResolveResult } from './context-builder'
 import { resolveAgent } from './agent-resolver'
 import { fuzzyMatch } from './levenshtein'
+import { routeViaLLM, type LLMActionPlan } from './llm-router'
 
 export interface MatchResult {
   action: VoiceAction
   raw: string
   normalized: string
   tier: 1 | 2 | 3
+  /** Multi-step plan from Tier 3 LLM */
+  plan?: LLMActionPlan
 }
 
 // Confirmation-mode patterns — only these are checked when mode === 'confirming'
@@ -41,11 +44,11 @@ function buildCommandCorpus(): Array<{ text: string; patternIndex: number }> {
   })
 }
 
-export function matchCommand(
+export async function matchCommand(
   transcript: string,
   mode: VoiceMode,
   context?: VoiceContext
-): MatchResult | null {
+): Promise<MatchResult | null> {
   const raw = transcript
   const normalized = normalize(transcript)
 
@@ -120,7 +123,23 @@ export function matchCommand(
     return { action, raw, normalized, tier: 2 }
   }
 
-  // Tier 3: Local LLM (future — M9)
+  // Tier 3: Local LLM via Ollama/LM Studio
+  if (context) {
+    try {
+      const plan = await routeViaLLM(raw, context)
+      if (plan && plan.steps.length > 0) {
+        return {
+          action: plan.steps[0],
+          raw,
+          normalized,
+          tier: 3,
+          plan
+        }
+      }
+    } catch {
+      // LLM unavailable or errored — fall through to null
+    }
+  }
 
   return null
 }

@@ -239,6 +239,18 @@ export function executeAction(action: VoiceAction): ExecuteResult {
       return { ok: true, message: `Selected ${num}`, selectedNumber: num }
     }
 
+    // ── Multi-step plan (Tier 3 LLM) ──
+
+    case '__plan': {
+      const plan = action.params.plan as { steps: VoiceAction[] }
+      const results: string[] = []
+      for (const step of plan.steps) {
+        const stepResult = executeAction(step)
+        results.push(stepResult.message)
+      }
+      return { ok: true, message: results.join(', ') }
+    }
+
     // ── Undo ──
 
     case 'undo': {

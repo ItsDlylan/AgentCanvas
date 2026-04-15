@@ -1060,6 +1060,64 @@ function VoiceSection({ settings, update }: { settings: Settings; update: (patch
           </span>
         </SettingRow>
       </div>
+
+      <h3 className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wider text-zinc-500">Local LLM (Tier 3)</h3>
+      <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
+        <SettingRow label="LLM Endpoint" description="Override auto-discovery (leave empty to auto-detect Ollama/LM Studio)">
+          <TextInput
+            value={v.llmEndpoint ?? ''}
+            onChange={(val) => update({ voice: { ...v, llmEndpoint: val || null } })}
+            placeholder="http://localhost:11434"
+          />
+        </SettingRow>
+
+        <SettingRow label="LLM Model" description="Model name (auto-detected if endpoint is set)">
+          <TextInput
+            value={v.llmModel ?? ''}
+            onChange={(val) => update({ voice: { ...v, llmModel: val || null } })}
+            placeholder="Auto-detect"
+          />
+        </SettingRow>
+
+        <SettingRow label="Discover LLM" description="Probe localhost for Ollama and LM Studio">
+          <LLMDiscoverButton endpoint={v.llmEndpoint} model={v.llmModel} />
+        </SettingRow>
+      </div>
+    </div>
+  )
+}
+
+function LLMDiscoverButton({ endpoint, model }: { endpoint: string | null; model: string | null }) {
+  const [status, setStatus] = useState<string>('Not checked')
+  const [checking, setChecking] = useState(false)
+
+  const discover = async () => {
+    setChecking(true)
+    setStatus('Scanning...')
+    try {
+      const result = await window.voice.discoverLLM(endpoint ?? undefined, model ?? undefined)
+      if (result.endpoints.length === 0) {
+        setStatus('No LLM found')
+      } else {
+        const ep = result.endpoints[0]
+        setStatus(`${ep.provider}: ${ep.models[0] ?? 'no models'}`)
+      }
+    } catch {
+      setStatus('Error')
+    }
+    setChecking(false)
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={discover}
+        disabled={checking}
+        className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+      >
+        {checking ? 'Scanning...' : 'Scan'}
+      </button>
+      <span className="text-[10px] text-zinc-500">{status}</span>
     </div>
   )
 }

@@ -234,9 +234,9 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     setMode('idle')
   }, [dismissOverlay])
 
-  const processCommand = useCallback((text: string) => {
+  const processCommand = useCallback(async (text: string) => {
     const context = buildContext()
-    const result = matchCommand(text, modeRef.current, context)
+    const result = await matchCommand(text, modeRef.current, context)
 
     if (!result) {
       setTranscript(text)
@@ -263,6 +263,20 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       setTranscript('Cancelled')
       setMode('idle')
       controllerRef.current?.handleTranscriptionComplete()
+      return
+    }
+
+    // Tier 3 LLM multi-step plans — always confirm
+    if (result.plan && result.plan.steps.length > 0) {
+      // Store the full plan as a single "execute plan" action
+      const planAction: VoiceAction = {
+        type: '__plan',
+        params: { plan: result.plan },
+        destructive: result.plan.destructive
+      }
+      pendingAction.current = planAction
+      setTranscript(result.plan.confirmation || `${result.plan.steps.length} steps?`)
+      setMode('confirming')
       return
     }
 
