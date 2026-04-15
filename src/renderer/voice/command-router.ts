@@ -143,6 +143,26 @@ function resolveActionParams(action: VoiceAction, context: VoiceContext): void {
     applyResolution(action, result)
   }
 
+  // Resolve "send X to Y" — resolve the "to Y" target
+  if (type === 'agent.sendTo' && params.target && typeof params.target === 'string') {
+    const result = resolveTarget(params.target, context)
+    applyResolution(action, result)
+  }
+
+  // Resolve "tell all X to Y" — resolve to multiple agents
+  if (type === 'agent.broadcastTo' && params.target && typeof params.target === 'string') {
+    const result = resolveAgent(params.target, context)
+    // For broadcast, we want ALL matches, not just the first
+    if (result.resolved && result.tiles?.length) {
+      action.targets = result.tiles.map((t) => t.sessionId)
+      action.params.resolvedLabel = result.tiles.map((t) => t.label).join(', ')
+    } else if (result.reason === 'ambiguous' && result.candidates) {
+      // For broadcast, ambiguous IS the intent — use all candidates
+      action.targets = result.candidates.map((t) => t.sessionId)
+      action.params.resolvedLabel = result.candidates.map((t) => t.label).join(', ')
+    }
+  }
+
   // "close this" / "close focused" — resolve focused tile
   if ((type === 'tile.closeFocused' || type === 'tile.rename') && !params.sessionId) {
     if (context.focusedTileId) {

@@ -74,12 +74,24 @@ export const patterns: VoiceCommandPattern[] = [
     destructive: true
   },
   {
+    patterns: [/^send (.+) to (.+)$/],
+    action: 'agent.sendTo',
+    extract: (m) => ({ text: m[1], target: m[2] }),
+    destructive: true
+  },
+  {
     patterns: [/^send (.+)$/],
     action: 'agent.sendInput',
     extract: (m) => ({ text: m[1] })
   },
 
   // ── Multi-agent (always confirm) ──
+  {
+    patterns: [/^tell all (.+) to (.+)$/],
+    action: 'agent.broadcastTo',
+    extract: (m) => ({ target: m[1], message: m[2] }),
+    destructive: true
+  },
   {
     patterns: [/^tell (.+) to (.+)$/],
     action: 'agent.tellTo',

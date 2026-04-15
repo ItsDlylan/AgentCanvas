@@ -6,6 +6,7 @@
 
 import type { VoiceAction, UndoableAction } from './types'
 import { useCanvasStore } from '@/store/canvas-store'
+import { routeToAgent, broadcastToAgents } from './multi-agent'
 
 const undoStack: UndoableAction[] = []
 const MAX_UNDO = 20
@@ -189,9 +190,28 @@ export function executeAction(action: VoiceAction): ExecuteResult {
       const targetId = action.params.sessionId as string
       if (!targetId) return { ok: false, message: 'Could not find that agent' }
       const message = action.params.message as string
-      window.terminal.write(targetId, message + '\n')
+      routeToAgent(targetId, message)
       const label = (action.params.resolvedLabel as string) ?? targetId
       return { ok: true, message: `Sent to "${label}"` }
+    }
+
+    case 'agent.sendTo': {
+      // "send X to Y" — resolved target
+      const targetId = action.params.sessionId as string
+      if (!targetId) return { ok: false, message: 'Could not find that terminal' }
+      const text = action.params.text as string
+      routeToAgent(targetId, text)
+      const label = (action.params.resolvedLabel as string) ?? targetId
+      return { ok: true, message: `Sent "${text}" to "${label}"` }
+    }
+
+    case 'agent.broadcastTo': {
+      // "tell all X to Y" — resolved to multiple targets
+      const targets = action.targets
+      if (!targets || targets.length === 0) return { ok: false, message: 'No matching agents found' }
+      const message = action.params.message as string
+      const count = broadcastToAgents(targets, message)
+      return { ok: true, message: `Sent to ${count} terminal${count !== 1 ? 's' : ''}` }
     }
 
     // ── Queries ──

@@ -268,7 +268,14 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     // Destructive actions need confirmation
     if (result.action.destructive) {
       pendingAction.current = result.action
-      setTranscript(`${result.normalized}?`)
+      // Broadcast gets a detailed warning
+      if (result.action.type === 'agent.broadcastTo' && result.action.targets?.length) {
+        const count = result.action.targets.length
+        const label = (result.action.params.resolvedLabel as string) ?? ''
+        setTranscript(`Send to ${count} terminal${count !== 1 ? 's' : ''}${label ? `: ${label}` : ''}?`)
+      } else {
+        setTranscript(`${result.normalized}?`)
+      }
       setMode('confirming')
       return
     }
