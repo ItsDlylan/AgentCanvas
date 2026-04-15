@@ -38,6 +38,10 @@ export interface TerminalAPI {
     linkedTerminalId?: string; width?: number; height?: number;
     metadata?: Record<string, unknown>
   }) => void) => () => void
+  onTemplateSpawn: (callback: (info: {
+    templateId?: string; templateName?: string;
+    origin?: { x: number; y: number }
+  }) => void) => () => void
 }
 
 const terminalAPI: TerminalAPI = {
@@ -126,6 +130,16 @@ const terminalAPI: TerminalAPI = {
     }
     ipcRenderer.on('canvas:terminal-spawn', handler)
     return () => ipcRenderer.removeListener('canvas:terminal-spawn', handler)
+  },
+  onTemplateSpawn: (callback) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      info: { templateId?: string; templateName?: string; origin?: { x: number; y: number } }
+    ) => {
+      callback(info)
+    }
+    ipcRenderer.on('canvas:template-spawn', handler)
+    return () => ipcRenderer.removeListener('canvas:template-spawn', handler)
   }
 }
 
@@ -298,6 +312,22 @@ const settingsAPI: SettingsAPI = {
 }
 
 contextBridge.exposeInMainWorld('settings', settingsAPI)
+
+// ── Project Templates API ──────────────────────────────
+
+export interface TemplateAPI {
+  loadProject: (workspaceId: string) => Promise<import('../main/settings-store').WorkspaceTemplate[]>
+  saveProject: (workspaceId: string, templates: import('../main/settings-store').WorkspaceTemplate[]) => Promise<void>
+  deleteProject: (workspaceId: string) => Promise<void>
+}
+
+const templateAPI: TemplateAPI = {
+  loadProject: (workspaceId) => ipcRenderer.invoke('templates:load-project', { workspaceId }),
+  saveProject: (workspaceId, templates) => ipcRenderer.invoke('templates:save-project', { workspaceId, templates }),
+  deleteProject: (workspaceId) => ipcRenderer.invoke('templates:delete-project', { workspaceId })
+}
+
+contextBridge.exposeInMainWorld('templates', templateAPI)
 
 // ── Pomodoro API ────────────────────────────────────────
 

@@ -172,7 +172,7 @@ export interface CanvasStore {
   // ── Tile CRUD ──
   removeTileFromCanvas: (sessionId: string) => void
   killTile: (sessionId: string) => void
-  addTerminalAt: (position?: { x: number; y: number }, width?: number, height?: number, command?: string, label?: string) => void
+  addTerminalAt: (position?: { x: number; y: number }, width?: number, height?: number, command?: string, label?: string, cwdOverride?: string) => void
   addBrowserAt: (position?: { x: number; y: number }, preset?: DevicePreset) => void
   addNoteAt: (position?: { x: number; y: number }) => void
   addDrawAt: (position?: { x: number; y: number }, linkedTerminalId?: string) => string
@@ -208,7 +208,7 @@ export interface CanvasStore {
   focusProcess: (workspaceId: string, sessionId: string) => void
 
   // ── Template ──
-  spawnTemplate: (template: { tiles: Array<{ type: string; relativePosition: { x: number; y: number }; width: number; height: number }> }, origin?: { x: number; y: number }) => void
+  spawnTemplate: (template: { tiles: Array<{ type: string; relativePosition: { x: number; y: number }; width: number; height: number; command?: string; label?: string; cwd?: string }> }, origin?: { x: number; y: number }) => void
 }
 
 // ── Store ──────────────────────────────────────────────────
@@ -331,7 +331,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       removeTileFromCanvas(sessionId)
     },
 
-    addTerminalAt: (position, width = 640, height = 400, command, label) => {
+    addTerminalAt: (position, width = 640, height = 400, command, label, cwdOverride) => {
       tileCount++
       const sessionId = uuid()
       const { tileGap, activeWorkspaceId, workspaces } = get()
@@ -339,7 +339,10 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       const pos = position ?? findOpenPosition(visible, width, height, 4, tileGap)
 
       const ws = workspaces.find((w) => w.id === activeWorkspaceId)
-      const cwd = ws?.path ?? undefined
+      const basePath = ws?.path ?? undefined
+      const cwd = cwdOverride
+        ? (cwdOverride.startsWith('/') ? cwdOverride : basePath ? basePath + '/' + cwdOverride : cwdOverride)
+        : basePath
 
       const newNode: Node = {
         id: sessionId,
@@ -998,6 +1001,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
         }
       }
 
+      // Clean up project templates for this workspace
+      window.templates.deleteProject(id)
+
       const killSet = new Set(tilesToKill)
       set((s) => {
         const nextMap = new Map(s.tileWorkspaceMap)
@@ -1089,7 +1095,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
           x: basePos.x + tile.relativePosition.x,
           y: basePos.y + tile.relativePosition.y
         }
-        if (tile.type === 'terminal') addTerminalAt(pos, tile.width, tile.height)
+        if (tile.type === 'terminal') addTerminalAt(pos, tile.width, tile.height, tile.command, tile.label, tile.cwd)
         else if (tile.type === 'browser') addBrowserAt(pos)
         else if (tile.type === 'notes') addNoteAt(pos)
         else if (tile.type === 'draw') addDrawAt(pos)

@@ -42,6 +42,7 @@ import { PomodoroWidget } from './PomodoroWidget'
 import { usePomodoro, PomodoroContext } from '@/hooks/usePomodoro'
 import { DEFAULT_WORKSPACE } from '@/types/workspace'
 import { useSettings } from '@/hooks/useSettings'
+import { useResolvedTemplates } from '@/hooks/useResolvedTemplates'
 import { useHotkeys } from '@/hooks/useHotkeys'
 import type { HotkeyAction } from '@/types/settings'
 import { SettingsPage } from './SettingsPage'
@@ -155,6 +156,7 @@ export default function Canvas() {
   registerRender('Canvas')
   const { enabled: perfEnabled, stats: perfStats } = usePerformanceDebug()
   const { settings, updateSettings } = useSettings()
+  const { resolvedTemplates } = useResolvedTemplates(settings.templates)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const pomodoro = usePomodoro()
   const [pomodoroExpanded, setPomodoroExpanded] = useState(false)
@@ -850,6 +852,20 @@ export default function Canvas() {
     return unsub
   }, [])
 
+  // ── Spawn a template via API (POST /api/template/spawn) ──
+  useEffect(() => {
+    const unsub = window.terminal.onTemplateSpawn((info) => {
+      const templates = resolvedTemplates
+      const match = info.templateId
+        ? templates.find((t) => t.id === info.templateId)
+        : templates.find((t) => t.name.toLowerCase() === info.templateName?.toLowerCase())
+      if (match) {
+        useCanvasStore.getState().spawnTemplate(match, info.origin)
+      }
+    })
+    return unsub
+  }, [resolvedTemplates])
+
   // Handle Cmd+R / Ctrl+R / F5 — globalShortcut in the main process intercepts
   // the key at the OS level and sends IPC here. Reload the focused browser tile.
   useEffect(() => {
@@ -1527,13 +1543,13 @@ export default function Canvas() {
                 <span className="h-2 w-2 rounded-full bg-pink-500" />
                 Draw
               </button>
-              {settings.templates.length > 0 && (
+              {resolvedTemplates.length > 0 && (
                 <>
                   <div className="my-1 border-t border-zinc-700" />
                   <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
                     Templates
                   </div>
-                  {settings.templates.map((tmpl) => (
+                  {resolvedTemplates.map((tmpl) => (
                     <button
                       key={tmpl.id}
                       onClick={() => {
@@ -1542,7 +1558,7 @@ export default function Canvas() {
                       }}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-700"
                     >
-                      <span className="h-2 w-2 rounded-full bg-blue-500" />
+                      <span className={`h-2 w-2 rounded-full ${tmpl.scope === 'project' ? 'bg-purple-500' : 'bg-blue-500'}`} />
                       {tmpl.name}
                     </button>
                   ))}

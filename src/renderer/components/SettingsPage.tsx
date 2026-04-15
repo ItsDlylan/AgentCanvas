@@ -1,6 +1,9 @@
-import { memo, useState, useCallback, useEffect } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSettings, type Settings, type WorkspaceTemplate, type TemplateTile, type HotkeyAction } from '@/hooks/useSettings'
+import { useResolvedTemplates, type ResolvedTemplate } from '@/hooks/useResolvedTemplates'
+import { useCanvasStore } from '@/store/canvas-store'
 import { formatHotkey, captureHotkey, DEFAULT_HOTKEYS } from '@/hooks/useHotkeys'
+import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS } from '@/constants/devicePresets'
 import { DEVICE_PRESETS } from '@/constants/devicePresets'
 import { v4 as uuid } from 'uuid'
 
@@ -702,48 +705,292 @@ function TemplatePreview({ tiles }: { tiles: TemplateTile[] }) {
   )
 }
 
+const TILE_GAP = 40
+
+type SnapSide = 'right' | 'left' | 'top' | 'bottom'
+interface SnapTarget { anchorIdx: number; side: SnapSide; x: number; y: number }
+
+function getSnapTargets(tiles: TemplateTile[], dragIdx: number): SnapTarget[] {
+  const dragged = tiles[dragIdx]
+  const targets: SnapTarget[] = []
+  for (let i = 0; i < tiles.length; i++) {
+    if (i === dragIdx) continue
+    const t = tiles[i]
+    targets.push(
+      { anchorIdx: i, side: 'right', x: t.relativePosition.x + t.width + TILE_GAP, y: t.relativePosition.y },
+      { anchorIdx: i, side: 'left', x: t.relativePosition.x - dragged.width - TILE_GAP, y: t.relativePosition.y },
+      { anchorIdx: i, side: 'bottom', x: t.relativePosition.x, y: t.relativePosition.y + t.height + TILE_GAP },
+      { anchorIdx: i, side: 'top', x: t.relativePosition.x, y: t.relativePosition.y - dragged.height - TILE_GAP }
+    )
+  }
+  return targets
+}
+
+function nearestSnap(targets: SnapTarget[], dragX: number, dragY: number): SnapTarget | null {
+  if (targets.length === 0) return null
+  let best: SnapTarget | null = null
+  let bestDist = Infinity
+  for (const t of targets) {
+    const dx = t.x - dragX
+    const dy = t.y - dragY
+    const dist = dx * dx + dy * dy
+    if (dist < bestDist) { bestDist = dist; best = t }
+  }
+  return best
+}
+
+// Shift all tiles so the minimum x,y is 0 — other tiles move out of the way
+function normalizePositions(tiles: TemplateTile[]): TemplateTile[] {
+  if (tiles.length === 0) return tiles
+  let minX = Infinity, minY = Infinity
+  for (const t of tiles) {
+    minX = Math.min(minX, t.relativePosition.x)
+    minY = Math.min(minY, t.relativePosition.y)
+  }
+  if (minX === 0 && minY === 0) return tiles
+  return tiles.map((t) => ({
+    ...t,
+    relativePosition: { x: t.relativePosition.x - minX, y: t.relativePosition.y - minY }
+  }))
+}
+
+function InteractiveTemplatePreview({
+  tiles,
+  onUpdate
+}: {
+  tiles: TemplateTile[]
+  onUpdate: (tiles: TemplateTile[]) => void
+}) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
+  const dragOriginRef = useRef<{ clientX: number; clientY: number; origX: number; origY: number } | null>(null)
+
+  if (tiles.length === 0) return <span className="text-[10px] text-zinc-600">Add tiles, then drag to arrange</span>
+
+  // Bounding box from settled tile positions only (exclude the dragged tile)
+  // so dragging far away doesn't shrink the preview
+  let maxX = 0, maxY = 0
+  for (let i = 0; i < tiles.length; i++) {
+    if (i === dragIdx) continue
+    const t = tiles[i]
+    maxX = Math.max(maxX, t.relativePosition.x + t.width)
+    maxY = Math.max(maxY, t.relativePosition.y + t.height)
+  }
+  // When not dragging, include all tiles normally
+  if (dragIdx === null) {
+    for (const t of tiles) {
+      maxX = Math.max(maxX, t.relativePosition.x + t.width)
+      maxY = Math.max(maxY, t.relativePosition.y + t.height)
+    }
+  }
+  // Include snap target extents so ghost outlines fit in the container
+  const snapTargets = dragIdx !== null ? getSnapTargets(tiles, dragIdx) : []
+  if (dragIdx !== null) {
+    const dragged = tiles[dragIdx]
+    for (const st of snapTargets) {
+      maxX = Math.max(maxX, st.x + dragged.width)
+      maxY = Math.max(maxY, st.y + dragged.height)
+    }
+  }
+  const scale = Math.min(460 / Math.max(maxX, 1), 180 / Math.max(maxY, 1), 0.35)
+
+  // Find which snap target the dragged tile is closest to
+  const activeSnap = (dragIdx !== null && dragPos) ? nearestSnap(snapTargets, dragPos.x, dragPos.y) : null
+
+  const handlePointerDown = (e: React.PointerEvent, index: number) => {
+    if (tiles.length < 2) return
+    e.preventDefault()
+    e.stopPropagation()
+    const tile = tiles[index]
+    setDragIdx(index)
+    setDragPos({ x: tile.relativePosition.x, y: tile.relativePosition.y })
+    dragOriginRef.current = {
+      clientX: e.clientX, clientY: e.clientY,
+      origX: tile.relativePosition.x, origY: tile.relativePosition.y
+    }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (dragIdx === null || !dragOriginRef.current) return
+    const { clientX: sx, clientY: sy, origX, origY } = dragOriginRef.current
+    const dx = (e.clientX - sx) / scale
+    const dy = (e.clientY - sy) / scale
+    setDragPos({ x: origX + dx, y: origY + dy })
+  }
+
+  const handlePointerUp = () => {
+    if (dragIdx !== null && activeSnap) {
+      // Snap to target position, then normalize so nothing is negative
+      const result = tiles.map((t, i) =>
+        i === dragIdx ? { ...t, relativePosition: { x: activeSnap.x, y: activeSnap.y } } : t
+      )
+      onUpdate(normalizePositions(result))
+    }
+    setDragIdx(null)
+    setDragPos(null)
+    dragOriginRef.current = null
+  }
+
+  const SIDE_ARROWS: Record<SnapSide, string> = { right: '\u2192', left: '\u2190', bottom: '\u2193', top: '\u2191' }
+
+  return (
+    <div
+      ref={containerRef}
+      className="relative select-none overflow-visible"
+      style={{ width: maxX * scale, height: maxY * scale, minHeight: 60 }}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+    >
+      {/* Snap zone ghosts */}
+      {dragIdx !== null && snapTargets.map((st, si) => {
+        const dragged = tiles[dragIdx]
+        const isActive = activeSnap === st
+        return (
+          <div
+            key={si}
+            className={`absolute rounded border border-dashed pointer-events-none transition-all duration-150 ${
+              isActive
+                ? 'border-blue-400 bg-blue-500/20 opacity-100 scale-100'
+                : 'border-zinc-700/50 opacity-0'
+            }`}
+            style={{
+              left: st.x * scale,
+              top: st.y * scale,
+              width: dragged.width * scale,
+              height: dragged.height * scale
+            }}
+          >
+            {isActive && (
+              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-blue-400">
+                {SIDE_ARROWS[st.side]}
+              </span>
+            )}
+          </div>
+        )
+      })}
+
+      {/* Tiles */}
+      {tiles.map((t, i) => {
+        const isDragging = dragIdx === i
+        // Dragged tile follows the mouse
+        const posX = (isDragging && dragPos) ? dragPos.x : t.relativePosition.x
+        const posY = (isDragging && dragPos) ? dragPos.y : t.relativePosition.y
+        return (
+          <div
+            key={i}
+            onPointerDown={(e) => handlePointerDown(e, i)}
+            className={`absolute flex flex-col items-center justify-center rounded border text-[8px] font-bold text-zinc-300 ${
+              TILE_COLORS[t.type]
+            } ${tiles.length >= 2 ? 'cursor-grab active:cursor-grabbing' : ''} ${
+              isDragging ? 'shadow-lg shadow-black/40 brightness-125 z-10' : 'hover:brightness-110'
+            }`}
+            style={{
+              left: posX * scale,
+              top: posY * scale,
+              width: t.width * scale,
+              height: t.height * scale,
+              zIndex: isDragging ? 10 : 1,
+              transition: isDragging ? 'none' : 'left 0.15s, top 0.15s'
+            }}
+          >
+            <span>{TILE_LABELS[t.type]}</span>
+            {t.label && <span className="text-[7px] font-normal text-zinc-400 truncate max-w-full px-1">{t.label}</span>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function TemplatesSection({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editName, setEditName] = useState('')
   const [editTiles, setEditTiles] = useState<TemplateTile[]>([])
+  const [editScope, setEditScope] = useState<'global' | 'project'>('global')
 
-  const startEdit = useCallback((tmpl: WorkspaceTemplate) => {
+  const workspaces = useCanvasStore((s) => s.workspaces)
+  const activeWorkspaceId = useCanvasStore((s) => s.activeWorkspaceId)
+  const activeWorkspace = workspaces.find((w) => w.id === activeWorkspaceId)
+  const { resolvedTemplates, projectTemplates, saveProjectTemplates, isProjectScope } = useResolvedTemplates(settings.templates)
+
+  const [scopeFilter, setScopeFilter] = useState<'all' | 'global' | string>('all')
+
+  const filteredTemplates = useMemo(() => {
+    if (scopeFilter === 'all') return resolvedTemplates
+    if (scopeFilter === 'global') return resolvedTemplates.filter((t) => t.scope === 'global')
+    return resolvedTemplates.filter((t) => t.scope === 'project')
+  }, [resolvedTemplates, scopeFilter])
+
+  const startEdit = useCallback((tmpl: ResolvedTemplate) => {
     setEditingId(tmpl.id)
     setEditName(tmpl.name)
     setEditTiles([...tmpl.tiles])
+    setEditScope(tmpl.scope)
   }, [])
 
   const startNew = useCallback(() => {
     setEditingId('new')
     setEditName('')
     setEditTiles([])
-  }, [])
+    setEditScope(isProjectScope ? 'project' : 'global')
+  }, [isProjectScope])
 
   const saveTemplate = useCallback(() => {
     if (!editName.trim() || editTiles.length === 0) return
-    const existing = settings.templates.find((t) => t.id === editingId)
-    if (existing) {
-      update({
-        templates: settings.templates.map((t) =>
+
+    if (editScope === 'project' && isProjectScope) {
+      const existing = projectTemplates.find((t) => t.id === editingId)
+      if (existing) {
+        saveProjectTemplates(projectTemplates.map((t) =>
           t.id === editingId ? { ...t, name: editName.trim(), tiles: editTiles } : t
-        )
-      })
-    } else {
-      update({
-        templates: [
-          ...settings.templates,
+        ))
+      } else {
+        saveProjectTemplates([
+          ...projectTemplates,
           { id: uuid(), name: editName.trim(), isBuiltIn: false, tiles: editTiles }
-        ]
-      })
+        ])
+      }
+    } else {
+      const existing = settings.templates.find((t) => t.id === editingId)
+      if (existing) {
+        update({
+          templates: settings.templates.map((t) =>
+            t.id === editingId ? { ...t, name: editName.trim(), tiles: editTiles } : t
+          )
+        })
+      } else {
+        update({
+          templates: [
+            ...settings.templates,
+            { id: uuid(), name: editName.trim(), isBuiltIn: false, tiles: editTiles }
+          ]
+        })
+      }
     }
     setEditingId(null)
-  }, [editingId, editName, editTiles, settings.templates, update])
+  }, [editingId, editName, editTiles, editScope, settings.templates, update, projectTemplates, saveProjectTemplates, isProjectScope])
 
   const deleteTemplate = useCallback(
-    (id: string) => {
-      update({ templates: settings.templates.filter((t) => t.id !== id) })
+    (tmpl: ResolvedTemplate) => {
+      if (tmpl.scope === 'project') {
+        saveProjectTemplates(projectTemplates.filter((t) => t.id !== tmpl.id))
+      } else {
+        update({ templates: settings.templates.filter((t) => t.id !== tmpl.id) })
+      }
     },
-    [settings.templates, update]
+    [settings.templates, update, projectTemplates, saveProjectTemplates]
+  )
+
+  const forkToProject = useCallback(
+    (tmpl: WorkspaceTemplate) => {
+      if (!isProjectScope) return
+      const forked = { ...tmpl, id: uuid(), isBuiltIn: false }
+      saveProjectTemplates([...projectTemplates, forked])
+    },
+    [isProjectScope, projectTemplates, saveProjectTemplates]
   )
 
   const addTile = useCallback(
@@ -754,7 +1001,6 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
         notes: { w: 400, h: 400 }
       }
       const { w, h } = defaults[type]
-      // Place to the right of the last tile
       let maxRight = 0
       for (const t of editTiles) maxRight = Math.max(maxRight, t.relativePosition.x + t.width)
       setEditTiles((prev) => [
@@ -769,24 +1015,48 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
     setEditTiles((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
+  const updateTileField = useCallback((index: number, field: keyof TemplateTile, value: string | undefined) => {
+    setEditTiles((prev) => prev.map((t, i) => (i === index ? { ...t, [field]: value } : t)))
+  }, [])
+
+  const updateTileSize = useCallback((index: number, width: number, height: number) => {
+    setEditTiles((prev) => prev.map((t, i) => (i === index ? { ...t, width, height } : t)))
+  }, [])
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-zinc-200">Templates</h2>
-        <button
-          onClick={startNew}
-          className="flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-white"
-        >
-          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          New Template
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Scope filter */}
+          <select
+            value={scopeFilter}
+            onChange={(e) => setScopeFilter(e.target.value)}
+            className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none focus:border-blue-500"
+          >
+            <option value="all">All</option>
+            <option value="global">Global</option>
+            {isProjectScope && (
+              <option value={activeWorkspaceId}>
+                {activeWorkspace?.name ?? 'Project'}
+              </option>
+            )}
+          </select>
+          <button
+            onClick={startNew}
+            className="flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-white"
+          >
+            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            New Template
+          </button>
+        </div>
       </div>
 
       {/* Template list */}
       <div className="space-y-2">
-        {settings.templates.map((tmpl) => (
+        {filteredTemplates.map((tmpl) => (
           <div
             key={tmpl.id}
             className="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-3"
@@ -798,6 +1068,11 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
                 {tmpl.isBuiltIn && (
                   <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[9px] text-zinc-500">Built-in</span>
                 )}
+                <span className={`rounded px-1.5 py-0.5 text-[9px] ${
+                  tmpl.scope === 'project' ? 'bg-purple-500/20 text-purple-400' : 'bg-zinc-800 text-zinc-500'
+                }`}>
+                  {tmpl.scope === 'project' ? 'Project' : 'Global'}
+                </span>
               </div>
               <span className="text-[10px] text-zinc-600">
                 {tmpl.tiles.length} tile{tmpl.tiles.length !== 1 ? 's' : ''} &middot;{' '}
@@ -805,6 +1080,18 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
               </span>
             </div>
             <div className="flex gap-1">
+              {/* Fork global to project */}
+              {tmpl.scope === 'global' && isProjectScope && !tmpl.isBuiltIn && (
+                <button
+                  onClick={() => forkToProject(tmpl)}
+                  className="rounded p-1.5 text-zinc-600 hover:bg-zinc-700 hover:text-purple-400"
+                  title="Customize for this project"
+                >
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                  </svg>
+                </button>
+              )}
               {!tmpl.isBuiltIn && (
                 <>
                   <button
@@ -821,7 +1108,7 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
                     </svg>
                   </button>
                   <button
-                    onClick={() => deleteTemplate(tmpl.id)}
+                    onClick={() => deleteTemplate(tmpl)}
                     className="rounded p-1.5 text-zinc-600 hover:bg-zinc-700 hover:text-red-400"
                     title="Delete"
                   >
@@ -842,6 +1129,28 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
           <h3 className="mb-3 text-xs font-semibold text-zinc-300">
             {editingId === 'new' ? 'New Template' : 'Edit Template'}
           </h3>
+
+          {/* Scope selector for new templates */}
+          {editingId === 'new' && isProjectScope && (
+            <div className="mb-3">
+              <Label>Scope</Label>
+              <div className="mt-1 flex gap-2">
+                <button
+                  onClick={() => setEditScope('global')}
+                  className={`rounded px-3 py-1.5 text-xs ${editScope === 'global' ? 'bg-zinc-700 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  Global
+                </button>
+                <button
+                  onClick={() => setEditScope('project')}
+                  className={`rounded px-3 py-1.5 text-xs ${editScope === 'project' ? 'bg-purple-500/30 text-purple-300' : 'text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  {activeWorkspace?.name ?? 'Project'}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="mb-3">
             <Label>Template Name</Label>
             <div className="mt-1">
@@ -852,24 +1161,86 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
           <Label>Tiles</Label>
           <div className="mt-2 space-y-1.5">
             {editTiles.map((tile, i) => (
-              <div key={i} className="flex items-center gap-2 rounded border border-zinc-800 bg-zinc-800/50 px-3 py-2">
-                <span
-                  className={`h-2 w-2 rounded-full ${
-                    tile.type === 'terminal' ? 'bg-green-500' : tile.type === 'browser' ? 'bg-emerald-500' : 'bg-amber-400'
-                  }`}
-                />
-                <span className="text-xs text-zinc-300 capitalize">{tile.type}</span>
-                <span className="text-[10px] text-zinc-600">
-                  {tile.width}x{tile.height}
-                </span>
-                <button
-                  onClick={() => removeTile(i)}
-                  className="ml-auto rounded p-0.5 text-zinc-600 hover:text-red-400"
-                >
-                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+              <div key={i} className="rounded border border-zinc-800 bg-zinc-800/50 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`h-2 w-2 rounded-full ${
+                      tile.type === 'terminal' ? 'bg-green-500' : tile.type === 'browser' ? 'bg-emerald-500' : 'bg-amber-400'
+                    }`}
+                  />
+                  <span className="text-xs text-zinc-300 capitalize">{tile.type}</span>
+                  {(tile.type === 'terminal' || tile.type === 'browser') ? (
+                    <select
+                      value={`${tile.width}x${tile.height}`}
+                      onChange={(e) => {
+                        const [w, h] = e.target.value.split('x').map(Number)
+                        updateTileSize(i, w, h)
+                      }}
+                      className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400 outline-none focus:border-blue-500"
+                    >
+                      {(tile.type === 'terminal' ? TERMINAL_PRESETS : BROWSER_SPAWN_PRESETS).map((preset) => (
+                        <option key={preset.name} value={`${preset.width}x${preset.height}`}>
+                          {preset.name} ({preset.width}&times;{preset.height})
+                        </option>
+                      ))}
+                      {/* Show current size if it doesn't match any preset */}
+                      {!(tile.type === 'terminal' ? TERMINAL_PRESETS : BROWSER_SPAWN_PRESETS).some(
+                        (p) => p.width === tile.width && p.height === tile.height
+                      ) && (
+                        <option value={`${tile.width}x${tile.height}`}>
+                          Custom ({tile.width}&times;{tile.height})
+                        </option>
+                      )}
+                    </select>
+                  ) : (
+                    <span className="text-[10px] text-zinc-600">
+                      {tile.width}x{tile.height}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => removeTile(i)}
+                    className="ml-auto rounded p-0.5 text-zinc-600 hover:text-red-400"
+                  >
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                {/* Terminal-specific fields: label, command, cwd */}
+                {tile.type === 'terminal' && (
+                  <div className="mt-2 space-y-1.5 pl-4">
+                    <div className="flex items-center gap-2">
+                      <span className="w-14 text-[10px] text-zinc-600">Label</span>
+                      <input
+                        type="text"
+                        value={tile.label || ''}
+                        onChange={(e) => updateTileField(i, 'label', e.target.value || undefined)}
+                        placeholder="e.g., Dev Server"
+                        className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-14 text-[10px] text-zinc-600">Command</span>
+                      <input
+                        type="text"
+                        value={tile.command || ''}
+                        onChange={(e) => updateTileField(i, 'command', e.target.value || undefined)}
+                        placeholder="e.g., npm run dev"
+                        className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-14 text-[10px] text-zinc-600">CWD</span>
+                      <input
+                        type="text"
+                        value={tile.cwd || ''}
+                        onChange={(e) => updateTileField(i, 'cwd', e.target.value || undefined)}
+                        placeholder="relative/path or /absolute/path"
+                        className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-700 focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -898,11 +1269,11 @@ function TemplatesSection({ settings, update }: { settings: Settings; update: (p
             </button>
           </div>
 
-          {/* Preview */}
+          {/* Interactive layout preview */}
           {editTiles.length > 0 && (
             <div className="mt-3 rounded border border-zinc-800 bg-zinc-950 p-3">
-              <span className="mb-2 block text-[10px] text-zinc-600">Preview</span>
-              <TemplatePreview tiles={editTiles} />
+              <span className="mb-2 block text-[10px] text-zinc-600">Layout — drag tiles to arrange</span>
+              <InteractiveTemplatePreview tiles={editTiles} onUpdate={setEditTiles} />
             </div>
           )}
 

@@ -57,6 +57,8 @@ export interface TemplateTile {
   height: number
   devicePreset?: string
   command?: string
+  label?: string
+  cwd?: string
   metadata?: Record<string, unknown>
   linkedTo?: string
 }

@@ -248,6 +248,28 @@ export class CanvasApi extends EventEmitter {
       return
     }
 
+    if (req.method === 'POST' && url === '/api/template/spawn') {
+      this.readBody(req).then((body) => {
+        const { templateId, templateName, origin } = body as {
+          templateId?: string; templateName?: string;
+          origin?: { x: number; y: number }
+        }
+        if (!templateId && !templateName) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'templateId or templateName is required' }))
+          return
+        }
+        this.emit('template-spawn', { templateId, templateName, origin }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
     if (req.method === 'POST' && url === '/api/terminal/write') {
       this.readBody(req).then((body) => {
         const { terminalId, data } = body as { terminalId?: string; data?: string }

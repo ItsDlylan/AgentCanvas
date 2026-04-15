@@ -268,6 +268,20 @@ ipcMain.handle('settings:save', (_event, { settings }: { settings: Settings }) =
 })
 ipcMain.handle('settings:defaults', () => DEFAULT_SETTINGS)
 
+// ── Project Templates IPC ──
+
+import { loadProjectTemplates, saveProjectTemplates, deleteProjectTemplates } from './template-store'
+
+ipcMain.handle('templates:load-project', (_event, { workspaceId }: { workspaceId: string }) =>
+  loadProjectTemplates(workspaceId)
+)
+ipcMain.handle('templates:save-project', (_event, { workspaceId, templates }: { workspaceId: string; templates: import('./settings-store').WorkspaceTemplate[] }) => {
+  saveProjectTemplates(workspaceId, templates)
+})
+ipcMain.handle('templates:delete-project', (_event, { workspaceId }: { workspaceId: string }) => {
+  deleteProjectTemplates(workspaceId)
+})
+
 // ── IDE IPC ──
 
 // Map setting values to macOS app names for `open -a`
@@ -927,6 +941,11 @@ canvasApi.on('terminal-spawn', (info: {
 
 canvasApi.on('terminal-write', (info: { terminalId: string; data: string }, reply: (result: unknown) => void) => {
   terminalManager.write(info.terminalId, info.data)
+  reply({ ok: true })
+})
+
+canvasApi.on('template-spawn', (info: { templateId?: string; templateName?: string; origin?: { x: number; y: number } }, reply: (result: unknown) => void) => {
+  mainWindow?.webContents.send('canvas:template-spawn', info)
   reply({ ok: true })
 })
 

@@ -58,6 +58,11 @@ export interface TemplateTile {
   width: number
   height: number
   devicePreset?: string
+  command?: string
+  label?: string
+  cwd?: string
+  metadata?: Record<string, unknown>
+  linkedTo?: string
 }
 
 export interface WorkspaceTemplate {

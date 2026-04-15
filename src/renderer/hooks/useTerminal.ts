@@ -233,6 +233,10 @@ export function useTerminal({ sessionId, label, cwd, metadata, command, appearan
       }
     })
 
+    // For idle-based command execution cleanup
+    let unsubCommandStatus: (() => void) | undefined
+    let commandFallbackTimer: ReturnType<typeof setTimeout> | undefined
+
     // Create or reconnect to PTY session
     ;(async () => {
       const result = await window.terminal.create(sessionId, label, cwd, metadata)
@@ -262,16 +266,30 @@ export function useTerminal({ sessionId, label, cwd, metadata, command, appearan
 
       // Auto-type command for programmatically spawned terminals
       // Use commandSentRef to survive StrictMode double-invoke (second mount sees isReconnect=true)
+      // Wait for terminal to go idle (shell prompt ready) before sending command
       if (command && !commandSentRef.current) {
         commandSentRef.current = true
-        setTimeout(() => {
+        unsubCommandStatus = window.terminal.onStatus((id, info) => {
+          if (id === sessionId && info.status === 'idle' && !cancelled) {
+            unsubCommandStatus?.()
+            unsubCommandStatus = undefined
+            clearTimeout(commandFallbackTimer)
+            window.terminal.write(sessionId, command + '\n')
+          }
+        })
+        // Safety fallback: if idle never fires within 5s, send anyway
+        commandFallbackTimer = setTimeout(() => {
+          unsubCommandStatus?.()
+          unsubCommandStatus = undefined
           if (!cancelled) window.terminal.write(sessionId, command + '\n')
-        }, 500)
+        }, 5000)
       }
     })()
 
     return () => {
       cancelled = true
+      unsubCommandStatus?.()
+      if (commandFallbackTimer) clearTimeout(commandFallbackTimer)
       if (scrollRafId) cancelAnimationFrame(scrollRafId)
       container.removeEventListener('wheel', onContainerWheel)
       for (const type of mouseFixEvents) {

@@ -5,6 +5,7 @@ import { useAllBrowserStatuses } from '@/hooks/useBrowserStatus'
 import { useUnreadForTile } from '@/hooks/useNotifications'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { useSettings, type WorkspaceTemplate } from '@/hooks/useSettings'
+import { useResolvedTemplates } from '@/hooks/useResolvedTemplates'
 import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS, AGENT_PRESETS, type DevicePreset, type AgentPreset } from '@/constants/devicePresets'
 import type { Workspace } from '@/types/workspace'
 
@@ -896,6 +897,7 @@ function ProcessPanelComponent({
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const { settings } = useSettings()
+  const { resolvedTemplates } = useResolvedTemplates(settings.templates)
 
   const toggleGroup = useCallback((parentId: string) => {
     setCollapsedGroups((prev) => {
@@ -1261,26 +1263,57 @@ function ProcessPanelComponent({
           </button>
 
           {/* Template button */}
-          {settings.templates.length > 0 && (
+          {resolvedTemplates.length > 0 && (
             <div className="relative w-full" onMouseDown={(e) => e.stopPropagation()}>
-              {templateMenuOpen && (
-                <div className="absolute bottom-full left-0 right-0 z-50 mb-1 rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
-                  {settings.templates.map((tmpl) => (
-                    <button
-                      key={tmpl.id}
-                      onClick={() => {
-                        onSpawnTemplate(tmpl)
-                        setTemplateMenuOpen(false)
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-                      <span className="flex-1">{tmpl.name}</span>
-                      <span className="text-zinc-600">{tmpl.tiles.length} tiles</span>
-                    </button>
-                  ))}
-                </div>
-              )}
+              {templateMenuOpen && (() => {
+                const projectTmpls = resolvedTemplates.filter((t) => t.scope === 'project')
+                const globalTmpls = resolvedTemplates.filter((t) => t.scope === 'global')
+                return (
+                  <div className="absolute bottom-full left-0 right-0 z-50 mb-1 max-h-64 overflow-y-auto rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
+                    {projectTmpls.length > 0 && (
+                      <>
+                        <div className="flex items-center gap-1.5 px-3 py-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-purple-500" />
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-purple-400/70">Project</span>
+                        </div>
+                        {projectTmpls.map((tmpl) => (
+                          <button
+                            key={tmpl.id}
+                            onClick={() => { onSpawnTemplate(tmpl); setTemplateMenuOpen(false) }}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-purple-500" />
+                            <span className="flex-1">{tmpl.name}</span>
+                            <span className="text-zinc-600">{tmpl.tiles.length} tiles</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    {projectTmpls.length > 0 && globalTmpls.length > 0 && (
+                      <div className="my-1 border-t border-zinc-700" />
+                    )}
+                    {globalTmpls.length > 0 && (
+                      <>
+                        <div className="flex items-center gap-1.5 px-3 py-1">
+                          <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Global</span>
+                        </div>
+                        {globalTmpls.map((tmpl) => (
+                          <button
+                            key={tmpl.id}
+                            onClick={() => { onSpawnTemplate(tmpl); setTemplateMenuOpen(false) }}
+                            className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                            <span className="flex-1">{tmpl.name}</span>
+                            <span className="text-zinc-600">{tmpl.tiles.length} tiles</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )
+              })()}
               <button
                 onClick={() => setTemplateMenuOpen(!templateMenuOpen)}
                 className="flex w-full items-center justify-center gap-1.5 rounded-md bg-zinc-800 py-2 text-xs font-medium text-blue-400 transition-colors hover:bg-zinc-700 hover:text-blue-300"

@@ -202,11 +202,23 @@ async function resolveActionParams(action: VoiceAction, context: VoiceContext): 
     }
   }
 
-  // Resolve workflow trigger — match name against templates
+  // Resolve workflow trigger — match name against merged templates (project + global)
   if (type === 'workflow.trigger' && params.name && typeof params.name === 'string') {
     try {
       const settings = await window.settings.load()
-      const templates = settings.templates ?? []
+      const globalTemplates = settings.templates ?? []
+      const { useCanvasStore } = await import('@/store/canvas-store')
+      const { activeWorkspaceId, workspaces } = useCanvasStore.getState()
+      const ws = workspaces.find((w) => w.id === activeWorkspaceId)
+
+      // Load project templates and merge (project wins on name conflict)
+      let templates = globalTemplates
+      if (ws?.path) {
+        const projectTemplates = await window.templates.loadProject(activeWorkspaceId)
+        const projectNames = new Set(projectTemplates.map((t) => t.name.toLowerCase()))
+        templates = [...projectTemplates, ...globalTemplates.filter((t) => !projectNames.has(t.name.toLowerCase()))]
+      }
+
       const name = (params.name as string).toLowerCase()
 
       // Match against voiceTrigger first, then template name
