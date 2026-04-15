@@ -10,6 +10,8 @@ import { createActivationController, type ActivationController } from '@/voice/a
 import { loadVoskModel, transcribeWithVosk, getVoskStatus } from '@/voice/vosk-stt'
 import { createAmbientMonitor, type AmbientMonitor } from '@/voice/ambient-monitor'
 import { createDictationNote, createStandupNote, appendToDictation, createVoiceAnnotation } from '@/voice/voice-notes'
+import { createDictationStream, type DictationStreamInstance } from '@/voice/dictation-stream'
+import { routeViaLLM } from '@/voice/llm-router'
 import type { NumberedTile } from '@/components/VoiceNumberOverlay'
 
 export interface UseVoiceReturn {
@@ -27,6 +29,19 @@ export interface UseVoiceReturn {
   numberedTiles: NumberedTile[]
   dismissOverlay: () => void
   selectGridRegion: (region: number) => void
+  // Dictation stream state
+  dictationStreamActive: boolean
+  dictationStreamText: string
+  dictationStreamSpeaking: boolean
+  dictationStreamComplete: boolean
+  dictationStreamConfirming: boolean
+  dictationStreamConfirmMsg: string | null
+  dictationStreamHeardText: string | null
+  sendDictationStream: (text: string) => void
+  cancelDictationStream: () => void
+  stopDictationStream: () => void
+  confirmDictationStream: () => void
+  rejectDictationStream: () => void
 }
 
 export function useVoice(settings: VoiceSettings): UseVoiceReturn {
@@ -54,8 +69,19 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   // Pending destructive action waiting for confirmation
   const pendingAction = useRef<VoiceAction | null>(null)
 
-  // Dictation state
+  // Dictation state (note-based)
   const dictationNoteId = useRef<string | null>(null)
+
+  // Dictation stream state
+  const [dsActive, setDsActive] = useState(false)
+  const [dsText, setDsText] = useState('')
+  const [dsSpeaking, setDsSpeaking] = useState(false)
+  const [dsComplete, setDsComplete] = useState(false)
+  const [dsConfirming, setDsConfirming] = useState(false)
+  const [dsConfirmMsg, setDsConfirmMsg] = useState<string | null>(null)
+  const [dsHeardText, setDsHeardText] = useState<string | null>(null)
+  const dsRef = useRef<DictationStreamInstance | null>(null)
+  const baseModelReady = useRef(false)
 
   // Wake word verified flag — stays true until system returns to wake monitoring
   const wakeWordVerifiedRef = useRef(false)
@@ -349,12 +375,72 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
 
     // Handle mode signals (dictation/standup)
     if (execResult.modeSignal === 'startDictation') {
-      const noteId = createDictationNote()
-      dictationNoteId.current = noteId
-      setTranscript('Dictating...')
-      setMode('dictating')
-      // Keep VAD running continuously for dictation
-      if (vadRef.current) vadRef.current.start()
+      // Guard against double-start
+      if (dsRef.current?.active) return
+
+      // Pause regular VAD — dictation stream manages its own audio
+      if (vadRef.current) vadRef.current.pause()
+      controllerRef.current?.stop()
+
+      setMode('dictationStream')
+      setDsActive(true)
+      setDsText('')
+      setDsComplete(false)
+      setTranscript('Dictation stream')
+
+      // Ensure base model is downloaded
+      const startStream = async () => {
+        if (!baseModelReady.current) {
+          const models = await window.voice.getModelStatus()
+          const base = models.find(m => m.model === 'base')
+          if (!base?.downloaded) {
+            setTranscript('Downloading base model...')
+            const dl = await window.voice.loadModel('base')
+            if (!dl.ok) {
+              setError(dl.error ?? 'Base model download failed')
+              setMode('idle')
+              setDsActive(false)
+              controllerRef.current?.handleTranscriptionComplete()
+              return
+            }
+          }
+          baseModelReady.current = true
+        }
+
+        const stream = await createDictationStream(
+          {
+            chunkMaxMs: 7000,
+            overlapMs: 2000,
+            silenceTimeoutMs: 3000,
+            whisperModel: 'base',
+            deviceId: settings.inputDeviceId
+          },
+          {
+            onChunkTranscribed: (_newWords, fullText) => {
+              setDsText(fullText)
+            },
+            onDictationComplete: (fullText) => {
+              setDsText(fullText)
+              setDsComplete(true)
+              setTranscript('Edit & send')
+            },
+            onError: (err) => {
+              setError(err)
+              cleanupDictationStream()
+              setMode('idle')
+              controllerRef.current?.handleTranscriptionComplete()
+            },
+            onSpeechActivity: (speaking) => {
+              setDsSpeaking(speaking)
+            }
+          }
+        )
+
+        dsRef.current = stream
+        await stream.start()
+      }
+
+      startStream()
       return
     }
     if (execResult.modeSignal === 'startStandup') {
@@ -367,6 +453,12 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       return
     }
     if (execResult.modeSignal === 'stopDictation') {
+      // Dictation stream stop — flush and transition to editing
+      if (dsRef.current?.active) {
+        dsRef.current.stop()
+        return
+      }
+      // Note-based dictation stop (backward compat)
       dictationNoteId.current = null
       setTranscript('Dictation stopped')
       setMode('idle')
@@ -502,6 +594,12 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
 
   // ── Push-to-talk start/stop (original behavior) ──
   const startListening = useCallback(async () => {
+    // If dictation stream is active, hotkey stops it
+    if (mode === 'dictationStream' && dsRef.current?.active) {
+      dsRef.current.stop()
+      return
+    }
+
     if (mode !== 'idle' && mode !== 'confirming') return
 
     setError(null)
@@ -562,6 +660,95 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     }
   }, [mode])
 
+  // ── Dictation stream handlers ──
+
+  function cleanupDictationStream() {
+    if (dsRef.current) {
+      dsRef.current.destroy()
+      dsRef.current = null
+    }
+    setDsActive(false)
+    setDsText('')
+    setDsSpeaking(false)
+    setDsComplete(false)
+    setDsConfirming(false)
+    setDsConfirmMsg(null)
+    setDsHeardText(null)
+  }
+
+  const sendDictationStream = useCallback(async (text: string) => {
+    // Keep the panel active but show a processing state
+    setDsComplete(false)
+    setDsConfirming(false)
+    setDsText('Processing...')
+    setDsSpeaking(false)
+    setTranscript('Processing...')
+    setMode('dictationStream')
+
+    const context = buildContext()
+    try {
+      const plan = await routeViaLLM(text, context)
+      if (plan && plan.steps.length > 0) {
+        const planAction: VoiceAction = {
+          type: '__plan',
+          params: { plan },
+          destructive: plan.destructive
+        }
+        pendingAction.current = planAction
+        // Show confirmation in the DictationPanel
+        setDsHeardText(text)
+        setDsConfirmMsg(plan.confirmation || `${plan.steps.length} step${plan.steps.length !== 1 ? 's' : ''} planned`)
+        setDsConfirming(true)
+        setDsComplete(true)
+        setDsText('')
+        setTranscript(null)
+      } else {
+        setTranscript('No actions recognized')
+        cleanupDictationStream()
+        setMode('idle')
+        controllerRef.current?.handleTranscriptionComplete()
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'LLM routing failed')
+      cleanupDictationStream()
+      setMode('idle')
+      controllerRef.current?.handleTranscriptionComplete()
+    }
+  }, [])
+
+  const confirmDictationStream = useCallback(() => {
+    const pending = pendingAction.current
+    pendingAction.current = null
+    cleanupDictationStream()
+    if (pending) {
+      const result = executeAction(pending)
+      setTranscript(result.message)
+    }
+    setMode('idle')
+    controllerRef.current?.handleTranscriptionComplete()
+  }, [])
+
+  const rejectDictationStream = useCallback(() => {
+    pendingAction.current = null
+    cleanupDictationStream()
+    setTranscript('Cancelled')
+    setMode('idle')
+    controllerRef.current?.handleTranscriptionComplete()
+  }, [])
+
+  const cancelDictationStream = useCallback(() => {
+    pendingAction.current = null
+    cleanupDictationStream()
+    setTranscript('Dictation cancelled')
+    setMode('idle')
+    controllerRef.current?.handleTranscriptionComplete()
+  }, [])
+
+  const stopDictationStream = useCallback(() => {
+    // Manual stop — stream's onDictationComplete callback transitions to editing
+    dsRef.current?.stop()
+  }, [])
+
   // ── Ambient monitoring ──
   useEffect(() => {
     if (!settings.enabled) return
@@ -595,6 +782,10 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
         controllerRef.current.destroy()
         controllerRef.current = null
       }
+      if (dsRef.current) {
+        dsRef.current.destroy()
+        dsRef.current = null
+      }
     }
   }, [])
 
@@ -602,6 +793,19 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     mode, transcript, error, listeningSecondsLeft,
     startListening, stopListening, confirm, cancel,
     numberOverlayActive, gridOverlayActive, numberedTiles,
-    dismissOverlay, selectGridRegion
+    dismissOverlay, selectGridRegion,
+    // Dictation stream
+    dictationStreamActive: dsActive,
+    dictationStreamText: dsText,
+    dictationStreamSpeaking: dsSpeaking,
+    dictationStreamComplete: dsComplete,
+    dictationStreamConfirming: dsConfirming,
+    dictationStreamConfirmMsg: dsConfirmMsg,
+    dictationStreamHeardText: dsHeardText,
+    sendDictationStream,
+    cancelDictationStream,
+    stopDictationStream,
+    confirmDictationStream,
+    rejectDictationStream
   }
 }

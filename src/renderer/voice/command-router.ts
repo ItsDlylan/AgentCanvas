@@ -77,7 +77,7 @@ export async function matchCommand(
   }
 
   // In DICTATING mode, only match "stop dictation" / "end standup"
-  if (mode === 'dictating') {
+  if (mode === 'dictating' || mode === 'dictationStream') {
     if (/^(?:stop dictation|end standup|end dictation)$/.test(normalized)) {
       return {
         action: { type: 'mode.stopDictation', params: {}, destructive: false },

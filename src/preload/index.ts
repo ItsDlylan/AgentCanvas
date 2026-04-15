@@ -547,7 +547,7 @@ export interface VoiceModelStatus {
 }
 
 export interface VoiceAPI {
-  transcribe: (audio: Float32Array, provider?: string) => Promise<{ text: string; durationMs: number }>
+  transcribe: (audio: Float32Array, provider?: string, model?: string) => Promise<{ text: string; durationMs: number }>
   loadModel: (model: string) => Promise<{ ok: boolean; error?: string }>
   getModelStatus: () => Promise<VoiceModelStatus[]>
   onModelProgress: (callback: (model: string, progress: number) => void) => () => void
@@ -565,11 +565,11 @@ export interface VoiceAPI {
 }
 
 const voiceAPI: VoiceAPI = {
-  transcribe: (audio, provider) => {
+  transcribe: (audio, provider, model) => {
     // Copy raw bytes into a standalone Buffer
     const bytes = new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength)
     const buf = Buffer.from(bytes)
-    return ipcRenderer.invoke('voice:transcribe', { audio: buf, provider })
+    return ipcRenderer.invoke('voice:transcribe', { audio: buf, provider, model })
   },
   loadModel: (model) => ipcRenderer.invoke('voice:load-model', { model }),
   getModelStatus: () => ipcRenderer.invoke('voice:model-status'),

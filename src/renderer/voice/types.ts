@@ -1,6 +1,6 @@
 // ── Voice Feature Types ───────────────────────────────────
 
-export type VoiceMode = 'idle' | 'listening' | 'processing' | 'confirming' | 'dictating'
+export type VoiceMode = 'idle' | 'listening' | 'processing' | 'confirming' | 'dictating' | 'dictationStream'
 
 export interface VoiceSettings {
   enabled: boolean

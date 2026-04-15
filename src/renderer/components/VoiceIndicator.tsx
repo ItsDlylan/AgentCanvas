@@ -81,6 +81,7 @@ function borderColor(mode: VoiceMode, error: string | null): string {
     case 'processing': return '#a855f7'
     case 'confirming': return '#f59e0b'
     case 'dictating': return '#10b981'
+    case 'dictationStream': return '#10b981'
     default: return '#27272a'
   }
 }
@@ -116,6 +117,7 @@ function statusIcon(mode: VoiceMode, error: string | null) {
         </svg>
       )
     case 'dictating':
+    case 'dictationStream':
       return (
         <div className="h-2 w-2 rounded-full bg-emerald-500" />
       )
@@ -145,6 +147,7 @@ function statusText(mode: VoiceMode, transcript: string | null, error: string | 
     case 'processing': return 'Transcribing...'
     case 'confirming': return transcript ?? 'Confirm action?'
     case 'dictating': return 'Dictating...'
+    case 'dictationStream': return 'Dictation stream'
     default: return transcript ?? ''
   }
 }

@@ -46,6 +46,7 @@ import { useHotkeys } from '@/hooks/useHotkeys'
 import type { HotkeyAction } from '@/types/settings'
 import { SettingsPage } from './SettingsPage'
 import { VoiceIndicator } from './VoiceIndicator'
+import { DictationPanel } from './DictationPanel'
 import { VoiceNumberOverlay } from './VoiceNumberOverlay'
 import { VoiceGridOverlay } from './VoiceGridOverlay'
 import { useVoice } from '@/hooks/useVoice'
@@ -1400,6 +1401,20 @@ export default function Canvas() {
                   active={voice.gridOverlayActive}
                   onSelect={voice.selectGridRegion}
                   onDismiss={voice.dismissOverlay}
+                />
+                <DictationPanel
+                  active={voice.dictationStreamActive}
+                  streamingText={voice.dictationStreamText}
+                  isSpeaking={voice.dictationStreamSpeaking}
+                  isComplete={voice.dictationStreamComplete}
+                  isConfirming={voice.dictationStreamConfirming}
+                  confirmationMessage={voice.dictationStreamConfirmMsg}
+                  heardText={voice.dictationStreamHeardText}
+                  onSend={voice.sendDictationStream}
+                  onCancel={voice.cancelDictationStream}
+                  onStopDictation={voice.stopDictationStream}
+                  onConfirm={voice.confirmDictationStream}
+                  onReject={voice.rejectDictationStream}
                 />
               </>
             )}

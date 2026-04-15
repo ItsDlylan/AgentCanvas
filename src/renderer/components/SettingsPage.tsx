@@ -1161,10 +1161,14 @@ function VoiceCommandReference() {
             <Cmd phrase="tell [agent] to [message]" note="Direct an agent (confirms)" />
             <Cmd phrase="tell all [group] to [message]" note="Broadcast to group (confirms)" />
           </CommandGroup>
-          <CommandGroup title="Dictation">
-            <Cmd phrase="start dictation" note="All speech goes to a new note" />
-            <Cmd phrase="stop dictation" note="Also: end dictation" />
-            <Cmd phrase="start standup" note="Dated standup note + dictation" />
+          <CommandGroup title="Dictation Stream">
+            <Cmd phrase="start dictation" note="Opens streaming panel — words appear as you speak" />
+            <Cmd phrase="" note="Edit the transcript, then Send to route through the LLM" />
+            <Cmd phrase="" note="Confirm/reject the action plan before it executes" />
+            <Cmd phrase="" note="Uses Whisper base model for higher accuracy" />
+          </CommandGroup>
+          <CommandGroup title="Standup / Note Dictation">
+            <Cmd phrase="start standup" note="Dated standup note — speech appended continuously" />
             <Cmd phrase="end standup" />
           </CommandGroup>
           <CommandGroup title="Workflows">
@@ -1198,13 +1202,18 @@ function VoiceCommandReference() {
             With a local LLM (Ollama or LM Studio), you can speak natural compound commands.
             These are interpreted by the LLM and presented for confirmation before executing.
           </p>
-          <CommandGroup title="Examples">
+          <CommandGroup title="Quick Commands">
             <Cmd phrase="Set up a code review with three agents for auth" note="Spawns 3 named terminals with prompts" />
             <Cmd phrase="Open a browser to GitHub and a terminal side by side" note="Multi-tile spawn" />
             <Cmd phrase="Rename this to API Server and zoom to fit" note="Multi-step action" />
             <Cmd phrase="Tell all review agents to wrap up and summarize" note="Broadcast with natural language" />
             <Cmd phrase="Close all the note tiles" note="Batch operation" />
             <Cmd phrase="Start a debugging session with devtools" note="Context-aware workspace setup" />
+          </CommandGroup>
+          <CommandGroup title="Dictation Stream + LLM">
+            <Cmd phrase="start dictation → speak at length → edit → send" note="Full workflow for complex multi-step plans" />
+            <Cmd phrase="" note="Say &quot;start dictation&quot;, describe what you want in detail, review the transcript, fix any words the voice recognition got wrong, hit Send" />
+            <Cmd phrase="" note="The LLM parses your corrected text into an action plan — you see what it heard and what it plans to do, then confirm or reject" />
           </CommandGroup>
         </div>
       )}

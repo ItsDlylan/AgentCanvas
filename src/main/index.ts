@@ -622,14 +622,14 @@ ipcMain.handle('debug:profile', async (_event, durationMs: number) => {
 // ── Voice IPC Handlers ────────────────────────────────────
 import { transcribe, downloadModel, getModelStatus } from './voice/whisper-stt'
 
-ipcMain.handle('voice:transcribe', async (_event, { audio, provider }: { audio: Buffer; provider?: string }) => {
+ipcMain.handle('voice:transcribe', async (_event, { audio, provider, model }: { audio: Buffer; provider?: string; model?: string }) => {
   // Copy into an aligned ArrayBuffer — Node.js Buffers use a pooled ArrayBuffer
   // whose byteOffset may not be 4-byte aligned, breaking Float32Array reads
   const aligned = new ArrayBuffer(audio.byteLength)
   new Uint8Array(aligned).set(new Uint8Array(audio.buffer, audio.byteOffset, audio.byteLength))
   const float32 = new Float32Array(aligned)
   const samples = Array.from(float32)
-  return transcribe(samples)
+  return transcribe(samples, (model as 'tiny' | 'base' | 'small') ?? 'tiny')
 })
 
 ipcMain.handle('voice:load-model', async (_event, { model }: { model: string }) => {
