@@ -256,7 +256,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
         allEdges: typeof updater === 'function' ? updater(s.allEdges) : updater
       })),
 
-    setFocusedId: (id) => set({ focusedId: id }),
+    setFocusedId: (id) => { set({ focusedId: id }); if (id) markTerminalRead(id) },
 
     setTileWorkspaceMap: (updater) =>
       set((s) => ({
