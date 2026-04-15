@@ -1061,6 +1061,34 @@ function VoiceSection({ settings, update }: { settings: Settings; update: (patch
         </SettingRow>
       </div>
 
+      <h3 className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wider text-zinc-500">Ambient Monitoring</h3>
+      <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
+        <SettingRow label="Waiting Alerts" description="Flash when a terminal enters waiting state (e.g. Claude asking for approval)">
+          <Toggle
+            value={v.ambientMonitoring?.onWaiting ?? true}
+            onChange={(val) => update({ voice: { ...v, ambientMonitoring: { ...v.ambientMonitoring, onWaiting: val } } })}
+          />
+        </SettingRow>
+        <SettingRow label="Error Alerts" description="Flash when an error notification arrives">
+          <Toggle
+            value={v.ambientMonitoring?.onError ?? true}
+            onChange={(val) => update({ voice: { ...v, ambientMonitoring: { ...v.ambientMonitoring, onError: val } } })}
+          />
+        </SettingRow>
+        <SettingRow label="Exit Alerts" description="Flash when a terminal process exits">
+          <Toggle
+            value={v.ambientMonitoring?.onExit ?? false}
+            onChange={(val) => update({ voice: { ...v, ambientMonitoring: { ...v.ambientMonitoring, onExit: val } } })}
+          />
+        </SettingRow>
+        <SettingRow label="All Notifications" description="Flash for every notification, not just errors">
+          <Toggle
+            value={v.ambientMonitoring?.onNotification ?? false}
+            onChange={(val) => update({ voice: { ...v, ambientMonitoring: { ...v.ambientMonitoring, onNotification: val } } })}
+          />
+        </SettingRow>
+      </div>
+
       <h3 className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wider text-zinc-500">Local LLM (Tier 3)</h3>
       <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
         <SettingRow label="LLM Endpoint" description="Override auto-discovery (leave empty to auto-detect Ollama/LM Studio)">
