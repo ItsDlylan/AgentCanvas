@@ -323,12 +323,34 @@ Plus custom environment variables configured in Settings > Terminal.
 
 ## Changelog
 
+### 2026-04-15
+
+- **feat:** Dictation stream mode — say "start dictation" to open a floating composer panel that streams transcribed words in real-time as you speak, with VAD-aware chunking (7s max), 2s overlap, and LCS deduplication at chunk boundaries
+- **feat:** Edit-before-send workflow — after dictation completes (3s silence or manual stop), transcript becomes an editable textarea for correcting misrecognized words before routing to the LLM
+- **feat:** Inline confirmation panel — after sending, the panel shows what the AI heard alongside the planned actions with Y/N keyboard shortcuts, replacing the small top-center pill for dictation flows
+- **feat:** Whisper model selection via IPC — transcribe calls now forward an optional model parameter, dictation stream uses the `base` model (~23% lower WER than tiny)
+- **feat:** Tier 3 LLM voice routing via local Qwen + coding vocabulary corrections (multi-word: "a p i" → "api", "cube control" → "kubectl"; single-word: "off" → "auth", "jason" → "json")
+- **fix:** Voice activation only triggers on wake word or push-to-talk (prevents ambient noise from triggering commands)
+- **fix:** Wake word detection tuning — sliding window 3/5 hits, 3s debounce, VAD timing improvements, and listening countdown timer
+
 ### 2026-04-14
 
-- **feat:** Agent orchestration workspace — `POST /api/terminal/spawn` lets agents programmatically spawn worker terminal tiles with radial fan layout, purple team edges, auto-type commands, and team role badges (Lead/Worker)
-- **feat:** Gold crown badge on orchestrator terminal tiles (`metadata.team.isLead`)
+- **feat:** Full voice command system (M1–M12) — push-to-talk, wake word ("hey jarvis"), and always-on activation modes with Silero VAD for speech boundary detection
+- **feat:** Whisper.cpp STT — auto-downloads models to `~/.agentcanvas/models/`, supports tiny/base/small, runs via direct binary invocation with audio normalization
+- **feat:** Three-tier command routing — Tier 1: 140+ regex patterns (<50ms), Tier 2: Levenshtein fuzzy matching (<5ms), Tier 3: local LLM via Ollama/LM Studio (1–5s)
+- **feat:** Voice-driven tile management — spawn/close/rename terminals, browsers, notes, and draw tiles by voice
+- **feat:** Voice navigation — workspace switching, tile focus by label, zoom controls, number overlay for tile selection, 3x3 grid for viewport panning
+- **feat:** Multi-agent voice control — approve/reject/interrupt agents, send input to specific tiles, broadcast messages to agent groups by role or team
+- **feat:** Wake word detection — openWakeWord ONNX pipeline (mel spectrogram → embedding → classifier) with hey_jarvis, alexa, hey_mycroft models
+- **feat:** Vosk grammar fast path — grammar-constrained recognition (~200ms) with automatic Whisper fallback for out-of-grammar speech
+- **feat:** Context-aware disambiguation — resolves ambiguous tile references ("the browser", "the waiting terminal") via multi-step resolution cascade
+- **feat:** Voice dictation and standup notes — continuous speech-to-note with timestamped entries
+- **feat:** Ambient visual monitoring — flashes transcript on terminal waiting/error/exit/notification events
+- **feat:** Voice workflow triggers — spawn workspace templates by voice ("start code review")
+- **feat:** Voice settings UI with activation mode picker, wake word selector, model chooser, device selection, LLM endpoint discovery, and command reference
+- **feat:** Agent orchestration workspace — `POST /api/terminal/spawn` lets agents programmatically spawn worker terminal tiles with radial fan layout, purple team edges, auto-type commands, and team role badges
 - **feat:** `POST /api/terminal/write` endpoint to send commands to any terminal tile
-- **feat:** Passive team detection via file watcher on `~/.claude/teams/` for Claude Code Agent Teams integration
+- **refactor:** Extract canvas state to Zustand store for voice system integration
 
 ### 2026-04-13 / 04-14
 
