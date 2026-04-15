@@ -38,7 +38,9 @@ export function executeAction(action: VoiceAction): ExecuteResult {
 
     case 'tile.spawnTerminal': {
       const count = Math.min((action.params.count as number) || 1, 10)
-      for (let i = 0; i < count; i++) store.addTerminalAt()
+      const command = action.params.command as string | undefined
+      const label = action.params.label as string | undefined
+      for (let i = 0; i < count; i++) store.addTerminalAt(undefined, undefined, undefined, command, label)
       return { ok: true, message: count > 1 ? `${count} terminals spawned` : 'Terminal spawned' }
     }
 
@@ -166,6 +168,15 @@ export function executeAction(action: VoiceAction): ExecuteResult {
     }
 
     // ── Agent control ──
+
+    case 'agent.startClaude': {
+      const prompt = action.params.prompt as string
+      if (!prompt) return { ok: false, message: 'No prompt provided' }
+      const escaped = prompt.replace(/'/g, "'\\''")
+      const command = `claude -p '${escaped}'`
+      store.addTerminalAt(undefined, undefined, undefined, command, 'Claude')
+      return { ok: true, message: 'Claude agent started' }
+    }
 
     case 'agent.approve':
     case 'agent.reject': {
