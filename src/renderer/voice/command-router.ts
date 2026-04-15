@@ -47,10 +47,11 @@ function buildCommandCorpus(): Array<{ text: string; patternIndex: number }> {
 export async function matchCommand(
   transcript: string,
   mode: VoiceMode,
-  context?: VoiceContext
+  context?: VoiceContext,
+  wakeWord?: string
 ): Promise<MatchResult | null> {
   const raw = transcript
-  const normalized = normalize(transcript)
+  const normalized = normalize(transcript, wakeWord)
 
   if (!normalized) return null
 

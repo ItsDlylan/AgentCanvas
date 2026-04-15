@@ -29,7 +29,7 @@ const NUMBER_WORDS: Record<string, string> = {
 // (the entire normalized result is just that word).
 const AMBIGUOUS_NUMBER_WORDS = new Set(['to', 'too', 'for'])
 
-export function normalize(transcript: string): string {
+export function normalize(transcript: string, wakeWord?: string): string {
   const words = transcript
     .toLowerCase()
     .replace(/[.,!?;:'"()\[\]{}\-—–]/g, '')  // strip punctuation
@@ -45,5 +45,25 @@ export function normalize(transcript: string): string {
     return digit
   })
 
-  return converted.join(' ').trim()
+  let result = converted.join(' ').trim()
+
+  // Strip wake word prefix — STT captures the trigger phrase in the audio
+  if (wakeWord && result) {
+    const phrase = wakeWord.replace(/_/g, ' ').toLowerCase()
+    const parts = phrase.split(' ')
+
+    if (result.startsWith(phrase + ' ')) {
+      // Full match: "hey jarvis open terminal" → "open terminal"
+      result = result.slice(phrase.length + 1)
+    } else if (parts.length > 1) {
+      // Partial: filler removal may have stripped "hey", or STT missed it
+      // e.g. "a jarvis open terminal" → fillers strip "a" → "jarvis open terminal"
+      const name = parts[parts.length - 1]
+      if (result.startsWith(name + ' ')) {
+        result = result.slice(name.length + 1)
+      }
+    }
+  }
+
+  return result
 }

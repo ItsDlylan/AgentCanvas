@@ -27,13 +27,28 @@ export const patterns: VoiceCommandPattern[] = [
 
   // ── Tile spawning (creative = immediate) ──
   {
+    patterns: [/^(?:spawn|new|open) (\d+) terminals?$/, /^(?:spawn|new|open) terminals? (\d+)$/],
+    action: 'tile.spawnTerminal',
+    extract: (m) => ({ count: parseInt(m[1], 10) })
+  },
+  {
     patterns: [/^spawn terminal$/, /^new terminal$/, /^open terminal$/],
     action: 'tile.spawnTerminal'
+  },
+  {
+    patterns: [/^(?:spawn|new|open) (\d+) browsers?$/, /^(?:spawn|new|open) browsers? (\d+)$/],
+    action: 'tile.spawnBrowser',
+    extract: (m) => ({ count: parseInt(m[1], 10) })
   },
   {
     patterns: [/^(?:open|spawn) browser(?: to (.+))?$/, /^new browser(?: to (.+))?$/],
     action: 'tile.spawnBrowser',
     extract: (m) => (m[1] ? { url: m[1] } : {})
+  },
+  {
+    patterns: [/^(?:create|new|open) (\d+) notes?$/, /^(?:create|new|open) notes? (\d+)$/],
+    action: 'tile.spawnNote',
+    extract: (m) => ({ count: parseInt(m[1], 10) })
   },
   {
     patterns: [/^create note$/, /^new note$/, /^open note$/],

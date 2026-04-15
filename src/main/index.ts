@@ -649,12 +649,16 @@ import {
   unloadWakeWordEngine,
   downloadWakeWordModels,
   getWakeWordModelStatus,
-  isWakeWordReady
+  isWakeWordReady,
+  resetDetectionBuffers
 } from './voice/wake-word'
 
 let wakeWordActive = false
 let wakeWordErrorLogged = false
 let lastDetectionTime = 0
+let consecutiveDetections = 0
+const DETECTION_THRESHOLD = 0.5
+const REQUIRED_CONSECUTIVE = 3  // Must exceed threshold N times in a row
 const DETECTION_COOLDOWN_MS = 3000 // 3s debounce between detections
 
 ipcMain.on('wake-word:audio-frame', async (_event, frame: Buffer) => {
@@ -667,12 +671,21 @@ ipcMain.on('wake-word:audio-frame', async (_event, frame: Buffer) => {
     const samples = new Float32Array(aligned)
 
     const probability = await processAudioFrame(samples)
-    if (probability !== null && probability > 0.25) {
-      const now = Date.now()
-      if (now - lastDetectionTime > DETECTION_COOLDOWN_MS) {
-        lastDetectionTime = now
-        console.log(`[wake-word] Detected! probability=${probability.toFixed(3)}`)
-        mainWindow?.webContents.send('wake-word:detected')
+    if (probability !== null) {
+      if (probability > DETECTION_THRESHOLD) {
+        consecutiveDetections++
+        if (consecutiveDetections >= REQUIRED_CONSECUTIVE) {
+          const now = Date.now()
+          if (now - lastDetectionTime > DETECTION_COOLDOWN_MS) {
+            lastDetectionTime = now
+            console.log(`[wake-word] Detected! probability=${probability.toFixed(3)} (${consecutiveDetections} consecutive)`)
+            mainWindow?.webContents.send('wake-word:detected')
+            resetDetectionBuffers()
+          }
+          consecutiveDetections = 0
+        }
+      } else {
+        consecutiveDetections = 0
       }
     }
   } catch (err) {
@@ -696,6 +709,7 @@ ipcMain.handle('wake-word:start', async (_event, { wakeWord }: { wakeWord: strin
   if (result.ok) {
     wakeWordActive = true
     wakeWordErrorLogged = false
+    consecutiveDetections = 0
   }
   return result
 })

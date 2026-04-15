@@ -134,7 +134,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
 
       try {
         await controller.start()
-        if (settings.activationMode === 'always-on') {
+        if (settings.activationMode === 'always') {
           setMode('listening')
         }
       } catch (err) {
@@ -244,7 +244,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     const effectiveMode: VoiceMode = isDictating ? 'dictating' : modeRef.current
 
     const context = buildContext()
-    const result = await matchCommand(text, effectiveMode, context)
+    const result = await matchCommand(text, effectiveMode, context, settings.wakeWord)
 
     if (!result) {
       // In dictating mode, append speech to the dictation note

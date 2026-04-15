@@ -78,6 +78,7 @@ export interface VoiceSettings {
   wakeWord: string
   audioFeedback: boolean
   language: string
+  inputDeviceId: string | null
   llmEndpoint: string | null
   llmModel: string | null
   ambientMonitoring: {

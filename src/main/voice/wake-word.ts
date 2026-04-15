@@ -153,6 +153,11 @@ export function unloadWakeWordEngine(): void {
   melSession = null
   embeddingSession = null
   classifierSession = null
+  resetDetectionBuffers()
+}
+
+/** Clear accumulated mel/embedding buffers without unloading ONNX sessions. */
+export function resetDetectionBuffers(): void {
   melFrameBuffer = []
   embeddingBuffer = []
   melFramesSinceLastEmbed = 0

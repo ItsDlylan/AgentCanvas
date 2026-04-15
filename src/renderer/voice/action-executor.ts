@@ -37,18 +37,21 @@ export function executeAction(action: VoiceAction): ExecuteResult {
     // ── Tile spawning (immediate) ──
 
     case 'tile.spawnTerminal': {
-      store.addTerminalAt()
-      return { ok: true, message: 'Terminal spawned' }
+      const count = Math.min((action.params.count as number) || 1, 10)
+      for (let i = 0; i < count; i++) store.addTerminalAt()
+      return { ok: true, message: count > 1 ? `${count} terminals spawned` : 'Terminal spawned' }
     }
 
     case 'tile.spawnBrowser': {
-      store.addBrowserAt()
-      return { ok: true, message: 'Browser spawned' }
+      const count = Math.min((action.params.count as number) || 1, 10)
+      for (let i = 0; i < count; i++) store.addBrowserAt()
+      return { ok: true, message: count > 1 ? `${count} browsers spawned` : 'Browser spawned' }
     }
 
     case 'tile.spawnNote': {
-      store.addNoteAt()
-      return { ok: true, message: 'Note created' }
+      const count = Math.min((action.params.count as number) || 1, 10)
+      for (let i = 0; i < count; i++) store.addNoteAt()
+      return { ok: true, message: count > 1 ? `${count} notes created` : 'Note created' }
     }
 
     case 'tile.spawnDraw': {

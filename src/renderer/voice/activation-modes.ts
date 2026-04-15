@@ -8,7 +8,7 @@ import type { VADInstance } from './vad'
 import { createVAD } from './vad'
 import { createAudioStream, type AudioStreamInstance } from './audio-stream'
 
-export type ActivationMode = 'push-to-talk' | 'wake-word' | 'always-on'
+export type ActivationMode = 'push-to-talk' | 'wake-word' | 'always'
 
 export interface ActivationCallbacks {
   onSpeechStart: () => void
@@ -82,7 +82,7 @@ export function createActivationController(
         case 'wake-word':
           await startWakeWord()
           break
-        case 'always-on':
+        case 'always':
           await startAlwaysOn()
           break
       }
@@ -147,7 +147,7 @@ export function createActivationController(
           if (vad) vad.pause()
           if (audioStream) audioStream.start()
           break
-        case 'always-on':
+        case 'always':
           // Restart VAD immediately
           if (vad) vad.start()
           break
