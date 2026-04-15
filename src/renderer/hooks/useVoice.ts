@@ -7,6 +7,7 @@ import { buildContext } from '@/voice/context-builder'
 import { useCanvasStore } from '@/store/canvas-store'
 import { defaultTileWidth, defaultTileHeight } from '@/store/canvas-store'
 import { createActivationController, type ActivationController } from '@/voice/activation-modes'
+import { loadVoskModel, transcribeWithVosk, getVoskStatus } from '@/voice/vosk-stt'
 import type { NumberedTile } from '@/components/VoiceNumberOverlay'
 
 export interface UseVoiceReturn {
@@ -313,7 +314,33 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
   const transcribeAudio = useCallback(async (audio: Float32Array) => {
     setMode('processing')
     try {
-      // Auto-download model on first use
+      // ── Vosk fast path: try grammar-constrained recognition first ──
+      if (settings.sttProvider === 'vosk') {
+        // Auto-load Vosk model on first use
+        const voskStatus = getVoskStatus()
+        if (voskStatus.status === 'unloaded') {
+          setTranscript('Loading Vosk model...')
+          const dl = await loadVoskModel()
+          if (!dl.ok) {
+            // Fall through to Whisper
+            console.warn('[vosk] Load failed, falling back to Whisper:', dl.error)
+          }
+        }
+
+        if (getVoskStatus().status === 'ready') {
+          const voskResult = await transcribeWithVosk(audio)
+          if (voskResult && voskResult.text) {
+            console.log(`[vosk] Fast path hit: "${voskResult.text}" (conf=${voskResult.confidence.toFixed(2)})`)
+            processCommand(voskResult.text)
+            return
+          }
+          // Not in grammar → fall through to Whisper
+          console.log('[vosk] Not in grammar, falling back to Whisper')
+        }
+      }
+
+      // ── Whisper path (default, or Vosk fallback) ──
+      // Auto-download Whisper model on first use
       if (!modelReady.current) {
         setTranscript(`Downloading ${settings.whisperModel} model...`)
         const dl = await window.voice.loadModel(settings.whisperModel)

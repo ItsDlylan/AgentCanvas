@@ -42,6 +42,7 @@
     "react-konva": "^19.2.3",
     "roughjs": "^4.6.6",
     "uuid": "^11.1.0",
+    "vosk-browser": "^0.0.8",
     "whisper-node": "^1.1.1",
     "ws": "^8.20.0",
     "zustand": "^4.5.7"

@@ -1024,13 +1024,17 @@ function VoiceSection({ settings, update }: { settings: Settings; update: (patch
           </SettingRow>
         )}
 
-        <SettingRow label="STT Provider" description="Speech-to-text engine for transcription">
+        <SettingRow label="STT Provider" description={
+          v.sttProvider === 'vosk'
+            ? 'Vosk recognizes known commands instantly (~200ms), falls back to Whisper for everything else'
+            : 'Speech-to-text engine for transcription'
+        }>
           <SelectInput
             value={v.sttProvider}
             onChange={(val) => update({ voice: { ...v, sttProvider: val as 'whisper' | 'vosk' | 'web-speech' } })}
             options={[
               { value: 'whisper', label: 'Whisper (local)' },
-              { value: 'vosk', label: 'Vosk (local)' },
+              { value: 'vosk', label: 'Vosk + Whisper (fast path)' },
               { value: 'web-speech', label: 'Web Speech API' }
             ]}
           />

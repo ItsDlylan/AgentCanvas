@@ -4,7 +4,7 @@
 
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
+import { existsSync, writeFileSync, mkdirSync, unlinkSync, renameSync } from 'fs'
 import { execFileSync } from 'child_process'
 import { randomUUID } from 'crypto'
 
@@ -67,13 +67,12 @@ export async function downloadModel(
   try {
     // Use curl for progress-friendly download
     const tmpPath = `${modelPath}.tmp`
-    execSync(`curl -L -o "${tmpPath}" "${url}"`, {
+    execFileSync('curl', ['-L', '-o', tmpPath, url], {
       timeout: 300000, // 5 minute timeout
       stdio: 'pipe'
     })
 
     // Move into place atomically
-    const { renameSync } = await import('fs')
     renameSync(tmpPath, modelPath)
     onProgress?.(100)
     return { ok: true }

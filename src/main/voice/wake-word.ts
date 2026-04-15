@@ -8,7 +8,7 @@
 
 import { app } from 'electron'
 import { join } from 'path'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, renameSync } from 'fs'
 import { execFileSync } from 'child_process'
 import * as ort from 'onnxruntime-node'
 
@@ -48,7 +48,6 @@ function downloadFile(url: string, dest: string): void {
     timeout: 120000,
     stdio: 'pipe'
   })
-  const { renameSync } = require('fs')
   renameSync(tmpPath, dest)
 }
 
