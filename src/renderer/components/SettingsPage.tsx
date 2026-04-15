@@ -1112,7 +1112,63 @@ function VoiceSection({ settings, update }: { settings: Settings; update: (patch
         </SettingRow>
       </div>
 
+      <RecommendedModels />
       <VoiceCommandReference />
+    </div>
+  )
+}
+
+function RecommendedModels() {
+  const [expanded, setExpanded] = useState(false)
+
+  const models: Array<{ name: string; params: string; provider: string; note: string; best?: boolean }> = [
+    { name: 'qwen2.5:3b', params: '3B', provider: 'Ollama', note: 'Fast, good for quick commands. Low resource usage.', best: true },
+    { name: 'qwen2.5:7b', params: '7B', provider: 'Ollama', note: 'Better comprehension for compound commands. Recommended sweet spot.' },
+    { name: 'llama3.2:3b', params: '3B', provider: 'Ollama', note: 'Solid alternative to Qwen. Good instruction following.' },
+    { name: 'mistral:7b', params: '7B', provider: 'Ollama', note: 'Strong reasoning. Slightly slower than Qwen 7B.' },
+    { name: 'phi-4-mini', params: '3.8B', provider: 'Ollama / LM Studio', note: 'Compact, fast JSON output. Good for structured action plans.' },
+    { name: 'gemma-3:4b', params: '4B', provider: 'Ollama', note: 'Google model, strong at short structured tasks.' },
+    { name: 'deepseek-r1:7b', params: '7B', provider: 'Ollama', note: 'Reasoning-focused. Best for complex multi-step plans, slower.' },
+  ]
+
+  return (
+    <div className="mt-6">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex w-full items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-2.5 text-left text-xs font-medium text-zinc-300 hover:bg-zinc-800/50"
+      >
+        <span>Recommended Models</span>
+        <span className="text-zinc-600">{expanded ? '−' : '+'}</span>
+      </button>
+      {expanded && (
+        <div className="rounded-b-lg border-x border-b border-zinc-800 bg-zinc-950/50 px-4 py-3">
+          <p className="mb-3 text-[10px] text-zinc-500">
+            These models work well with the Tier 3 LLM voice router. Install via <code className="rounded bg-zinc-800 px-1 text-zinc-400">ollama pull model_name</code> or load in LM Studio.
+            Smaller models (3–4B) are faster; larger models (7B+) understand compound commands better.
+          </p>
+          <div className="space-y-1.5">
+            {models.map((m) => (
+              <div key={m.name} className="flex items-start gap-3 rounded px-2 py-1.5 hover:bg-zinc-800/30">
+                <div className="flex min-w-0 flex-1 items-baseline gap-2">
+                  <code className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] text-blue-400">
+                    {m.name}
+                  </code>
+                  {m.best && (
+                    <span className="shrink-0 rounded bg-emerald-900/40 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-emerald-400">
+                      quick start
+                    </span>
+                  )}
+                  <span className="text-[10px] text-zinc-600">{m.note}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-500">{m.params}</span>
+                  <span className="text-[10px] text-zinc-600">{m.provider}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
