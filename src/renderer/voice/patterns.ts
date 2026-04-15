@@ -116,9 +116,9 @@ export const patterns: VoiceCommandPattern[] = [
     destructive: true
   },
 
-  // ── Workflow triggers ──
+  // ── Workflow triggers (short phrases only — complex commands fall through to Tier 3 LLM) ──
   {
-    patterns: [/^start (.+)$/, /^set up (.+)$/, /^launch (.+)$/],
+    patterns: [/^start (\S+(?:\s\S+)?)$/, /^set up (\S+(?:\s\S+)?)$/, /^launch (\S+(?:\s\S+)?)$/],
     action: 'workflow.trigger',
     extract: (m) => ({ name: m[1] })
   },

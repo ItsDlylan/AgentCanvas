@@ -561,6 +561,7 @@ export interface VoiceAPI {
   // LLM
   discoverLLM: (endpoint?: string, model?: string) => Promise<{ endpoints: Array<{ provider: string; baseUrl: string; models: string[] }>; defaultEndpoint: { provider: string; baseUrl: string; models: string[] } | null }>
   getLLMStatus: () => Promise<{ endpoints: Array<{ provider: string; baseUrl: string; models: string[] }>; defaultEndpoint: { provider: string; baseUrl: string; models: string[] } | null } | null>
+  chatLLM: (apiUrl: string, body: object) => Promise<{ ok: boolean; data?: unknown; status?: number; error?: string }>
 }
 
 const voiceAPI: VoiceAPI = {
@@ -593,7 +594,8 @@ const voiceAPI: VoiceAPI = {
   getWakeWordModelStatus: () => ipcRenderer.invoke('wake-word:model-status'),
   // LLM
   discoverLLM: (endpoint?: string, model?: string) => ipcRenderer.invoke('llm:discover', { endpoint, model }),
-  getLLMStatus: () => ipcRenderer.invoke('llm:status')
+  getLLMStatus: () => ipcRenderer.invoke('llm:status'),
+  chatLLM: (apiUrl: string, body: object) => ipcRenderer.invoke('llm:chat', { apiUrl, body })
 }
 
 contextBridge.exposeInMainWorld('voice', voiceAPI)

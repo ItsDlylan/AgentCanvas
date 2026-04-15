@@ -247,7 +247,7 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
     const result = await matchCommand(text, effectiveMode, context, settings.wakeWord)
 
     if (!result) {
-      // In dictating mode, append speech to the dictation note
+      // In dictating mode, append speech to the dictation note (use raw text)
       if (isDictating && dictationNoteId.current) {
         appendToDictation(dictationNoteId.current, text)
         setTranscript(text)

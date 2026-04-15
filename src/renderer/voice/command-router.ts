@@ -53,6 +53,8 @@ export async function matchCommand(
   const raw = transcript
   const normalized = normalize(transcript, wakeWord)
 
+  console.log(`[command-router] raw="${raw}" → normalized="${normalized}"`)
+
   if (!normalized) return null
 
   // In CONFIRMING mode, only match yes/no
@@ -102,6 +104,7 @@ export async function matchCommand(
           await resolveActionParams(action, context)
         }
 
+        console.log(`[command-router] Tier 1 match: "${normalized}" → ${action.type}`)
         return { action, raw, normalized, tier: 1 }
       }
     }
@@ -127,14 +130,17 @@ export async function matchCommand(
       resolveActionParams(action, context)
     }
 
+    console.log(`[command-router] Tier 2 fuzzy match: "${normalized}" → ${action.type} (matched "${fuzzyResult.item.text}")`)
     return { action, raw, normalized, tier: 2 }
   }
 
   // Tier 3: Local LLM via Ollama/LM Studio
+  console.log(`[command-router] Tiers 1+2 missed, trying Tier 3 LLM...`)
   if (context) {
     try {
-      const plan = await routeViaLLM(raw, context)
+      const plan = await routeViaLLM(normalized, context)
       if (plan && plan.steps.length > 0) {
+        console.log(`[command-router] Tier 3 match: ${plan.steps.length} steps`)
         return {
           action: plan.steps[0],
           raw,

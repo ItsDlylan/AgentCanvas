@@ -80,13 +80,23 @@ export async function routeViaLLM(
   transcript: string,
   context: VoiceContext
 ): Promise<LLMActionPlan | null> {
-  // Discover endpoint from cached IPC result
-  const discovery = await window.voice.getLLMStatus()
-  if (!discovery?.defaultEndpoint) return null
+  // Discover endpoint from cached IPC result — auto-discover if cache is empty
+  let discovery = await window.voice.getLLMStatus()
+  if (!discovery?.defaultEndpoint) {
+    console.log('[llm-router] No cached endpoint, running auto-discovery...')
+    discovery = await window.voice.discoverLLM()
+  }
+  if (!discovery?.defaultEndpoint) {
+    console.error('[llm-router] No LLM endpoint found — is LM Studio / Ollama running?')
+    return null
+  }
 
   const endpoint = discovery.defaultEndpoint
   const model = endpoint.models[0]
-  if (!model) return null
+  if (!model) {
+    console.error('[llm-router] Endpoint found but no models loaded:', endpoint.baseUrl)
+    return null
+  }
 
   // Build the API URL based on provider
   const apiUrl = endpoint.provider === 'ollama'
@@ -127,45 +137,89 @@ export async function routeViaLLM(
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: userMessage }
           ],
-          response_format: { type: 'json_object' },
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'action_plan',
+              strict: true,
+              schema: {
+                type: 'object',
+                properties: {
+                  steps: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        type: { type: 'string' },
+                        params: { type: 'object' },
+                        destructive: { type: 'boolean' }
+                      },
+                      required: ['type', 'params', 'destructive']
+                    }
+                  },
+                  confirmation: { type: 'string' },
+                  destructive: { type: 'boolean' }
+                },
+                required: ['steps', 'confirmation', 'destructive']
+              }
+            }
+          },
           temperature: 0.1
         }
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 5000)
+    console.log(`[llm-router] Tier 3 request → ${apiUrl} (model=${model})`)
+    console.log(`[llm-router] Transcript: "${transcript}"`)
+    console.log(`[llm-router] Context:`, contextSummary)
 
-    const res = await fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    })
+    const t0 = performance.now()
 
-    clearTimeout(timeout)
-    if (!res.ok) return null
+    // Route through main process IPC to avoid CORS
+    const res = await window.voice.chatLLM(apiUrl, body)
+    const elapsed = Math.round(performance.now() - t0)
 
-    const json = await res.json()
+    if (!res.ok) {
+      console.error(`[llm-router] HTTP ${res.status ?? ''} ${res.error ?? 'unknown error'} (${elapsed}ms)`)
+      return null
+    }
+
+    const json = res.data as Record<string, unknown>
 
     // Extract content based on provider format
     const content = endpoint.provider === 'ollama'
-      ? json.message?.content
-      : json.choices?.[0]?.message?.content
+      ? (json.message as Record<string, unknown>)?.content
+      : ((json.choices as Array<Record<string, unknown>>)?.[0]?.message as Record<string, unknown>)?.content
 
-    if (!content) return null
+    if (!content) {
+      console.error(`[llm-router] No content in response (${elapsed}ms):`, JSON.stringify(json).slice(0, 500))
+      return null
+    }
+
+    console.log(`[llm-router] Raw LLM response (${elapsed}ms):`, content)
 
     const plan = JSON.parse(content) as LLMActionPlan
-    if (!plan.steps || !Array.isArray(plan.steps)) return null
-    if (plan.steps.length === 0) return null
+    if (!plan.steps || !Array.isArray(plan.steps)) {
+      console.error('[llm-router] Invalid plan — missing steps array:', content)
+      return null
+    }
+    if (plan.steps.length === 0) {
+      console.log('[llm-router] Empty plan — LLM says not a command')
+      return null
+    }
 
     // Ensure each step has the required fields
     for (const step of plan.steps) {
-      if (!step.type) return null
+      if (!step.type) {
+        console.error('[llm-router] Step missing type:', step)
+        return null
+      }
       if (!step.params) step.params = {}
       if (step.destructive === undefined) step.destructive = false
     }
 
+    console.log(`[llm-router] Plan accepted (${plan.steps.length} steps, ${elapsed}ms):`, plan.confirmation)
     return plan
-  } catch {
+  } catch (err) {
+    console.error('[llm-router] Failed:', err instanceof Error ? err.message : err)
     return null
   }
 }

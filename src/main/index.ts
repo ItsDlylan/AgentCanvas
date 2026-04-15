@@ -734,6 +734,27 @@ ipcMain.handle('llm:status', async () => {
   return getCachedDiscovery()
 })
 
+ipcMain.handle('llm:chat', async (_event, { apiUrl, body }: { apiUrl: string; body: object }) => {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10000)
+
+  try {
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    })
+    clearTimeout(timeout)
+    if (!res.ok) return { ok: false, status: res.status, error: res.statusText }
+    const json = await res.json()
+    return { ok: true, data: json }
+  } catch (err) {
+    clearTimeout(timeout)
+    return { ok: false, error: (err as Error).message }
+  }
+})
+
 // ── Batched PTY Output ────────────────────────────────────
 // Buffer PTY data per session and flush every 4ms to avoid
 // flooding the IPC channel (Solo uses the same 4ms interval).

@@ -1,6 +1,6 @@
 // ── Transcript normalization pipeline ──────────────────────
 // Applied to all Whisper/Vosk/WebSpeech transcripts before pattern matching.
-// Order: lowercase → strip punctuation → remove fillers → number words → collapse whitespace → trim
+// Order: lowercase → strip punctuation → remove fillers → number words → coding corrections → collapse whitespace → trim
 
 const FILLER_WORDS = new Set([
   'uh', 'um', 'uhm', 'hmm', 'hm',
@@ -29,10 +29,40 @@ const NUMBER_WORDS: Record<string, string> = {
 // (the entire normalized result is just that word).
 const AMBIGUOUS_NUMBER_WORDS = new Set(['to', 'too', 'for'])
 
+// ── Coding/programming vocabulary corrections ──────────────
+// Whisper frequently mishears programming terms. Multi-word patterns
+// (spelled-out acronyms) are applied first, then single-word replacements.
+
+const CODING_MULTI_WORD: [string, string][] = [
+  ['a p i', 'api'],
+  ['c l i', 'cli'],
+  ['s s h', 'ssh'],
+  ['h t t p', 'http'],
+  ['u r l', 'url'],
+  ['e n v', 'env'],
+  ['no js', 'nodejs'],
+  ['node js', 'nodejs'],
+  ['pie test', 'pytest'],
+  ['pie torch', 'pytorch'],
+  ['pie thon', 'python'],
+  ['cube control', 'kubectl'],
+  ['cube cuddle', 'kubectl'],
+  ['en pm', 'npm'],
+  ['m pm', 'npm'],
+]
+
+const CODING_SINGLE_WORD: Record<string, string> = {
+  off: 'auth',
+  jason: 'json',
+  sequel: 'sql',
+  jist: 'gist',
+}
+
 export function normalize(transcript: string, wakeWord?: string): string {
   const words = transcript
     .toLowerCase()
-    .replace(/[.,!?;:'"()\[\]{}\-—–]/g, '')  // strip punctuation
+    .replace(/[\-—–]/g, ' ')                   // hyphens → spaces (preserves word boundaries)
+    .replace(/[.,!?;:'"()\[\]{}]/g, '')        // strip other punctuation
     .split(/\s+/)
     .filter((word) => !FILLER_WORDS.has(word))
 
@@ -45,7 +75,22 @@ export function normalize(transcript: string, wakeWord?: string): string {
     return digit
   })
 
-  let result = converted.join(' ').trim()
+  // Apply coding vocabulary corrections
+  // 1) Multi-word patterns (spelled-out acronyms, compound terms)
+  let joined = converted.join(' ')
+  for (const [pattern, replacement] of CODING_MULTI_WORD) {
+    // Replace all occurrences of the multi-word pattern
+    let idx = joined.indexOf(pattern)
+    while (idx !== -1) {
+      joined = joined.slice(0, idx) + replacement + joined.slice(idx + pattern.length)
+      idx = joined.indexOf(pattern, idx + replacement.length)
+    }
+  }
+
+  // 2) Single-word replacements
+  const corrected = joined.split(/\s+/).map((word) => CODING_SINGLE_WORD[word] ?? word)
+
+  let result = corrected.join(' ').trim()
 
   // Strip wake word prefix — STT captures the trigger phrase in the audio
   if (wakeWord && result) {
