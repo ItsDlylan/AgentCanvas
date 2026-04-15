@@ -56,6 +56,9 @@ export interface TemplateTile {
   width: number
   height: number
   devicePreset?: string
+  command?: string
+  metadata?: Record<string, unknown>
+  linkedTo?: string
 }
 
 export interface WorkspaceTemplate {
@@ -63,6 +66,7 @@ export interface WorkspaceTemplate {
   name: string
   isBuiltIn: boolean
   tiles: TemplateTile[]
+  voiceTrigger?: string
 }
 
 export interface VoiceSettings {

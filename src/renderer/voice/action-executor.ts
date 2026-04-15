@@ -226,6 +226,16 @@ export function executeAction(action: VoiceAction): ExecuteResult {
       return { ok: true, message: `${terminals} terminals, ${browsers} browsers, ${notes} notes` }
     }
 
+    // ── Workflow triggers ──
+
+    case 'workflow.trigger': {
+      const template = action.params.template as { tiles: Array<{ type: string; relativePosition: { x: number; y: number }; width: number; height: number }> } | undefined
+      if (!template) return { ok: false, message: `No template matching "${action.params.name}"` }
+      store.spawnTemplate(template)
+      const label = (action.params.resolvedLabel as string) ?? (action.params.name as string)
+      return { ok: true, message: `Launched "${label}"` }
+    }
+
     // ── Dictation / Standup ──
 
     case 'mode.startDictation': {

@@ -98,7 +98,7 @@ export async function matchCommand(
 
         // Resolve context references in params if context is available
         if (context) {
-          resolveActionParams(action, context)
+          await resolveActionParams(action, context)
         }
 
         return { action, raw, normalized, tier: 1 }
@@ -153,7 +153,7 @@ export async function matchCommand(
 // ── Context resolution ───────────────────────────────────
 // Enriches action params with resolved tile IDs from context.
 
-function resolveActionParams(action: VoiceAction, context: VoiceContext): void {
+async function resolveActionParams(action: VoiceAction, context: VoiceContext): Promise<void> {
   const { type, params } = action
 
   // Resolve label-based targets to sessionIds
@@ -193,6 +193,28 @@ function resolveActionParams(action: VoiceAction, context: VoiceContext): void {
     if (context.focusedTileId) {
       params.sessionId = context.focusedTileId
     }
+  }
+
+  // Resolve workflow trigger — match name against templates
+  if (type === 'workflow.trigger' && params.name && typeof params.name === 'string') {
+    try {
+      const settings = await window.settings.load()
+      const templates = settings.templates ?? []
+      const name = (params.name as string).toLowerCase()
+
+      // Match against voiceTrigger first, then template name
+      const match = templates.find((t) =>
+        t.voiceTrigger?.toLowerCase() === name ||
+        t.name.toLowerCase() === name ||
+        t.name.toLowerCase().includes(name) ||
+        name.includes(t.name.toLowerCase())
+      )
+
+      if (match) {
+        params.template = match
+        params.resolvedLabel = match.name
+      }
+    } catch { /* settings load failed */ }
   }
 }
 

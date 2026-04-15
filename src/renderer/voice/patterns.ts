@@ -101,6 +101,13 @@ export const patterns: VoiceCommandPattern[] = [
     destructive: true
   },
 
+  // ── Workflow triggers ──
+  {
+    patterns: [/^start (.+)$/, /^set up (.+)$/, /^launch (.+)$/],
+    action: 'workflow.trigger',
+    extract: (m) => ({ name: m[1] })
+  },
+
   // ── Queries (always immediate) ──
   { patterns: [/^(?:whats|show) status$/, /^status$/], action: 'query.status' },
   {
