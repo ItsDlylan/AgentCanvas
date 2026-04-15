@@ -5,7 +5,7 @@ import { useAllBrowserStatuses } from '@/hooks/useBrowserStatus'
 import { useUnreadForTile } from '@/hooks/useNotifications'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { useSettings, type WorkspaceTemplate } from '@/hooks/useSettings'
-import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS, type DevicePreset } from '@/constants/devicePresets'
+import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS, AGENT_PRESETS, type DevicePreset, type AgentPreset } from '@/constants/devicePresets'
 import type { Workspace } from '@/types/workspace'
 
 interface ProcessPanelProps {
@@ -17,7 +17,7 @@ interface ProcessPanelProps {
   onKill: (sessionId: string) => void
   onCloseNote: (sessionId: string) => void
   onDeleteNote: (sessionId: string) => void
-  onAddTerminal: (width?: number, height?: number) => void
+  onAddTerminal: (width?: number, height?: number, command?: string, label?: string) => void
   onAddBrowser: (preset?: DevicePreset) => void
   onAddNote: () => void
   onAddDraw: () => void
@@ -889,7 +889,9 @@ function ProcessPanelComponent({
   })
   const statuses = useAllTerminalStatuses()
   const browserStatuses = useAllBrowserStatuses()
-  const [terminalPresetsOpen, setTerminalPresetsOpen] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
+  const [wizardStep, setWizardStep] = useState<'agent' | 'size'>('agent')
+  const [selectedAgent, setSelectedAgent] = useState<AgentPreset | null>(null)
   const [browserPresetsOpen, setBrowserPresetsOpen] = useState(false)
   const [templateMenuOpen, setTemplateMenuOpen] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
@@ -911,15 +913,15 @@ function ProcessPanelComponent({
   )
 
   useEffect(() => {
-    if (!terminalPresetsOpen && !browserPresetsOpen && !templateMenuOpen) return
+    if (!wizardOpen && !browserPresetsOpen && !templateMenuOpen) return
     const handler = () => {
-      setTerminalPresetsOpen(false)
+      setWizardOpen(false)
       setBrowserPresetsOpen(false)
       setTemplateMenuOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [terminalPresetsOpen, browserPresetsOpen, templateMenuOpen])
+  }, [wizardOpen, browserPresetsOpen, templateMenuOpen])
 
   return (
     <>
@@ -1116,21 +1118,59 @@ function ProcessPanelComponent({
         <div className="flex flex-wrap gap-1.5 border-t border-zinc-800 p-2">
           {/* Terminal split button */}
           <div className="relative flex-1" onMouseDown={(e) => e.stopPropagation()}>
-            {terminalPresetsOpen && (
-              <div className="absolute bottom-full left-0 right-0 z-50 mb-1 rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
-                {TERMINAL_PRESETS.map((preset) => (
-                  <button
-                    key={preset.name}
-                    onClick={() => {
-                      onAddTerminal(preset.width, preset.height)
-                      setTerminalPresetsOpen(false)
-                    }}
-                    className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
-                  >
-                    <span>{preset.name}</span>
-                    <span className="text-zinc-500">{preset.width}&times;{preset.height}</span>
-                  </button>
-                ))}
+            {wizardOpen && (
+              <div className="absolute bottom-full left-0 z-50 mb-1 w-56 rounded-md border border-zinc-700 bg-zinc-800 shadow-lg">
+                {wizardStep === 'agent' ? (
+                  <div className="py-1">
+                    <div className="px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500">Choose Agent</div>
+                    {AGENT_PRESETS.map((agent) => (
+                      <button
+                        key={agent.id}
+                        onClick={() => {
+                          setSelectedAgent(agent)
+                          setWizardStep('size')
+                        }}
+                        className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-zinc-700"
+                      >
+                        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${agent.dotClass}`} />
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`text-xs font-medium ${agent.textClass}`}>{agent.name}</span>
+                          <span className="text-[10px] text-zinc-500">{agent.description}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-1">
+                    <div className="flex items-center gap-1.5 px-3 pb-1 pt-2">
+                      <button
+                        onClick={() => setWizardStep('agent')}
+                        className="rounded p-0.5 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
+                      >
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Choose Size</span>
+                      {selectedAgent && (
+                        <span className={`ml-auto text-[10px] font-medium ${selectedAgent.textClass}`}>{selectedAgent.name}</span>
+                      )}
+                    </div>
+                    {TERMINAL_PRESETS.map((preset) => (
+                      <button
+                        key={preset.name}
+                        onClick={() => {
+                          onAddTerminal(preset.width, preset.height, selectedAgent?.command, selectedAgent?.id !== 'plain' ? selectedAgent?.name : undefined)
+                          setWizardOpen(false)
+                        }}
+                        className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs text-zinc-300 hover:bg-zinc-700"
+                      >
+                        <span>{preset.name}</span>
+                        <span className="text-zinc-500">{preset.width}&times;{preset.height}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
             <div className="flex overflow-hidden rounded-md bg-zinc-800">
@@ -1144,7 +1184,11 @@ function ProcessPanelComponent({
                 Terminal
               </button>
               <button
-                onClick={() => setTerminalPresetsOpen(!terminalPresetsOpen)}
+                onClick={() => {
+                  setWizardOpen(!wizardOpen)
+                  setWizardStep('agent')
+                  setSelectedAgent(null)
+                }}
                 className="border-l border-zinc-700 px-1.5 py-2 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-white"
               >
                 <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

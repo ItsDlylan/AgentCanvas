@@ -172,7 +172,7 @@ export interface CanvasStore {
   // ── Tile CRUD ──
   removeTileFromCanvas: (sessionId: string) => void
   killTile: (sessionId: string) => void
-  addTerminalAt: (position?: { x: number; y: number }, width?: number, height?: number) => void
+  addTerminalAt: (position?: { x: number; y: number }, width?: number, height?: number, command?: string, label?: string) => void
   addBrowserAt: (position?: { x: number; y: number }, preset?: DevicePreset) => void
   addNoteAt: (position?: { x: number; y: number }) => void
   addDrawAt: (position?: { x: number; y: number }, linkedTerminalId?: string) => string
@@ -331,7 +331,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       removeTileFromCanvas(sessionId)
     },
 
-    addTerminalAt: (position, width = 640, height = 400) => {
+    addTerminalAt: (position, width = 640, height = 400, command, label) => {
       tileCount++
       const sessionId = uuid()
       const { tileGap, activeWorkspaceId, workspaces } = get()
@@ -346,7 +346,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
         type: 'terminal',
         position: pos,
         style: { width, height },
-        data: { sessionId, label: `Terminal ${tileCount}`, cwd },
+        data: { sessionId, label: label ? `${label} ${tileCount}` : `Terminal ${tileCount}`, cwd, command },
         dragHandle: '.terminal-tile-header'
       }
 

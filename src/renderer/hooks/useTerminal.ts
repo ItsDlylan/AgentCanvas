@@ -43,6 +43,7 @@ export function useTerminal({ sessionId, label, cwd, metadata, command, appearan
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const mountedRef = useRef(false)
+  const commandSentRef = useRef(false)
   const autoScrollRef = useRef(true)
 
   const fit = useCallback(() => {
@@ -260,7 +261,9 @@ export function useTerminal({ sessionId, label, cwd, metadata, command, appearan
       onReady?.()
 
       // Auto-type command for programmatically spawned terminals
-      if (command && !result.isReconnect) {
+      // Use commandSentRef to survive StrictMode double-invoke (second mount sees isReconnect=true)
+      if (command && !commandSentRef.current) {
+        commandSentRef.current = true
         setTimeout(() => {
           if (!cancelled) window.terminal.write(sessionId, command + '\n')
         }, 500)

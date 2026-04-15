@@ -1460,7 +1460,7 @@ export default function Canvas() {
             onKill={(id) => useCanvasStore.getState().killTile(id)}
             onCloseNote={(id) => useCanvasStore.getState().closeNote(id)}
             onDeleteNote={(id) => useCanvasStore.getState().deleteNote(id)}
-            onAddTerminal={() => useCanvasStore.getState().addTerminalAt()}
+            onAddTerminal={(width, height, command, label) => useCanvasStore.getState().addTerminalAt(undefined, width, height, command, label)}
             onAddBrowser={() => useCanvasStore.getState().addBrowserAt()}
             onAddNote={() => useCanvasStore.getState().addNoteAt()}
             onAddDraw={() => useCanvasStore.getState().addDrawAt()}

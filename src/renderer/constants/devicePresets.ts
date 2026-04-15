@@ -40,3 +40,20 @@ export const TERMINAL_PRESETS: TerminalPreset[] = [
   { name: 'Wide', width: 1200, height: 400 },
   { name: 'Tall', width: 640, height: 800 }
 ]
+
+export interface AgentPreset {
+  id: string
+  name: string
+  command?: string
+  description: string
+  dotClass: string
+  textClass: string
+}
+
+export const AGENT_PRESETS: AgentPreset[] = [
+  { id: 'plain',    name: 'Terminal',    command: undefined,  description: 'Plain shell session',       dotClass: 'bg-zinc-400',   textClass: 'text-zinc-300' },
+  { id: 'claude',   name: 'Claude Code', command: 'claude',   description: 'Anthropic coding agent',   dotClass: 'bg-orange-500', textClass: 'text-orange-400' },
+  { id: 'codex',    name: 'Codex',       command: 'codex',    description: 'OpenAI Codex CLI',         dotClass: 'bg-green-500',  textClass: 'text-green-400' },
+  { id: 'gemini',   name: 'Gemini CLI',  command: 'gemini',   description: 'Google Gemini agent',      dotClass: 'bg-blue-500',   textClass: 'text-blue-400' },
+  { id: 'opencode', name: 'OpenCode',    command: 'opencode', description: 'Open-source coding agent', dotClass: 'bg-purple-500', textClass: 'text-purple-400' },
+]
