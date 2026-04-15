@@ -17,7 +17,7 @@ export const patterns: VoiceCommandPattern[] = [
   // ── Overlays ──
   { patterns: [/^show numbers$/], action: 'overlay.showNumbers' },
   { patterns: [/^show grid$/], action: 'overlay.showGrid' },
-  { patterns: [/^focus (\d+)$/], action: 'overlay.focusNumber', extract: (m) => ({ number: parseInt(m[1]) }) },
+  { patterns: [/^focus (\d+)$/], action: 'overlay.focusNumber', extract: (m) => ({ number: parseInt(m[1], 10) }) },
 
   // ── Navigation ──
   { patterns: [/^go to workspace (.+)$/], action: 'navigate.workspace', extract: (m) => ({ name: m[1] }) },
