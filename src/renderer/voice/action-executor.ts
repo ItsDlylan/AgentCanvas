@@ -166,7 +166,7 @@ export function executeAction(action: VoiceAction): ExecuteResult {
     case 'agent.reject': {
       const targetId = (action.params.sessionId as string) ?? store.focusedId
       if (!targetId) return { ok: false, message: 'No terminal focused' }
-      const input = action.type === 'agent.approve' ? 'y\n' : 'n\n'
+      const input = action.type === 'agent.approve' ? 'y\r' : 'n\r'
       window.terminal.write(targetId, input)
       return { ok: true, message: action.type === 'agent.approve' ? 'Approved' : 'Rejected' }
     }
@@ -181,7 +181,7 @@ export function executeAction(action: VoiceAction): ExecuteResult {
     case 'agent.sendInput': {
       const targetId = (action.params.sessionId as string) ?? store.focusedId
       if (!targetId) return { ok: false, message: 'No terminal focused' }
-      window.terminal.write(targetId, (action.params.text as string) + '\n')
+      window.terminal.write(targetId, (action.params.text as string) + '\r')
       return { ok: true, message: 'Sent' }
     }
 

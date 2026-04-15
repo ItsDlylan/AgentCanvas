@@ -8,7 +8,7 @@ import type { TileInfo } from './types'
  * Write a message to a single terminal.
  */
 export function routeToAgent(sessionId: string, text: string): void {
-  window.terminal.write(sessionId, text + '\n')
+  window.terminal.write(sessionId, text + '\r')
 }
 
 /**
@@ -17,7 +17,7 @@ export function routeToAgent(sessionId: string, text: string): void {
  */
 export function broadcastToAgents(sessionIds: string[], text: string): number {
   for (const id of sessionIds) {
-    window.terminal.write(id, text + '\n')
+    window.terminal.write(id, text + '\r')
   }
   return sessionIds.length
 }
