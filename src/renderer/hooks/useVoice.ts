@@ -8,6 +8,7 @@ import { useCanvasStore } from '@/store/canvas-store'
 import { defaultTileWidth, defaultTileHeight } from '@/store/canvas-store'
 import { createActivationController, type ActivationController } from '@/voice/activation-modes'
 import { loadVoskModel, transcribeWithVosk, getVoskStatus } from '@/voice/vosk-stt'
+import { createAmbientMonitor, type AmbientMonitor } from '@/voice/ambient-monitor'
 import type { NumberedTile } from '@/components/VoiceNumberOverlay'
 
 export interface UseVoiceReturn {
@@ -439,6 +440,28 @@ export function useVoice(settings: VoiceSettings): UseVoiceReturn {
       controllerRef.current?.handleTranscriptionComplete()
     }
   }, [mode])
+
+  // ── Ambient monitoring ──
+  useEffect(() => {
+    if (!settings.enabled) return
+    const monitoring = settings.ambientMonitoring
+    if (!monitoring.onWaiting && !monitoring.onError && !monitoring.onExit && !monitoring.onNotification) return
+
+    const monitor = createAmbientMonitor(monitoring, (event) => {
+      // Only flash when idle — don't interrupt active voice commands
+      if (modeRef.current !== 'idle') return
+      setTranscript(event.message)
+      // Auto-clear will happen via the existing cleanup timer
+    })
+
+    return () => monitor.destroy()
+  }, [
+    settings.enabled,
+    settings.ambientMonitoring.onWaiting,
+    settings.ambientMonitoring.onError,
+    settings.ambientMonitoring.onExit,
+    settings.ambientMonitoring.onNotification
+  ])
 
   // Cleanup on unmount
   useEffect(() => {
