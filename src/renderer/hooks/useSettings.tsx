@@ -57,7 +57,8 @@ const FALLBACK: Settings = {
     maxAutoKeepAlives: 10,
     notifyOnWarning: true,
     notifyOnExpiry: true,
-    rankByUrgency: true
+    rankByUrgency: true,
+    detectTtlFromLogs: true
   }
 }
 

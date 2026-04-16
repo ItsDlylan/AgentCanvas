@@ -43,12 +43,16 @@ function CacheCountdown({
   expiresAt,
   state,
   sessionId,
-  warningThreshold
+  warningThreshold,
+  source,
+  ttlSeconds
 }: {
   expiresAt: number
   state: string
   sessionId: string
   warningThreshold: number
+  source?: 'detected' | 'assumed'
+  ttlSeconds?: number
 }) {
   const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)))
 
@@ -78,8 +82,13 @@ function CacheCountdown({
       ? 'text-amber-400 cache-warning-pulse'
       : 'text-cyan-400'
 
+  const ttlLabel = ttlSeconds === 3600 ? '1h' : ttlSeconds === 300 ? '5m' : `${ttlSeconds}s`
+  const tooltip = source === 'detected'
+    ? `Detected from Claude logs (${ttlLabel} TTL)`
+    : `Assumed TTL from settings (${ttlLabel})`
+
   return (
-    <div className={`flex items-center gap-1 pl-4 text-[10px] ${colorClass}`}>
+    <div className={`flex items-center gap-1 pl-4 text-[10px] ${colorClass}`} title={tooltip}>
       <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <circle cx="12" cy="12" r="10" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2" />
@@ -313,6 +322,8 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
               state={statusInfo.metadata.cacheState as string}
               sessionId={sessionId}
               warningThreshold={settings.promptCache?.warningThresholdSeconds ?? 60}
+              source={statusInfo.metadata.cacheSource as 'detected' | 'assumed' | undefined}
+              ttlSeconds={statusInfo.metadata.cacheTtlSeconds as number | undefined}
             />
           )}
         </div>

@@ -126,6 +126,7 @@ export interface PromptCacheSettings {
   notifyOnWarning: boolean
   notifyOnExpiry: boolean
   rankByUrgency: boolean
+  detectTtlFromLogs: boolean
 }
 
 export interface Settings {
@@ -255,7 +256,8 @@ export const DEFAULT_SETTINGS: Settings = {
     maxAutoKeepAlives: 10,
     notifyOnWarning: true,
     notifyOnExpiry: true,
-    rankByUrgency: true
+    rankByUrgency: true,
+    detectTtlFromLogs: true
   }
 }
 

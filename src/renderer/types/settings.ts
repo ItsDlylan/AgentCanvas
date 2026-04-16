@@ -126,6 +126,9 @@ export interface PromptCacheSettings {
   notifyOnWarning: boolean
   notifyOnExpiry: boolean
   rankByUrgency: boolean
+  // Tail Claude Code's session JSONL logs to detect the real TTL (5m vs 1h)
+  // that Anthropic served per query, overriding the assumed TTL above.
+  detectTtlFromLogs: boolean
 }
 
 export interface Settings {

@@ -379,6 +379,15 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
             step={10}
           />
         </SettingRow>
+        <SettingRow
+          label="Detect Real TTL from Logs"
+          description="Tail Claude Code's session JSONL files to learn whether each API call used a 5-minute or 1-hour cache. Overrides the Assumed Cache TTL above with the real value once observed."
+        >
+          <Toggle
+            value={pc.detectTtlFromLogs}
+            onChange={(v) => update({ promptCache: { ...pc, detectTtlFromLogs: v } })}
+          />
+        </SettingRow>
         <SettingRow label="Auto Keep-Alive" description="Automatically send a message to refresh the cache ~15s before it expires">
           <Toggle
             value={pc.autoKeepAlive}

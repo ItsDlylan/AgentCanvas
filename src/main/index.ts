@@ -276,7 +276,8 @@ function applyPromptCacheSettings(settings: Settings): void {
     keepAliveMessage: pc.keepAliveMessage,
     maxAutoKeepAlives: pc.maxAutoKeepAlives,
     notifyOnWarning: pc.notifyOnWarning,
-    notifyOnExpiry: pc.notifyOnExpiry
+    notifyOnExpiry: pc.notifyOnExpiry,
+    detectTtlFromLogs: pc.detectTtlFromLogs
   })
 }
 

@@ -3,6 +3,7 @@ import { execSync, execFile } from 'child_process'
 import { promisify } from 'util'
 import { createServer } from 'net'
 import os from 'os'
+import { ClaudeLogWatcher, type ClaudeCacheEvent } from './claude-log-watcher'
 
 const execFileAsync = promisify(execFile)
 
@@ -113,6 +114,10 @@ export class TerminalManager extends EventEmitter {
   private maxAutoKeepAlives = 10  // 0 = unlimited
   private notifyOnWarning = true
   private notifyOnExpiry = true
+  private detectTtlFromLogs = true
+
+  // One log tailer per Claude-active terminal session.
+  private logWatchers = new Map<string, ClaudeLogWatcher>()
 
   async create(id: string, label: string, cwd?: string, cols = 80, rows = 24, extraEnv?: Record<string, string>, customShell?: string): Promise<number> {
     if (this.sessions.has(id)) return this.sessions.get(id)!.cdpPort
@@ -191,6 +196,7 @@ export class TerminalManager extends EventEmitter {
         if (decoded !== session.cwd) {
           session.cwd = decoded
           this.throttledEmitStatus(id)
+          this.logWatchers.get(id)?.updateCwd(decoded)
         }
       }
 
@@ -214,6 +220,7 @@ export class TerminalManager extends EventEmitter {
     proc.onExit(({ exitCode }) => {
       if (session.idleTimer) clearTimeout(session.idleTimer)
       this.clearCacheTimers(session)
+      this.stopLogWatcher(id)
       this.sessions.delete(id)
       this.emit('exit', id, exitCode)
     })
@@ -299,10 +306,12 @@ export class TerminalManager extends EventEmitter {
           const nowClaude = isClaudeProcessName(name)
           if (nowClaude && !session.isClaudeSession) {
             session.isClaudeSession = true
+            this.startLogWatcher(session)
             changed = true
           } else if (!nowClaude && session.isClaudeSession) {
             session.isClaudeSession = false
             this.clearCacheState(session)
+            this.stopLogWatcher(id)
             changed = true
           }
 
@@ -337,6 +346,7 @@ export class TerminalManager extends EventEmitter {
             if (cwd && cwd !== session.cwd) {
               session.cwd = cwd
               changed = true
+              this.logWatchers.get(id)?.updateCwd(cwd)
             }
           } catch {
             // lsof may fail
@@ -365,11 +375,14 @@ export class TerminalManager extends EventEmitter {
     maxAutoKeepAlives?: number
     notifyOnWarning?: boolean
     notifyOnExpiry?: boolean
+    detectTtlFromLogs?: boolean
   }): void {
     const autoKeepAliveChanged =
       typeof s.autoKeepAlive === 'boolean' && s.autoKeepAlive !== this.autoKeepAliveEnabled
     const maxChanged =
       typeof s.maxAutoKeepAlives === 'number' && s.maxAutoKeepAlives !== this.maxAutoKeepAlives
+    const detectChanged =
+      typeof s.detectTtlFromLogs === 'boolean' && s.detectTtlFromLogs !== this.detectTtlFromLogs
 
     if (typeof s.ttlSeconds === 'number') this.cacheTtlSeconds = s.ttlSeconds
     if (typeof s.warningThresholdSeconds === 'number') this.cacheWarningThresholdSeconds = s.warningThresholdSeconds
@@ -378,6 +391,7 @@ export class TerminalManager extends EventEmitter {
     if (typeof s.maxAutoKeepAlives === 'number') this.maxAutoKeepAlives = Math.max(0, s.maxAutoKeepAlives)
     if (typeof s.notifyOnWarning === 'boolean') this.notifyOnWarning = s.notifyOnWarning
     if (typeof s.notifyOnExpiry === 'boolean') this.notifyOnExpiry = s.notifyOnExpiry
+    if (typeof s.detectTtlFromLogs === 'boolean') this.detectTtlFromLogs = s.detectTtlFromLogs
 
     // When auto-keep-alive or its cap changes, re-evaluate the in-flight
     // timers so the setting takes effect immediately instead of only applying
@@ -387,6 +401,92 @@ export class TerminalManager extends EventEmitter {
         this.scheduleKeepAlive(session)
       }
     }
+
+    // Toggling log-based TTL detection takes effect live: spin up or tear
+    // down watchers for any currently-active Claude sessions.
+    if (detectChanged) {
+      if (this.detectTtlFromLogs) {
+        for (const session of this.sessions.values()) {
+          if (session.isClaudeSession) this.startLogWatcher(session)
+        }
+      } else {
+        for (const id of Array.from(this.logWatchers.keys())) {
+          this.stopLogWatcher(id)
+        }
+      }
+    }
+  }
+
+  private startLogWatcher(session: TerminalSession): void {
+    if (!this.detectTtlFromLogs) return
+    if (this.logWatchers.has(session.id)) return
+    const watcher = new ClaudeLogWatcher({
+      terminalId: session.id,
+      cwd: session.cwd
+    })
+    watcher.on('cache-event', (e: ClaudeCacheEvent) => this.applyDetectedCacheTtl(e))
+    watcher.on('error', (err) => {
+      console.warn(`[ClaudeLogWatcher:${session.id}]`, err)
+    })
+    watcher.start()
+    this.logWatchers.set(session.id, watcher)
+  }
+
+  private stopLogWatcher(terminalId: string): void {
+    const watcher = this.logWatchers.get(terminalId)
+    if (!watcher) return
+    watcher.stop()
+    this.logWatchers.delete(terminalId)
+  }
+
+  /**
+   * Override the optimistic countdown with the real TTL Anthropic served, as
+   * reported by Claude Code's own JSONL log record. Anchored to the record's
+   * own timestamp so the expiry is accurate regardless of parse delay.
+   */
+  private applyDetectedCacheTtl(e: ClaudeCacheEvent): void {
+    const session = this.sessions.get(e.terminalId)
+    if (!session || !session.isClaudeSession) return
+
+    const expiresAt = e.timestampMs + e.ttlSeconds * 1000
+    if (expiresAt <= Date.now()) return // already stale
+
+    this.clearCacheTimers(session)
+
+    session.cacheExpiresAt = expiresAt
+    session.cacheState = 'countdown'
+    session.metadata.cacheExpiresAt = expiresAt
+    session.metadata.cacheState = 'countdown'
+    session.metadata.cacheTtlSeconds = e.ttlSeconds
+    session.metadata.cacheWarningThresholdSeconds = this.cacheWarningThresholdSeconds
+    session.metadata.cacheSource = 'detected'
+
+    this.throttledEmitStatus(e.terminalId)
+
+    // Reschedule warning + expiry against the true expiry time.
+    const warnMs = this.cacheWarningThresholdSeconds * 1000
+    const warnDelay = expiresAt - Date.now() - warnMs
+    if (warnDelay > 0 && this.notifyOnWarning) {
+      session.warningTimer = setTimeout(() => {
+        const s = this.sessions.get(e.terminalId)
+        if (!s || s.cacheState !== 'countdown') return
+        this.emitCacheNotification(s, 'warning')
+      }, warnDelay)
+    }
+
+    const expiryDelay = expiresAt - Date.now()
+    if (expiryDelay > 0) {
+      session.expiryTimer = setTimeout(() => {
+        const s = this.sessions.get(e.terminalId)
+        if (!s || s.cacheState !== 'countdown') return
+        s.cacheState = 'expired'
+        s.metadata.cacheState = 'expired'
+        this.throttledEmitStatus(e.terminalId)
+        if (this.notifyOnExpiry) this.emitCacheNotification(s, 'expired')
+      }, expiryDelay + 50)
+    }
+
+    this.scheduleKeepAlive(session)
   }
 
   /**
@@ -410,6 +510,9 @@ export class TerminalManager extends EventEmitter {
     session.metadata.cacheState = 'countdown'
     session.metadata.cacheTtlSeconds = this.cacheTtlSeconds
     session.metadata.cacheWarningThresholdSeconds = this.cacheWarningThresholdSeconds
+    // Mark this as an optimistic reset — the log tailer may upgrade this to
+    // 'detected' within 1-2s once Claude's JSONL record lands.
+    session.metadata.cacheSource = 'assumed'
 
     this.throttledEmitStatus(id)
 
@@ -489,6 +592,7 @@ export class TerminalManager extends EventEmitter {
     delete session.metadata.cacheExpiresAt
     delete session.metadata.cacheTtlSeconds
     delete session.metadata.cacheWarningThresholdSeconds
+    delete session.metadata.cacheSource
   }
 
   private emitCacheNotification(session: TerminalSession, kind: 'warning' | 'expired'): void {
@@ -579,6 +683,7 @@ export class TerminalManager extends EventEmitter {
     if (!session) return
     if (session.idleTimer) clearTimeout(session.idleTimer)
     this.clearCacheTimers(session)
+    this.stopLogWatcher(id)
     session.process.kill()
     this.sessions.delete(id)
     this.emit('exit', id, 0)
