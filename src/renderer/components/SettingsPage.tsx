@@ -360,13 +360,13 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
             onChange={(v) => update({ promptCache: { ...pc, showTimer: v } })}
           />
         </SettingRow>
-        <SettingRow label="Cache TTL" description="Prompt cache lifetime — depends on your Claude plan">
+        <SettingRow label="Assumed Cache TTL" description="Claude Code picks 5m or 1h per query using client-side heuristics (subagent, telemetry, query type). Choose the duration this timer should count down from.">
           <SelectInput
             value={String(pc.ttlSeconds)}
             onChange={(v) => update({ promptCache: { ...pc, ttlSeconds: Number(v) } })}
             options={[
-              { value: '300', label: '5 minutes (Pro)' },
-              { value: '3600', label: '1 hour (Max)' }
+              { value: '300', label: '5 minutes (default ephemeral)' },
+              { value: '3600', label: '1 hour (extended)' }
             ]}
           />
         </SettingRow>
