@@ -120,6 +120,9 @@ export interface PromptCacheSettings {
   warningThresholdSeconds: number
   autoKeepAlive: boolean
   keepAliveMessage: string
+  // Cap on how many auto keep-alives fire per session before giving up.
+  // Resets to 0 whenever the user sends their own message. 0 = unlimited.
+  maxAutoKeepAlives: number
   notifyOnWarning: boolean
   notifyOnExpiry: boolean
   rankByUrgency: boolean

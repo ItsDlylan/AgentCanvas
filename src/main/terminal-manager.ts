@@ -55,6 +55,9 @@ export interface TerminalSession {
   keepAliveTimer: ReturnType<typeof setTimeout> | null
   expiryTimer: ReturnType<typeof setTimeout> | null
   warningTimer: ReturnType<typeof setTimeout> | null
+  // How many auto keep-alives have fired since the last user message.
+  // Used to respect the cap; reset to 0 on every user submission.
+  autoKeepAliveCount: number
 }
 
 function isClaudeProcessName(name: string): boolean {
@@ -107,6 +110,7 @@ export class TerminalManager extends EventEmitter {
   private cacheWarningThresholdSeconds = 60
   private autoKeepAliveEnabled = false
   private keepAliveMessage = '.'
+  private maxAutoKeepAlives = 10  // 0 = unlimited
   private notifyOnWarning = true
   private notifyOnExpiry = true
 
@@ -171,7 +175,8 @@ export class TerminalManager extends EventEmitter {
       cacheState: null,
       keepAliveTimer: null,
       expiryTimer: null,
-      warningTimer: null
+      warningTimer: null,
+      autoKeepAliveCount: 0
     }
 
     this.sessions.set(id, session)
@@ -357,22 +362,27 @@ export class TerminalManager extends EventEmitter {
     warningThresholdSeconds?: number
     autoKeepAlive?: boolean
     keepAliveMessage?: string
+    maxAutoKeepAlives?: number
     notifyOnWarning?: boolean
     notifyOnExpiry?: boolean
   }): void {
     const autoKeepAliveChanged =
       typeof s.autoKeepAlive === 'boolean' && s.autoKeepAlive !== this.autoKeepAliveEnabled
+    const maxChanged =
+      typeof s.maxAutoKeepAlives === 'number' && s.maxAutoKeepAlives !== this.maxAutoKeepAlives
 
     if (typeof s.ttlSeconds === 'number') this.cacheTtlSeconds = s.ttlSeconds
     if (typeof s.warningThresholdSeconds === 'number') this.cacheWarningThresholdSeconds = s.warningThresholdSeconds
     if (typeof s.autoKeepAlive === 'boolean') this.autoKeepAliveEnabled = s.autoKeepAlive
     if (typeof s.keepAliveMessage === 'string') this.keepAliveMessage = s.keepAliveMessage
+    if (typeof s.maxAutoKeepAlives === 'number') this.maxAutoKeepAlives = Math.max(0, s.maxAutoKeepAlives)
     if (typeof s.notifyOnWarning === 'boolean') this.notifyOnWarning = s.notifyOnWarning
     if (typeof s.notifyOnExpiry === 'boolean') this.notifyOnExpiry = s.notifyOnExpiry
 
-    // When auto-keep-alive is flipped, apply to in-flight countdowns so the
-    // user doesn't have to send a new message for the setting to take effect.
-    if (autoKeepAliveChanged) {
+    // When auto-keep-alive or its cap changes, re-evaluate the in-flight
+    // timers so the setting takes effect immediately instead of only applying
+    // to the next user submission.
+    if (autoKeepAliveChanged || maxChanged) {
       for (const session of this.sessions.values()) {
         this.scheduleKeepAlive(session)
       }
@@ -438,6 +448,8 @@ export class TerminalManager extends EventEmitter {
     }
     if (!this.autoKeepAliveEnabled) return
     if (session.cacheState !== 'countdown' || !session.cacheExpiresAt) return
+    // Respect the per-session cap. 0 means unlimited.
+    if (this.maxAutoKeepAlives > 0 && session.autoKeepAliveCount >= this.maxAutoKeepAlives) return
 
     const LEAD_MS = 15_000
     const fireAt = session.cacheExpiresAt - LEAD_MS
@@ -448,7 +460,7 @@ export class TerminalManager extends EventEmitter {
     session.keepAliveTimer = setTimeout(() => {
       const s = this.sessions.get(id)
       if (!s || s.cacheState !== 'countdown') return
-      this.keepAlive(id)
+      this.keepAlive(id, true)
     }, delay)
   }
 
@@ -510,10 +522,26 @@ export class TerminalManager extends EventEmitter {
    *
    * Uses `\r` (what xterm sends for Enter) as the submit signal because Claude
    * Code treats `\n` as a newline-within-input, not a message submission.
+   *
+   * @param isAuto true when fired by the auto-keep-alive timer (counts toward
+   *               the per-session cap). false for manual Refresh / API calls
+   *               (resets the counter — user is actively engaged).
    */
-  keepAlive(id: string): boolean {
+  keepAlive(id: string, isAuto = false): boolean {
     const session = this.sessions.get(id)
     if (!session || !session.isClaudeSession) return false
+
+    if (isAuto) {
+      // Re-check the cap at fire time (setting may have changed since scheduling).
+      if (this.maxAutoKeepAlives > 0 && session.autoKeepAliveCount >= this.maxAutoKeepAlives) {
+        return false
+      }
+      session.autoKeepAliveCount += 1
+    } else {
+      // Manual keep-alive counts as user engagement — reset the counter.
+      session.autoKeepAliveCount = 0
+    }
+
     // Refresh the displayed countdown immediately for instant feedback.
     this.refreshCacheCountdown(id)
     session.process.write(this.keepAliveMessage + '\r')
@@ -530,6 +558,9 @@ export class TerminalManager extends EventEmitter {
     // countdown to the full TTL immediately — no intermediate "active" state,
     // no waiting for Claude's response.
     if (session.isClaudeSession && (data.includes('\r') || data.includes('\n'))) {
+      // User is actively engaged — reset the auto-keep-alive counter so the
+      // cap applies to *continuous* idle sessions, not the whole process.
+      session.autoKeepAliveCount = 0
       this.refreshCacheCountdown(id)
     }
     session.process.write(data)

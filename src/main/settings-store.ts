@@ -122,6 +122,7 @@ export interface PromptCacheSettings {
   warningThresholdSeconds: number
   autoKeepAlive: boolean
   keepAliveMessage: string
+  maxAutoKeepAlives: number       // 0 = unlimited
   notifyOnWarning: boolean
   notifyOnExpiry: boolean
   rankByUrgency: boolean
@@ -251,6 +252,7 @@ export const DEFAULT_SETTINGS: Settings = {
     warningThresholdSeconds: 60,
     autoKeepAlive: false,
     keepAliveMessage: '.',
+    maxAutoKeepAlives: 10,
     notifyOnWarning: true,
     notifyOnExpiry: true,
     rankByUrgency: true

@@ -54,6 +54,7 @@ const FALLBACK: Settings = {
     warningThresholdSeconds: 60,
     autoKeepAlive: false,
     keepAliveMessage: '.',
+    maxAutoKeepAlives: 10,
     notifyOnWarning: true,
     notifyOnExpiry: true,
     rankByUrgency: true

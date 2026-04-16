@@ -274,6 +274,7 @@ function applyPromptCacheSettings(settings: Settings): void {
     warningThresholdSeconds: pc.warningThresholdSeconds,
     autoKeepAlive: pc.autoKeepAlive,
     keepAliveMessage: pc.keepAliveMessage,
+    maxAutoKeepAlives: pc.maxAutoKeepAlives,
     notifyOnWarning: pc.notifyOnWarning,
     notifyOnExpiry: pc.notifyOnExpiry
   })

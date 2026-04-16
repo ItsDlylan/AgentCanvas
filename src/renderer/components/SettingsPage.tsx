@@ -365,7 +365,7 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
             step={10}
           />
         </SettingRow>
-        <SettingRow label="Auto Keep-Alive" description="Automatically send a message to refresh the cache ~5s before it expires">
+        <SettingRow label="Auto Keep-Alive" description="Automatically send a message to refresh the cache ~15s before it expires">
           <Toggle
             value={pc.autoKeepAlive}
             onChange={(v) => update({ promptCache: { ...pc, autoKeepAlive: v } })}
@@ -376,6 +376,15 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
             value={pc.keepAliveMessage}
             onChange={(v) => update({ promptCache: { ...pc, keepAliveMessage: v } })}
             placeholder="."
+          />
+        </SettingRow>
+        <SettingRow label="Max Auto Keep-Alives" description="How many times auto keep-alive may fire before stopping. Resets whenever you send a message. 0 = unlimited.">
+          <NumberInput
+            value={pc.maxAutoKeepAlives}
+            onChange={(v) => update({ promptCache: { ...pc, maxAutoKeepAlives: v } })}
+            min={0}
+            max={1000}
+            step={1}
           />
         </SettingRow>
         <SettingRow label="Warning Notification" description="Emit a sticky toast when the cache enters warning threshold">
