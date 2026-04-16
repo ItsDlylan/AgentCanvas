@@ -336,9 +336,23 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
         </SettingRow>
       </div>
 
-      <h3 className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-        Claude Code Prompt Cache
-      </h3>
+      <div className="mb-2 mt-6 flex items-baseline justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+          Claude Code Prompt Cache
+        </h3>
+        <a
+          href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+          target="_blank"
+          rel="noreferrer noopener"
+          className="inline-flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 hover:underline"
+          title="Read Anthropic's prompt caching docs"
+        >
+          Learn more
+          <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+          </svg>
+        </a>
+      </div>
       <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
         <SettingRow label="Show Cache Timer" description="Display prompt cache countdown on Claude Code terminal tiles">
           <Toggle
