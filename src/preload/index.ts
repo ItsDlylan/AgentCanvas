@@ -380,6 +380,27 @@ const pomodoroAPI: PomodoroAPI = {
 
 contextBridge.exposeInMainWorld('pomodoro', pomodoroAPI)
 
+// ── Claude Code Usage API ────────────────────────────────
+
+export interface ClaudeUsageAPI {
+  load: () => Promise<import('../renderer/types/claude-usage').ClaudeUsageSnapshot>
+  onChanged: (callback: (snapshot: import('../renderer/types/claude-usage').ClaudeUsageSnapshot) => void) => () => void
+}
+
+const claudeUsageAPI: ClaudeUsageAPI = {
+  load: () => ipcRenderer.invoke('claude-usage:load'),
+  onChanged: (callback) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      snapshot: import('../renderer/types/claude-usage').ClaudeUsageSnapshot
+    ): void => callback(snapshot)
+    ipcRenderer.on('claude-usage:changed', handler)
+    return () => ipcRenderer.removeListener('claude-usage:changed', handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('claudeUsage', claudeUsageAPI)
+
 // ── IDE API ──────────────────────────────────────────────
 
 export interface IdeAPI {
