@@ -1081,15 +1081,25 @@ export default function Canvas() {
   const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|bmp|tiff|ico)$/i
   const [imageDragPreview, setImageDragPreview] = useState<{ x: number; y: number } | null>(null)
 
+  // Clear image drag preview whenever the drag moves over any tile node.
+  // Uses a native capture-phase listener so it fires even when React synthetic
+  // events are stopped by child components (e.g. TerminalTile's stopPropagation).
+  useEffect(() => {
+    const handler = (e: DragEvent) => {
+      const target = e.target as HTMLElement
+      if (target.closest('.react-flow__node')) {
+        setImageDragPreview(null)
+      }
+    }
+    document.addEventListener('dragover', handler, { capture: true })
+    return () => document.removeEventListener('dragover', handler, { capture: true })
+  }, [])
+
   const onCanvasDragOver = useCallback(
     (event: React.DragEvent) => {
       if (!event.dataTransfer.types.includes('Files')) return
-      // Only show preview if not over a node
       const target = event.target as HTMLElement
-      if (target.closest('.react-flow__node')) {
-        setImageDragPreview(null)
-        return
-      }
+      if (target.closest('.react-flow__node')) return
       event.preventDefault()
       event.dataTransfer.dropEffect = 'copy'
       setImageDragPreview({ x: event.clientX, y: event.clientY })
@@ -1099,7 +1109,6 @@ export default function Canvas() {
 
   const onCanvasDragLeave = useCallback(
     (event: React.DragEvent) => {
-      // Only clear if leaving the canvas area entirely
       const related = event.relatedTarget as HTMLElement | null
       if (related && (event.currentTarget as HTMLElement).contains(related)) return
       setImageDragPreview(null)
