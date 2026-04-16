@@ -186,7 +186,13 @@ export function executeAction(action: VoiceAction): ExecuteResult {
     case 'agent.sendInput': {
       const targetId = (action.params.sessionId as string) ?? store.focusedId
       if (!targetId) return { ok: false, message: 'No terminal focused' }
-      window.terminal.write(targetId, (action.params.text as string) + '\r')
+      // Split the text and the Enter into two writes so Claude Code's
+      // bracketed-paste detector treats `\r` as a real keystroke rather than
+      // a literal newline inside a paste. See terminal-manager.keepAlive().
+      window.terminal.write(targetId, action.params.text as string)
+      setTimeout(() => {
+        window.terminal.write(targetId, '\r')
+      }, 30)
       return { ok: true, message: 'Sent' }
     }
 

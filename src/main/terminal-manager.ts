@@ -684,6 +684,14 @@ export class TerminalManager extends EventEmitter {
    * Uses `\r` (what xterm sends for Enter) as the submit signal because Claude
    * Code treats `\n` as a newline-within-input, not a message submission.
    *
+   * The message text and `\r` are written as *two separate* PTY writes
+   * separated by a short delay. Claude Code's TUI implements xterm bracketed
+   * paste detection — when multiple bytes arrive in one read(), the `\r` is
+   * treated as a literal newline inside a paste rather than an Enter
+   * keystroke. Splitting the writes makes `\r` arrive in its own read(), so
+   * Claude processes it as a real submit. Matches how xterm.js delivers real
+   * user keystrokes (one `data` event per key).
+   *
    * @param isAuto true when fired by the auto-keep-alive timer (counts toward
    *               the per-session cap). false for manual Refresh / API calls
    *               (resets the counter — user is actively engaged).
@@ -705,7 +713,12 @@ export class TerminalManager extends EventEmitter {
 
     // Refresh the displayed countdown immediately for instant feedback.
     this.refreshCacheCountdown(id)
-    session.process.write(this.keepAliveMessage + '\r')
+    session.process.write(this.keepAliveMessage)
+    setTimeout(() => {
+      const s = this.sessions.get(id)
+      if (!s) return // session torn down during the delay
+      s.process.write('\r')
+    }, 30)
     return true
   }
 
