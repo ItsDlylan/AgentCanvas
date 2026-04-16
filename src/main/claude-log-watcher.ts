@@ -42,11 +42,19 @@ export class ClaudeLogWatcher extends EventEmitter {
   private lastOffset = 0
   private lineBuffer = ''
   private stopped = false
+  // When set, the watcher tails ONLY `<pinnedUuid>.jsonl` in the project dir
+  // instead of guessing via latest-mtime. This is how V2 avoids cross-wiring
+  // between two terminals running Claude in the same cwd — each terminal
+  // resolves its own Claude PID → session UUID and pins its watcher.
+  // Null means v1 latest-mtime fallback (before the pin lands, or if
+  // resolution failed permanently).
+  private pinnedUuid: string | null = null
 
-  constructor(opts: { terminalId: string; cwd: string }) {
+  constructor(opts: { terminalId: string; cwd: string; sessionUuid?: string }) {
     super()
     this.terminalId = opts.terminalId
     this.projectDir = ClaudeLogWatcher.projectDirFor(opts.cwd)
+    this.pinnedUuid = opts.sessionUuid ?? null
   }
 
   /** Compute `~/.claude/projects/<encoded-cwd>` the way Claude Code does. */
@@ -79,6 +87,27 @@ export class ClaudeLogWatcher extends EventEmitter {
         }
       }, 2000)
     }
+  }
+
+  /**
+   * Late-bind the watcher to a specific Claude session UUID. Called by
+   * TerminalManager once the `~/.claude/sessions/<pid>.json` registry
+   * resolves to this terminal's Claude PID. Idempotent: no-op if the
+   * same UUID is already pinned.
+   */
+  setSessionUuid(uuid: string): void {
+    if (this.pinnedUuid === uuid) return
+    this.pinnedUuid = uuid
+    // Drop any in-flight cursor — we're switching to a different file.
+    this.currentFile = null
+    this.lastOffset = 0
+    this.lineBuffer = ''
+    // Re-anchor to the new file's EOF so we skip any prior history and only
+    // react to records written from here forward (matches initialize semantics).
+    this.initializeFromExisting()
+    // Then tick once in case data has already been written since the last
+    // fs-watch event.
+    this.tick()
   }
 
   /**
@@ -123,17 +152,38 @@ export class ClaudeLogWatcher extends EventEmitter {
     }
   }
 
-  /** Pick the latest JSONL at startup and skip history (set offset to EOF). */
+  /** Pick the target JSONL at startup and skip history (set offset to EOF). */
   private initializeFromExisting(): void {
-    const latest = this.pickLatestJsonl()
-    if (!latest) return
-    this.currentFile = latest.path
+    const target = this.pickTargetJsonl()
+    if (!target) return
+    this.currentFile = target.path
     try {
-      this.lastOffset = statSync(latest.path).size
+      this.lastOffset = statSync(target.path).size
     } catch {
       this.lastOffset = 0
     }
     this.lineBuffer = ''
+  }
+
+  /**
+   * Resolve which JSONL file to tail.
+   * - Pinned mode: the file named `<pinnedUuid>.jsonl` (may not exist yet;
+   *   returns null until it's flushed).
+   * - Unpinned (v1 fallback): the most-recently-modified `.jsonl` in the dir.
+   */
+  private pickTargetJsonl(): { path: string; mtimeMs: number } | null {
+    if (this.pinnedUuid) {
+      const path = join(this.projectDir, `${this.pinnedUuid}.jsonl`)
+      if (!existsSync(path)) return null
+      let mtimeMs: number
+      try {
+        mtimeMs = statSync(path).mtimeMs
+      } catch {
+        return null
+      }
+      return { path, mtimeMs }
+    }
+    return this.pickLatestJsonl()
   }
 
   private pickLatestJsonl(): { path: string; mtimeMs: number } | null {
@@ -166,14 +216,14 @@ export class ClaudeLogWatcher extends EventEmitter {
   private tick(): void {
     if (this.stopped) return
 
-    const latest = this.pickLatestJsonl()
-    if (!latest) return
+    const target = this.pickTargetJsonl()
+    if (!target) return
 
     // A newer file appeared (new Claude session in the same project dir).
     // Start at offset 0 — these are small when fresh and we want the very
     // first assistant record.
-    if (latest.path !== this.currentFile) {
-      this.currentFile = latest.path
+    if (target.path !== this.currentFile) {
+      this.currentFile = target.path
       this.lastOffset = 0
       this.lineBuffer = ''
     }
