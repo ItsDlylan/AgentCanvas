@@ -11,11 +11,11 @@ import { navigateBrowser } from '@/hooks/useBrowserNavigation'
 // ── Helper functions ──────────────────────────────────────
 
 export function defaultTileWidth(type: string | undefined): number {
-  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : type === 'devTools' ? 900 : type === 'draw' ? 800 : 640
+  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : type === 'devTools' ? 900 : type === 'draw' ? 800 : type === 'image' ? 500 : 640
 }
 
 export function defaultTileHeight(type: string | undefined): number {
-  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : type === 'devTools' ? 500 : type === 'draw' ? 600 : 400
+  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : type === 'devTools' ? 500 : type === 'draw' ? 600 : type === 'image' ? 400 : 400
 }
 
 let tileCount = 0
@@ -178,6 +178,7 @@ export interface CanvasStore {
   addDrawAt: (position?: { x: number; y: number }, linkedTerminalId?: string) => string
   addBrowserForTerminal: (terminalId: string, url: string, reservationId?: string, tileWidth?: number, tileHeight?: number) => void
   addTerminalForTerminal: (info: TerminalSpawnInfo) => void
+  addNoteForApi: (info: { noteId: string; label?: string; linkedTerminalId?: string; linkedNoteId?: string; position?: { x: number; y: number }; width?: number; height?: number }) => void
   focusTile: (sessionId: string) => void
   renameTile: (sessionId: string, newLabel: string) => void
 
@@ -187,6 +188,10 @@ export interface CanvasStore {
   deleteNote: (sessionId: string) => void
   spawnLinkedNote: (sourceNoteId: string, taskId: string, taskText: string, onCreated: (newNoteId: string) => void) => void
   focusNoteOnCanvas: (noteId: string) => void
+
+  // ── Image management ──
+  addImageAt: (position: { x: number; y: number }, sourcePath: string) => Promise<void>
+  deleteImage: (sessionId: string) => void
 
   // ── Draw management ──
   closeDraw: (sessionId: string) => void
@@ -316,6 +321,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
         window.note.delete(sessionId)
       } else if (node?.type === 'draw') {
         window.draw.delete(sessionId)
+      } else if (node?.type === 'image') {
+        window.image.delete(sessionId)
       } else if (node?.type === 'diffViewer') {
         // Diff viewers just get removed
       } else {
@@ -654,6 +661,96 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       })
     },
 
+    addNoteForApi: (info) => {
+      const {
+        noteId: sessionId,
+        label,
+        linkedTerminalId,
+        linkedNoteId,
+        position,
+        width = 400,
+        height = 400
+      } = info
+
+      const { allNodes, tileGap } = get()
+
+      // Position: explicit > adjacent to linked terminal/note > findOpenPosition
+      let pos: { x: number; y: number }
+      if (position) {
+        pos = position
+      } else if (linkedTerminalId) {
+        const sourceNode = allNodes.find((n) => sid(n) === linkedTerminalId)
+        if (sourceNode) {
+          const srcW = (sourceNode.style?.width as number) ?? 640
+          pos = { x: sourceNode.position.x + srcW + tileGap, y: sourceNode.position.y }
+        } else {
+          pos = findOpenPosition(get().getVisibleNodes(), width, height, 4, tileGap)
+        }
+      } else if (linkedNoteId) {
+        const sourceNode = allNodes.find((n) => sid(n) === linkedNoteId)
+        if (sourceNode) {
+          const srcW = (sourceNode.style?.width as number) ?? 400
+          pos = { x: sourceNode.position.x + srcW + tileGap, y: sourceNode.position.y }
+        } else {
+          pos = findOpenPosition(get().getVisibleNodes(), width, height, 4, tileGap)
+        }
+      } else {
+        pos = findOpenPosition(get().getVisibleNodes(), width, height, 4, tileGap)
+      }
+
+      tileCount++
+      const newNode: Node = {
+        id: sessionId,
+        type: 'notes',
+        position: pos,
+        style: { width, height },
+        data: { sessionId, label: label || `Note ${tileCount}`, linkedTerminalId, linkedNoteId },
+        dragHandle: '.notes-tile-header'
+      }
+
+      // Inherit workspace from linked terminal/note, or use active
+      const wsId = linkedTerminalId
+        ? get().tileWorkspaceMap.get(linkedTerminalId)
+        : linkedNoteId
+          ? get().tileWorkspaceMap.get(linkedNoteId)
+          : undefined
+
+      set((s) => {
+        const edges = [...s.allEdges]
+
+        if (linkedTerminalId) {
+          edges.push({
+            id: `note-term-${linkedTerminalId}-${sessionId}`,
+            source: linkedTerminalId,
+            target: sessionId,
+            animated: true,
+            style: { stroke: '#22c55e', strokeWidth: 2 }
+          })
+        } else if (linkedNoteId) {
+          edges.push({
+            id: `note-note-${linkedNoteId}-${sessionId}`,
+            source: linkedNoteId,
+            target: sessionId,
+            animated: true,
+            style: { stroke: '#f59e0b', strokeWidth: 2 }
+          })
+        }
+
+        return {
+          allNodes: [...s.allNodes, newNode],
+          allEdges: edges,
+          tileWorkspaceMap: new Map(s.tileWorkspaceMap).set(sessionId, wsId ?? s.activeWorkspaceId),
+          focusedId: sessionId
+        }
+      })
+
+      // Update workspace in persisted note file
+      const finalWsId = wsId ?? get().activeWorkspaceId
+      window.note.save(sessionId, { position: pos, workspaceId: finalWsId })
+
+      centerOn(pos.x + width / 2, pos.y + height / 2)
+    },
+
     focusTile: (sessionId) => {
       set({ focusedId: sessionId })
       markTerminalRead(sessionId)
@@ -679,6 +776,8 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
         window.note.save(sessionId, { label: newLabel })
       } else if (node?.type === 'draw') {
         window.draw.save(sessionId, { label: newLabel })
+      } else if (node?.type === 'image') {
+        window.image.save(sessionId, { label: newLabel })
       }
     },
 
@@ -786,6 +885,56 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       const cy = (node.measured?.height ?? (node.style?.height as number) ?? 400) / 2
       set({ focusedId: noteId })
       centerOn(node.position.x + cx, node.position.y + cy)
+    },
+
+    // ── Image management ──
+
+    addImageAt: async (position, sourcePath) => {
+      tileCount++
+      const sessionId = uuid()
+      const { activeWorkspaceId } = get()
+      const width = 500
+      const height = 400
+
+      // Store the image file and get the stored filename
+      const storedFilename = await window.image.store(sourcePath)
+      const filename = sourcePath.split('/').pop() || 'Image'
+      const label = filename.replace(/\.[^.]+$/, '')
+
+      const newNode: Node = {
+        id: sessionId,
+        type: 'image',
+        position,
+        style: { width, height },
+        data: { sessionId, label, imagePath: storedFilename },
+        dragHandle: '.image-tile-header'
+      }
+
+      set((s) => ({
+        allNodes: [...s.allNodes, newNode],
+        tileWorkspaceMap: new Map(s.tileWorkspaceMap).set(sessionId, activeWorkspaceId),
+        focusedId: sessionId
+      }))
+      centerOn(position.x + width / 2, position.y + height / 2)
+
+      window.image.save(sessionId, {
+        imageId: sessionId,
+        label,
+        workspaceId: activeWorkspaceId,
+        isSoftDeleted: false,
+        position,
+        width,
+        height,
+        sourcePath,
+        storedFilename,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      })
+    },
+
+    deleteImage: (sessionId) => {
+      window.image.delete(sessionId)
+      get().removeTileFromCanvas(sessionId)
     },
 
     // ── Draw management ──
@@ -996,6 +1145,10 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
           window.browser.destroy(sessionId)
         } else if (node?.type === 'notes') {
           window.note.delete(sessionId)
+        } else if (node?.type === 'image') {
+          window.image.delete(sessionId)
+        } else if (node?.type === 'draw') {
+          window.draw.delete(sessionId)
         } else {
           window.terminal.kill(sessionId)
         }

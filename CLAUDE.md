@@ -74,3 +74,55 @@ curl -s -X POST $AGENT_CANVAS_API/api/terminal/write \
   -H 'Content-Type: application/json' \
   -d "{\"terminalId\": \"<id>\", \"data\": \"ls -la\\n\"}"
 ```
+
+### Note tiles
+
+Create, read, update, and delete note tiles on the canvas. Content accepts **markdown strings** (auto-converted) or raw TipTap JSON.
+
+```bash
+# Create a note tile
+curl -s -X POST $AGENT_CANVAS_API/api/note/open \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"label\": \"Architecture Notes\",
+    \"content\": \"# Overview\n\n- Service A handles auth\n- Service B handles billing\",
+    \"linkedTerminalId\": \"$AGENT_CANVAS_TERMINAL_ID\"
+  }"
+# Returns: { "ok": true, "noteId": "<uuid>" }
+
+# Read a note (returns metadata, TipTap JSON content, and markdown)
+curl -s -X POST $AGENT_CANVAS_API/api/note/read \
+  -H 'Content-Type: application/json' \
+  -d '{"noteId":"<id>"}'
+
+# Update note content
+curl -s -X POST $AGENT_CANVAS_API/api/note/update \
+  -H 'Content-Type: application/json' \
+  -d '{"noteId":"<id>","content":"# Updated Content\n\nNew text here."}'
+
+# Rename a note (uses the generic tile rename endpoint)
+curl -s -X POST $AGENT_CANVAS_API/api/tile/rename \
+  -H 'Content-Type: application/json' \
+  -d '{"sessionId":"<id>","label":"New Name"}'
+
+# List all notes
+curl -s $AGENT_CANVAS_API/api/notes
+
+# Soft delete (removes from canvas, keeps file)
+curl -s -X POST $AGENT_CANVAS_API/api/note/close \
+  -H 'Content-Type: application/json' \
+  -d '{"noteId":"<id>"}'
+
+# Hard delete (removes from canvas and disk)
+curl -s -X POST $AGENT_CANVAS_API/api/note/delete \
+  -H 'Content-Type: application/json' \
+  -d '{"noteId":"<id>"}'
+```
+
+Parameters for `note/open`:
+- **`label`** — Note title (default: auto-generated)
+- **`content`** — Markdown string or TipTap JSON object
+- **`linkedTerminalId`** — Link to a terminal (green edge, positions adjacent)
+- **`linkedNoteId`** — Link to a parent note (amber edge)
+- **`position`** — `{ x, y }` canvas coordinates
+- **`width`** / **`height`** — Tile dimensions (default 400x400)

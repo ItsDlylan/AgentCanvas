@@ -25,6 +25,7 @@ import { NotesTile } from './NotesTile'
 import { DiffViewerTile } from './DiffViewerTile'
 import { DevToolsTile } from './DevToolsTile'
 import { DrawTile } from './draw/DrawTile'
+import { ImageTile } from './ImageTile'
 import { NotificationToast } from './NotificationToast'
 import { NotificationCenter } from './NotificationCenter'
 import { parseMermaid } from '@/lib/mermaid-parser'
@@ -59,7 +60,8 @@ const nodeTypes: NodeTypes = {
   notes: NotesTile as unknown as NodeTypes['notes'],
   diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer'],
   devTools: DevToolsTile as unknown as NodeTypes['devTools'],
-  draw: DrawTile as unknown as NodeTypes['draw']
+  draw: DrawTile as unknown as NodeTypes['draw'],
+  image: ImageTile as unknown as NodeTypes['image']
 }
 
 const MINIMAP_NODE_COLORS: Record<string, string> = {
@@ -69,6 +71,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   diffViewer: '#a855f7',
   devTools:   '#f97316',
   draw:       '#ec4899',
+  image:      '#06b6d4',
 }
 
 function minimapNodeColor(node: Node): string {
@@ -259,6 +262,13 @@ export default function Canvas() {
               }
             }
           }
+          // Inject delete callback into image data
+          if (n.type === 'image') {
+            return {
+              ...n,
+              data: { ...n.data, onDelete: useCanvasStore.getState().deleteImage }
+            }
+          }
           // Inject close/delete callbacks into draw data
           if (n.type === 'draw') {
             return {
@@ -326,6 +336,15 @@ export default function Canvas() {
                 const w = (n.style?.width as number) ?? 800
                 const h = (n.style?.height as number) ?? 600
                 window.draw.save(sid, {
+                  position: n.position,
+                  width: n.measured?.width ?? w,
+                  height: n.measured?.height ?? h
+                })
+              } else if (n.type === 'image') {
+                const sid = (n.data as Record<string, unknown>).sessionId as string
+                const w = (n.style?.width as number) ?? 500
+                const h = (n.style?.height as number) ?? 400
+                window.image.save(sid, {
                   position: n.position,
                   width: n.measured?.width ?? w,
                   height: n.measured?.height ?? h
@@ -718,6 +737,44 @@ export default function Canvas() {
     })
   }, [])
 
+  // ── Load persisted image tiles on mount ──
+  useEffect(() => {
+    window.image.list().then((imageFiles) => {
+      const imagesToRestore = imageFiles.filter((img) => !img.meta.isSoftDeleted)
+      if (imagesToRestore.length === 0) return
+
+      setAllNodes((nds) => {
+        const existingIds = new Set(nds.map((n) => n.id))
+        const newNodes: Node[] = []
+        const wsMapEntries: [string, string][] = []
+
+        for (const img of imagesToRestore) {
+          const { imageId, label, workspaceId, position, width, height, storedFilename } = img.meta
+          if (existingIds.has(imageId)) continue
+          newNodes.push({
+            id: imageId,
+            type: 'image',
+            position,
+            style: { width, height },
+            data: { sessionId: imageId, label, imagePath: storedFilename },
+            dragHandle: '.image-tile-header'
+          })
+          wsMapEntries.push([imageId, workspaceId])
+        }
+
+        if (newNodes.length > 0) {
+          setTileWorkspaceMap((prev) => {
+            const next = new Map(prev)
+            for (const [sid, wsId] of wsMapEntries) next.set(sid, wsId)
+            return next
+          })
+        }
+
+        return newNodes.length > 0 ? [...nds, ...newNodes] : nds
+      })
+    })
+  }, [])
+
   // ── Load persisted edges once all nodes are ready ──
   useEffect(() => {
     if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals || !nodesLoadedFlags.browsers || !nodesLoadedFlags.draws) return
@@ -953,6 +1010,38 @@ export default function Canvas() {
     return unsub
   }, [])
 
+  // ── Agent-driven note tile creation ──
+  useEffect(() => {
+    const unsub = window.note.onNoteOpen((info) => {
+      useCanvasStore.getState().addNoteForApi(info)
+    })
+    return unsub
+  }, [])
+
+  // ── Agent-driven note content update ──
+  useEffect(() => {
+    const unsub = window.note.onNoteUpdate((info) => {
+      window.dispatchEvent(new CustomEvent('api:note-updated', { detail: { noteId: info.noteId } }))
+    })
+    return unsub
+  }, [])
+
+  // ── Agent-driven note soft-delete ──
+  useEffect(() => {
+    const unsub = window.note.onNoteClose((info) => {
+      useCanvasStore.getState().closeNote(info.noteId)
+    })
+    return unsub
+  }, [])
+
+  // ── Agent-driven note hard-delete ──
+  useEffect(() => {
+    const unsub = window.note.onNoteDelete((info) => {
+      useCanvasStore.getState().deleteNote(info.noteId)
+    })
+    return unsub
+  }, [])
+
   // ── Right-click context menu ──
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowPos: { x: number; y: number } } | null>(null)
 
@@ -986,6 +1075,60 @@ export default function Canvas() {
       useCanvasStore.getState().addTerminalAt(safePos)
     },
     [screenToFlowPosition, settings.canvas.tileGap]
+  )
+
+  // ── Canvas-level image drag-and-drop ──
+  const IMAGE_EXTS = /\.(png|jpe?g|gif|webp|svg|bmp|tiff|ico)$/i
+  const [imageDragPreview, setImageDragPreview] = useState<{ x: number; y: number } | null>(null)
+
+  const onCanvasDragOver = useCallback(
+    (event: React.DragEvent) => {
+      if (!event.dataTransfer.types.includes('Files')) return
+      // Only show preview if not over a node
+      const target = event.target as HTMLElement
+      if (target.closest('.react-flow__node')) {
+        setImageDragPreview(null)
+        return
+      }
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+      setImageDragPreview({ x: event.clientX, y: event.clientY })
+    },
+    []
+  )
+
+  const onCanvasDragLeave = useCallback(
+    (event: React.DragEvent) => {
+      // Only clear if leaving the canvas area entirely
+      const related = event.relatedTarget as HTMLElement | null
+      if (related && (event.currentTarget as HTMLElement).contains(related)) return
+      setImageDragPreview(null)
+    },
+    []
+  )
+
+  const onCanvasDrop = useCallback(
+    (event: React.DragEvent) => {
+      setImageDragPreview(null)
+      const target = event.target as HTMLElement
+      if (target.closest('.react-flow__node')) return
+
+      const files = Array.from(event.dataTransfer.files)
+      const imageFiles = files.filter((f) =>
+        f.type.startsWith('image/') || IMAGE_EXTS.test(f.name)
+      )
+      if (imageFiles.length === 0) return
+
+      event.preventDefault()
+      const flowPos = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+
+      for (const file of imageFiles) {
+        const path = window.fileUtils.getPathForFile(file)
+        if (!path) continue
+        useCanvasStore.getState().addImageAt(flowPos, path)
+      }
+    },
+    [screenToFlowPosition]
   )
 
   // ── Mod-hold kill highlight ──
@@ -1359,7 +1502,26 @@ export default function Canvas() {
         </div>
 
         {/* Canvas + Panels */}
-        <div className="relative flex-1 overflow-hidden">
+        <div
+          className="relative flex-1 overflow-hidden"
+          onDragOver={onCanvasDragOver}
+          onDragLeave={onCanvasDragLeave}
+          onDrop={onCanvasDrop}
+        >
+          {/* Image drop ghost preview */}
+          {imageDragPreview && (
+            <div
+              className="fixed z-50 pointer-events-none"
+              style={{ left: imageDragPreview.x - 250, top: imageDragPreview.y - 200 }}
+            >
+              <div className="w-[500px] h-[400px] rounded-lg border-2 border-dashed border-cyan-500/60 bg-cyan-500/5 flex flex-col items-center justify-center">
+                <svg className="w-10 h-10 text-cyan-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+                </svg>
+                <span className="text-sm text-cyan-300 font-medium">Drop to create image tile</span>
+              </div>
+            </div>
+          )}
           <ReactFlow
             nodes={visibleNodes}
             edges={visibleEdges}
@@ -1482,6 +1644,7 @@ export default function Canvas() {
             onAddDraw={() => useCanvasStore.getState().addDrawAt()}
             onCloseDraw={(id) => useCanvasStore.getState().closeDraw(id)}
             onDeleteDraw={(id) => useCanvasStore.getState().deleteDraw(id)}
+            onDeleteImage={(id) => useCanvasStore.getState().deleteImage(id)}
             onSpawnTemplate={(tmpl, origin) => useCanvasStore.getState().spawnTemplate(tmpl, origin)}
             open={panelOpen}
             onToggle={togglePanel}

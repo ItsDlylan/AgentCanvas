@@ -14,6 +14,7 @@ import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
 import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachments } from './attachment-store'
 import { ensureDrawDir, loadDraw, saveDraw, deleteDraw, listDraws } from './draw-store'
+import { loadImage, saveImage, deleteImage, listImages, storeImage } from './image-store'
 import { jsonToMarkdown } from './note-converter'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
@@ -566,6 +567,34 @@ ipcMain.handle('draw:list', () => {
   return listDraws()
 })
 
+// ── Image IPC Handlers ──────────────────────────────────
+
+ipcMain.handle('image:load', (_event, { imageId }) => {
+  return loadImage(imageId)
+})
+
+ipcMain.handle('image:save', (_event, { imageId, meta }) => {
+  saveImage(imageId, meta)
+})
+
+ipcMain.handle('image:delete', (_event, { imageId }) => {
+  deleteImage(imageId)
+})
+
+ipcMain.handle('image:list', () => {
+  return listImages()
+})
+
+ipcMain.handle('image:store', (_event, { sourcePath }: { sourcePath: string }) => {
+  return storeImage(sourcePath)
+})
+
+ipcMain.handle('image:getUrl', (_event, { imageId }: { imageId: string }) => {
+  const img = loadImage(imageId)
+  if (!img?.meta.storedFilename) return null
+  return `agentcanvas://image/${img.meta.storedFilename}`
+})
+
 // ── Diff IPC Handler ─────────────────────────────────────
 
 ipcMain.handle('diff:compute', (_event, { cwd }: { cwd: string }) => {
@@ -979,7 +1008,88 @@ canvasApi.on('notify', (info: {
 canvasApi.on('status-request', (reply: (data: unknown) => void) => {
   const terminals = terminalManager.listSessions()
   const browsers = browserManager.listSessions()
-  reply({ terminals, browsers })
+  const notes = listNotes()
+    .filter((n) => !n.meta.isSoftDeleted)
+    .map((n) => ({
+      noteId: n.meta.noteId,
+      label: n.meta.label,
+      workspaceId: n.meta.workspaceId,
+      linkedTerminalId: n.meta.linkedTerminalId,
+      linkedNoteId: n.meta.linkedNoteId,
+      createdAt: n.meta.createdAt,
+      updatedAt: n.meta.updatedAt
+    }))
+  reply({ terminals, browsers, notes })
+})
+
+// ── Note API endpoints ──
+
+canvasApi.on('note-open', (info: {
+  noteId: string; label?: string; content?: Record<string, unknown>;
+  linkedTerminalId?: string; linkedNoteId?: string;
+  position?: { x: number; y: number }; width?: number; height?: number
+}, reply: (result: unknown) => void) => {
+  saveNote(info.noteId, {
+    noteId: info.noteId,
+    label: info.label || 'Note',
+    workspaceId: 'default',
+    isSoftDeleted: false,
+    position: info.position || { x: 100, y: 100 },
+    width: info.width || 400,
+    height: info.height || 400,
+    linkedTerminalId: info.linkedTerminalId,
+    linkedNoteId: info.linkedNoteId,
+    createdAt: Date.now(),
+    updatedAt: Date.now()
+  }, info.content)
+  mainWindow?.webContents.send('canvas:note-open', info)
+  reply({ ok: true, noteId: info.noteId })
+})
+
+canvasApi.on('note-update', (info: { noteId: string; content: Record<string, unknown> }, reply: (result: unknown) => void) => {
+  saveNote(info.noteId, {}, info.content)
+  mainWindow?.webContents.send('canvas:note-update', { noteId: info.noteId })
+  reply({ ok: true })
+})
+
+canvasApi.on('note-read', (info: { noteId: string }, reply: (result: unknown) => void) => {
+  const noteFile = loadNote(info.noteId)
+  if (!noteFile) {
+    reply({ ok: false, error: 'Note not found' })
+    return
+  }
+  reply({
+    ok: true,
+    noteId: info.noteId,
+    meta: noteFile.meta,
+    content: noteFile.content,
+    markdown: jsonToMarkdown(noteFile.content)
+  })
+})
+
+canvasApi.on('note-close', (info: { noteId: string }, reply: (result: unknown) => void) => {
+  mainWindow?.webContents.send('canvas:note-close', { noteId: info.noteId })
+  reply({ ok: true })
+})
+
+canvasApi.on('note-delete', (info: { noteId: string }, reply: (result: unknown) => void) => {
+  mainWindow?.webContents.send('canvas:note-delete', { noteId: info.noteId })
+  reply({ ok: true })
+})
+
+canvasApi.on('notes-list', (reply: (data: unknown) => void) => {
+  const notes = listNotes()
+    .filter((n) => !n.meta.isSoftDeleted)
+    .map((n) => ({
+      noteId: n.meta.noteId,
+      label: n.meta.label,
+      workspaceId: n.meta.workspaceId,
+      linkedTerminalId: n.meta.linkedTerminalId,
+      linkedNoteId: n.meta.linkedNoteId,
+      createdAt: n.meta.createdAt,
+      updatedAt: n.meta.updatedAt
+    }))
+  reply({ ok: true, notes })
 })
 
 // ── Team Watcher (passive detection of Claude Code Agent Teams) ──
@@ -1013,19 +1123,30 @@ protocol.registerSchemesAsPrivileged([
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.agentcanvas.app')
 
-  // Serve local attachment files via agentcanvas:// protocol
+  // Serve local files via agentcanvas:// protocol
   protocol.handle('agentcanvas', (request) => {
     const url = new URL(request.url)
-    // URL format: agentcanvas://attachment/{noteId}/{filename}
+    const host = url.host
     const parts = url.pathname.replace(/^\/+/, '').split('/')
+    const { join } = require('path')
+    const { homedir } = require('os')
+
+    // agentcanvas://image/{filename}
+    if (host === 'image') {
+      const filename = parts.join('/')
+      if (!filename) return new Response('Not found', { status: 404 })
+      const imagesBase = join(homedir(), 'AgentCanvas', 'images')
+      const filePath = join(imagesBase, filename)
+      if (!filePath.startsWith(imagesBase)) return new Response('Forbidden', { status: 403 })
+      return net.fetch(`file://${filePath}`)
+    }
+
+    // agentcanvas://attachment/{noteId}/{filename}
     if (parts.length < 2) return new Response('Not found', { status: 404 })
     const noteId = parts[0]
     const filename = parts.slice(1).join('/')
-    const { join } = require('path')
-    const { homedir } = require('os')
     const attachmentsBase = join(homedir(), 'AgentCanvas', 'attachments')
     const filePath = join(attachmentsBase, noteId, filename)
-    // Path traversal prevention
     if (!filePath.startsWith(attachmentsBase)) return new Response('Forbidden', { status: 403 })
     return net.fetch(`file://${filePath}`)
   })

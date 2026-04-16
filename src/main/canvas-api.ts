@@ -2,6 +2,8 @@ import { createServer, IncomingMessage, ServerResponse } from 'http'
 import type { Server } from 'http'
 import type { AddressInfo } from 'net'
 import { EventEmitter } from 'events'
+import { randomUUID } from 'crypto'
+import { markdownToTiptap } from './markdown-to-tiptap'
 
 /**
  * Local HTTP API that anything inside a terminal can call to control AgentCanvas.
@@ -13,6 +15,12 @@ import { EventEmitter } from 'events'
  *   POST /api/terminal/write    { terminalId, data }   → write data to a terminal
  *   POST /api/tile/rename       { sessionId, label }   → rename any tile
  *   POST /api/notify            { body, title?, level?, terminalId?, duration?, sound? } → toast notification
+ *   POST /api/note/open         { label?, content?, linkedTerminalId?, position?, width?, height? } → spawn a note tile
+ *   POST /api/note/update       { noteId, content }    → update note content
+ *   POST /api/note/read         { noteId }             → read note metadata + content
+ *   POST /api/note/close        { noteId }             → soft-delete a note tile
+ *   POST /api/note/delete       { noteId }             → hard-delete a note tile
+ *   GET  /api/notes                                     → list all notes
  *   GET  /api/status                                    → list all tiles
  *
  * Injected into every terminal as AGENT_CANVAS_API=http://127.0.0.1:<port>
@@ -319,6 +327,114 @@ export class CanvasApi extends EventEmitter {
       }).catch(() => {
         res.writeHead(400)
         res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    // ── Note endpoints ──
+
+    if (req.method === 'POST' && url === '/api/note/open') {
+      this.readBody(req).then((body) => {
+        const { label, content, linkedTerminalId, linkedNoteId, position, width, height } = body as {
+          label?: string; content?: string | Record<string, unknown>;
+          linkedTerminalId?: string; linkedNoteId?: string;
+          position?: { x: number; y: number }; width?: number; height?: number
+        }
+        const noteId = randomUUID()
+        const tiptapContent = typeof content === 'string' ? markdownToTiptap(content) : content
+        this.emit('note-open', { noteId, label, content: tiptapContent, linkedTerminalId, linkedNoteId, position, width, height }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/note/update') {
+      this.readBody(req).then((body) => {
+        const { noteId, content } = body as { noteId?: string; content?: string | Record<string, unknown> }
+        if (!noteId || content === undefined) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'noteId and content are required' }))
+          return
+        }
+        const tiptapContent = typeof content === 'string' ? markdownToTiptap(content) : content
+        this.emit('note-update', { noteId, content: tiptapContent }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/note/read') {
+      this.readBody(req).then((body) => {
+        const { noteId } = body as { noteId?: string }
+        if (!noteId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'noteId is required' }))
+          return
+        }
+        this.emit('note-read', { noteId }, (result: unknown) => {
+          const r = result as { ok: boolean }
+          res.writeHead(r.ok ? 200 : 404)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/note/close') {
+      this.readBody(req).then((body) => {
+        const { noteId } = body as { noteId?: string }
+        if (!noteId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'noteId is required' }))
+          return
+        }
+        this.emit('note-close', { noteId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/note/delete') {
+      this.readBody(req).then((body) => {
+        const { noteId } = body as { noteId?: string }
+        if (!noteId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'noteId is required' }))
+          return
+        }
+        this.emit('note-delete', { noteId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'GET' && url === '/api/notes') {
+      this.emit('notes-list', (data: unknown) => {
+        res.writeHead(200)
+        res.end(JSON.stringify(data))
       })
       return
     }

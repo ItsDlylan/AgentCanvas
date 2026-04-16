@@ -194,6 +194,23 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
     return () => window.removeEventListener('pomodoro:note-updated', handler)
   }, [editor])
 
+  // Refresh content when updated via API (POST /api/note/update)
+  useEffect(() => {
+    if (!editor) return
+    const handler = (e: Event) => {
+      const { noteId: updatedId } = (e as CustomEvent).detail
+      if (updatedId === noteIdRef.current && !editor.isDestroyed) {
+        window.note.load(noteIdRef.current).then((noteFile) => {
+          if (noteFile?.content && !editor.isDestroyed) {
+            editor.commands.setContent(noteFile.content)
+          }
+        })
+      }
+    }
+    window.addEventListener('api:note-updated', handler)
+    return () => window.removeEventListener('api:note-updated', handler)
+  }, [editor])
+
   // When a linked note is removed, clear stale linkedNoteId attributes
   useEffect(() => {
     if (!editor) return

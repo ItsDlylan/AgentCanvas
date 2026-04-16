@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 export type TerminalStatus = 'idle' | 'running' | 'waiting'
 
@@ -251,12 +251,27 @@ export interface NoteFile {
   content: Record<string, unknown>
 }
 
+export interface NoteOpenInfo {
+  noteId: string
+  label?: string
+  content?: Record<string, unknown>
+  linkedTerminalId?: string
+  linkedNoteId?: string
+  position?: { x: number; y: number }
+  width?: number
+  height?: number
+}
+
 export interface NoteAPI {
   load: (noteId: string) => Promise<NoteFile | null>
   save: (noteId: string, meta: Partial<NoteMeta>, content?: Record<string, unknown>) => Promise<void>
   delete: (noteId: string) => Promise<void>
   list: () => Promise<NoteFile[]>
   export: (noteId: string, format: 'markdown' | 'json') => Promise<boolean>
+  onNoteOpen: (callback: (info: NoteOpenInfo) => void) => () => void
+  onNoteUpdate: (callback: (info: { noteId: string }) => void) => () => void
+  onNoteClose: (callback: (info: { noteId: string }) => void) => () => void
+  onNoteDelete: (callback: (info: { noteId: string }) => void) => () => void
 }
 
 const noteAPI: NoteAPI = {
@@ -264,7 +279,27 @@ const noteAPI: NoteAPI = {
   save: (noteId, meta, content) => ipcRenderer.invoke('note:save', { noteId, meta, content }),
   delete: (noteId) => ipcRenderer.invoke('note:delete', { noteId }),
   list: () => ipcRenderer.invoke('note:list'),
-  export: (noteId, format) => ipcRenderer.invoke('note:export', { noteId, format })
+  export: (noteId, format) => ipcRenderer.invoke('note:export', { noteId, format }),
+  onNoteOpen: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: NoteOpenInfo): void => callback(info)
+    ipcRenderer.on('canvas:note-open', handler)
+    return () => ipcRenderer.removeListener('canvas:note-open', handler)
+  },
+  onNoteUpdate: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { noteId: string }): void => callback(info)
+    ipcRenderer.on('canvas:note-update', handler)
+    return () => ipcRenderer.removeListener('canvas:note-update', handler)
+  },
+  onNoteClose: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { noteId: string }): void => callback(info)
+    ipcRenderer.on('canvas:note-close', handler)
+    return () => ipcRenderer.removeListener('canvas:note-close', handler)
+  },
+  onNoteDelete: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { noteId: string }): void => callback(info)
+    ipcRenderer.on('canvas:note-delete', handler)
+    return () => ipcRenderer.removeListener('canvas:note-delete', handler)
+  }
 }
 
 contextBridge.exposeInMainWorld('note', noteAPI)
@@ -524,6 +559,28 @@ const drawAPI: DrawAPI = {
 
 contextBridge.exposeInMainWorld('draw', drawAPI)
 
+// ── Image API ───────────────────────────────────────────
+
+export interface ImageAPI {
+  load: (imageId: string) => Promise<import('../main/image-store').ImageFile | null>
+  save: (imageId: string, meta: Partial<import('../main/image-store').ImageMeta>) => Promise<void>
+  delete: (imageId: string) => Promise<void>
+  list: () => Promise<import('../main/image-store').ImageFile[]>
+  store: (sourcePath: string) => Promise<string>
+  getUrl: (imageId: string) => Promise<string | null>
+}
+
+const imageAPI: ImageAPI = {
+  load: (imageId) => ipcRenderer.invoke('image:load', { imageId }),
+  save: (imageId, meta) => ipcRenderer.invoke('image:save', { imageId, meta }),
+  delete: (imageId) => ipcRenderer.invoke('image:delete', { imageId }),
+  list: () => ipcRenderer.invoke('image:list'),
+  store: (sourcePath) => ipcRenderer.invoke('image:store', { sourcePath }),
+  getUrl: (imageId) => ipcRenderer.invoke('image:getUrl', { imageId })
+}
+
+contextBridge.exposeInMainWorld('image', imageAPI)
+
 // ── Notify API ──────────────────────────────────────────
 
 export interface CanvasNotification {
@@ -629,6 +686,11 @@ const voiceAPI: VoiceAPI = {
 }
 
 contextBridge.exposeInMainWorld('voice', voiceAPI)
+
+// File Utilities API
+contextBridge.exposeInMainWorld('fileUtils', {
+  getPathForFile: (file: File) => webUtils.getPathForFile(file)
+})
 
 // Debug APIs
 contextBridge.exposeInMainWorld('debug', {
