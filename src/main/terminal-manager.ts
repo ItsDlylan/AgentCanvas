@@ -4,6 +4,7 @@ import { promisify } from 'util'
 import { createServer } from 'net'
 import os from 'os'
 import { ClaudeLogWatcher, type ClaudeCacheEvent } from './claude-log-watcher'
+import { findClaudePidForShell, readSessionRegistry } from './claude-session-registry'
 
 const execFileAsync = promisify(execFile)
 
@@ -59,7 +60,19 @@ export interface TerminalSession {
   // How many auto keep-alives have fired since the last user message.
   // Used to respect the cap; reset to 0 on every user submission.
   autoKeepAliveCount: number
+  // V2 session correlation: resolved from `~/.claude/sessions/<pid>.json`
+  // via the TTY chain. Pins the log-watcher to the exact JSONL file for
+  // this terminal's Claude process, avoiding cross-wire when two terminals
+  // run Claude in the same cwd. Cleared when Claude exits.
+  claudePid?: number
+  claudeSessionUuid?: string
+  sessionLookupAttempts: number
 }
+
+// Stop trying to resolve Claude's session UUID after this many polls
+// (~50 s at the 5 s poll cadence). If the registry never appears, the
+// watcher stays in v1 latest-mtime mode — worst case is v1 behavior.
+const MAX_SESSION_LOOKUP_ATTEMPTS = 10
 
 function isClaudeProcessName(name: string): boolean {
   const n = name.toLowerCase()
@@ -181,7 +194,8 @@ export class TerminalManager extends EventEmitter {
       keepAliveTimer: null,
       expiryTimer: null,
       warningTimer: null,
-      autoKeepAliveCount: 0
+      autoKeepAliveCount: 0,
+      sessionLookupAttempts: 0
     }
 
     this.sessions.set(id, session)
@@ -312,7 +326,25 @@ export class TerminalManager extends EventEmitter {
             session.isClaudeSession = false
             this.clearCacheState(session)
             this.stopLogWatcher(id)
+            // Reset V2 correlation state so a restart re-resolves cleanly.
+            session.claudePid = undefined
+            session.claudeSessionUuid = undefined
+            session.sessionLookupAttempts = 0
             changed = true
+          }
+
+          // V2: while Claude is running but we haven't yet pinned the
+          // watcher to its session UUID, retry the registry lookup each
+          // poll. Handles the startup race where we see `claude` in the
+          // foreground before it has flushed `~/.claude/sessions/<pid>.json`.
+          if (
+            session.isClaudeSession &&
+            !session.claudeSessionUuid &&
+            session.sessionLookupAttempts < MAX_SESSION_LOOKUP_ATTEMPTS
+          ) {
+            session.sessionLookupAttempts += 1
+            // Fire-and-forget — don't block polling on this.
+            void this.resolveClaudeSession(session)
           }
 
           // Get full command line for persistence across restarts
@@ -422,7 +454,10 @@ export class TerminalManager extends EventEmitter {
     if (this.logWatchers.has(session.id)) return
     const watcher = new ClaudeLogWatcher({
       terminalId: session.id,
-      cwd: session.cwd
+      cwd: session.cwd,
+      // Usually undefined on first call — v1 latest-mtime fallback is used
+      // until resolveClaudeSession pins the UUID via setSessionUuid().
+      sessionUuid: session.claudeSessionUuid
     })
     watcher.on('cache-event', (e: ClaudeCacheEvent) => this.applyDetectedCacheTtl(e))
     watcher.on('error', (err) => {
@@ -430,6 +465,28 @@ export class TerminalManager extends EventEmitter {
     })
     watcher.start()
     this.logWatchers.set(session.id, watcher)
+  }
+
+  /**
+   * Resolve the Claude session UUID for this terminal via the PID registry,
+   * then late-bind it to the log watcher so subsequent records are read from
+   * the correct `<uuid>.jsonl`. No-op if already locked.
+   *
+   * Called from pollForegroundProcesses while `isClaudeSession && !uuid`.
+   * Silently returns on any failure — the next poll will retry (capped by
+   * MAX_SESSION_LOOKUP_ATTEMPTS).
+   */
+  private async resolveClaudeSession(session: TerminalSession): Promise<void> {
+    if (session.claudeSessionUuid) return
+    const pid = await findClaudePidForShell(session.process.pid)
+    if (!pid) return
+    const info = readSessionRegistry(pid)
+    if (!info) return
+    // Re-check state after the awaits — session may have changed.
+    if (!this.sessions.has(session.id) || !session.isClaudeSession) return
+    session.claudePid = info.pid
+    session.claudeSessionUuid = info.sessionId
+    this.logWatchers.get(session.id)?.setSessionUuid(info.sessionId)
   }
 
   private stopLogWatcher(terminalId: string): void {
