@@ -8,10 +8,12 @@
     "url": "https://github.com/ItsDlylan/AgentCanvas.git"
   },
   "scripts": {
+    "predev": "node scripts/check-native-arch.js",
     "dev": "electron-vite dev",
+    "prebuild": "node scripts/check-native-arch.js",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "postinstall": "electron-builder install-app-deps && node scripts/copy-vad-assets.js",
+    "postinstall": "electron-builder install-app-deps --arch=$(node -p process.arch) && node scripts/copy-vad-assets.js",
     "dist": "npm run build && electron-builder --publish never",
     "dist:mac": "npm run build && electron-builder --mac --publish never",
     "setup:claude-hook": "bash scripts/setup-claude-hook.sh",
