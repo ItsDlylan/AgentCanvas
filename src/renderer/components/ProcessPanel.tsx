@@ -24,6 +24,7 @@ interface ProcessPanelProps {
   onAddDraw: () => void
   onCloseDraw: (sessionId: string) => void
   onDeleteDraw: (sessionId: string) => void
+  onDeleteImage: (sessionId: string) => void
   onSpawnTemplate: (template: WorkspaceTemplate) => void
   open: boolean
   onToggle: () => void
@@ -866,6 +867,7 @@ function ProcessPanelComponent({
   onAddDraw,
   onCloseDraw,
   onDeleteDraw,
+  onDeleteImage,
   onSpawnTemplate,
   open,
   onToggle,
@@ -880,6 +882,7 @@ function ProcessPanelComponent({
   const notes = nodes.filter((n) => n.type === 'notes')
   const diffViewers = nodes.filter((n) => n.type === 'diffViewer')
   const draws = nodes.filter((n) => n.type === 'draw')
+  const images = nodes.filter((n) => n.type === 'image')
   const browsers = allBrowsers.filter((n) => {
     const sid = (n.data as Record<string, unknown>).sessionId as string
     return tileWorkspaceMap.get(sid) === activeWorkspaceId
@@ -958,13 +961,13 @@ function ProcessPanelComponent({
             Processes
           </span>
           <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-400">
-            {terminals.length + allBrowsers.length + notes.length}
+            {terminals.length + allBrowsers.length + notes.length + images.length}
           </span>
         </div>
 
         {/* Process list */}
         <div className="flex-1 overflow-y-auto p-2">
-          {terminals.length === 0 && allBrowsers.length === 0 && notes.length === 0 ? (
+          {terminals.length === 0 && allBrowsers.length === 0 && notes.length === 0 && images.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-8 text-center">
               <span className="text-xs text-zinc-600">No active tiles</span>
             </div>
@@ -1076,6 +1079,30 @@ function ProcessPanelComponent({
                         </svg>
                       </button>
                     </div>
+                  </button>
+                )
+              })}
+              {/* Images */}
+              {images.map((node) => {
+                const data = node.data as Record<string, unknown>
+                const sessionId = data.sessionId as string
+                const label = (data.label as string) || 'Image'
+                const isFocused = focusedId === sessionId
+                return (
+                  <button
+                    key={node.id}
+                    onClick={() => onFocus(sessionId)}
+                    className={`group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors ${
+                      isFocused ? 'bg-cyan-500/10 text-cyan-300' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${isFocused ? 'bg-cyan-400' : 'bg-cyan-600'}`} />
+                    <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                      <span className="truncate text-xs">{label}</span>
+                      <span className="shrink-0 text-[10px] text-cyan-400/70">Image</span>
+                    </div>
+                    <JumpBadge hint={jumpHints.get(sessionId)} />
+                    <CloseButton onClick={(e) => { e.stopPropagation(); onDeleteImage(sessionId) }} />
                   </button>
                 )
               })}

@@ -715,6 +715,45 @@
   border-radius: 0 0 8px 8px;
 }
 
+/* Image tile styling */
+.image-tile {
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  background: #09090b;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.image-tile-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #18181b;
+  border-bottom: 1px solid #27272a;
+  border-radius: 8px 8px 0 0;
+  cursor: grab;
+  user-select: none;
+  font-size: 12px;
+  color: #a1a1aa;
+}
+
+.image-tile-header:active {
+  cursor: grabbing;
+}
+
+.image-tile-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 0 0 8px 8px;
+}
+
 /* Minimap dark theme */
 .react-flow__minimap {
   background-color: #18181b !important;

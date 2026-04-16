@@ -24,6 +24,14 @@ const STATUS_CONFIG: Record<TerminalStatus, { dot: string; text: string; label: 
   waiting: { dot: 'bg-amber-400', text: 'text-amber-400', label: 'Waiting' }
 }
 
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.tiff', '.ico'])
+
+function isImageFile(file: File): boolean {
+  if (file.type.startsWith('image/')) return true
+  const ext = file.name.toLowerCase().match(/\.[^.]+$/)?.[0]
+  return ext ? IMAGE_EXTS.has(ext) : false
+}
+
 function shortenPath(path: string): string {
   const home = path.replace(/^\/Users\/[^/]+/, '~')
   const parts = home.split('/')
@@ -43,6 +51,7 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
   const bodyElRef = useRef<HTMLDivElement | null>(null)
   const resizingRef = useRef(false)
   const [isResizing, setIsResizing] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
   const isFocused = focusedId === sessionId
   const statusInfo = useTerminalStatus(sessionId)
   const status = statusInfo?.status ?? 'running'
@@ -71,6 +80,40 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
     if (!targetPath) return
     await window.ide.open(targetPath)
   }, [statusInfo, cwd])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.dataTransfer.types.includes('Files')) {
+      e.dataTransfer.dropEffect = 'copy'
+      setIsDragOver(true)
+    }
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setIsDragOver(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragOver(false)
+
+    const files = Array.from(e.dataTransfer.files).filter(isImageFile)
+    if (files.length === 0) return
+
+    const paths = files
+      .map((f) => window.fileUtils.getPathForFile(f))
+      .filter((p) => p.length > 0)
+
+    if (paths.length === 0) return
+
+    const quoted = paths.map((p) => (p.includes(' ') ? `'${p}'` : p))
+    window.terminal.write(sessionId, quoted.join(' '))
+  }, [sessionId])
 
   const onResizeStart = useCallback(() => {
     resizingRef.current = true
@@ -239,11 +282,24 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
         ref={bodyRef}
         className="terminal-tile-body titlebar-no-drag"
         style={{ position: 'relative' }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
         {/* Live xterm instance — GPU-composited via WebGL, no snapshot needed.
             will-change:transform + contain on .react-flow__node ensures the compositor
             handles pan transforms without re-rasterizing the WebGL canvas. */}
         <div ref={containerRef} className="h-full w-full" style={{ pointerEvents: isFocused ? 'auto' : 'none' }} />
+
+        {/* Drop overlay */}
+        {isDragOver && (
+          <div className="absolute inset-0 z-40 flex flex-col items-center justify-center rounded-b-lg bg-zinc-900/90 border-2 border-dashed border-blue-500/60 pointer-events-none">
+            <svg className="w-8 h-8 text-blue-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+            </svg>
+            <span className="text-xs text-blue-300 font-medium">Drop image to paste path</span>
+          </div>
+        )}
       </div>
 
       <Handle type="target" position={Position.Left} className="!bg-zinc-600" />
