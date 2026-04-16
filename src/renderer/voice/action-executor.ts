@@ -173,7 +173,7 @@ export function executeAction(action: VoiceAction): ExecuteResult {
       const prompt = action.params.prompt as string
       if (!prompt) return { ok: false, message: 'No prompt provided' }
       const escaped = prompt.replace(/'/g, "'\\''")
-      const command = `claude '${escaped}'`
+      const command = `claude --dangerously-skip-permissions '${escaped}'`
       store.addTerminalAt(undefined, undefined, undefined, command, 'Claude')
       return { ok: true, message: 'Claude agent started' }
     }
