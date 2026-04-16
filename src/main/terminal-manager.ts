@@ -360,12 +360,23 @@ export class TerminalManager extends EventEmitter {
     notifyOnWarning?: boolean
     notifyOnExpiry?: boolean
   }): void {
+    const autoKeepAliveChanged =
+      typeof s.autoKeepAlive === 'boolean' && s.autoKeepAlive !== this.autoKeepAliveEnabled
+
     if (typeof s.ttlSeconds === 'number') this.cacheTtlSeconds = s.ttlSeconds
     if (typeof s.warningThresholdSeconds === 'number') this.cacheWarningThresholdSeconds = s.warningThresholdSeconds
     if (typeof s.autoKeepAlive === 'boolean') this.autoKeepAliveEnabled = s.autoKeepAlive
     if (typeof s.keepAliveMessage === 'string') this.keepAliveMessage = s.keepAliveMessage
     if (typeof s.notifyOnWarning === 'boolean') this.notifyOnWarning = s.notifyOnWarning
     if (typeof s.notifyOnExpiry === 'boolean') this.notifyOnExpiry = s.notifyOnExpiry
+
+    // When auto-keep-alive is flipped, apply to in-flight countdowns so the
+    // user doesn't have to send a new message for the setting to take effect.
+    if (autoKeepAliveChanged) {
+      for (const session of this.sessions.values()) {
+        this.scheduleKeepAlive(session)
+      }
+    }
   }
 
   /**
@@ -414,17 +425,31 @@ export class TerminalManager extends EventEmitter {
       }, ttlMs + 50)
     }
 
-    // Schedule auto keep-alive (fires ~5s before expiry)
-    if (this.autoKeepAliveEnabled) {
-      const keepAliveDelay = ttlMs - 5_000
-      if (keepAliveDelay > 0) {
-        session.keepAliveTimer = setTimeout(() => {
-          const s = this.sessions.get(id)
-          if (!s || s.cacheState !== 'countdown') return
-          this.keepAlive(id)
-        }, keepAliveDelay)
-      }
+    // Schedule auto keep-alive. We fire 15s before expiry so there's
+    // enough time for the keep-alive message to reach Claude, the API
+    // call to happen, and the cache to refresh — before the old TTL lapses.
+    this.scheduleKeepAlive(session)
+  }
+
+  private scheduleKeepAlive(session: TerminalSession): void {
+    if (session.keepAliveTimer) {
+      clearTimeout(session.keepAliveTimer)
+      session.keepAliveTimer = null
     }
+    if (!this.autoKeepAliveEnabled) return
+    if (session.cacheState !== 'countdown' || !session.cacheExpiresAt) return
+
+    const LEAD_MS = 15_000
+    const fireAt = session.cacheExpiresAt - LEAD_MS
+    const delay = fireAt - Date.now()
+    if (delay <= 0) return
+
+    const id = session.id
+    session.keepAliveTimer = setTimeout(() => {
+      const s = this.sessions.get(id)
+      if (!s || s.cacheState !== 'countdown') return
+      this.keepAlive(id)
+    }, delay)
   }
 
   /** Clear timers (warning, expiry, keep-alive) without touching state fields. */
@@ -482,14 +507,16 @@ export class TerminalManager extends EventEmitter {
   /**
    * Write the configured keep-alive message to the PTY. Triggers Claude to make
    * an API call, which refreshes the prompt cache.
+   *
+   * Uses `\r` (what xterm sends for Enter) as the submit signal because Claude
+   * Code treats `\n` as a newline-within-input, not a message submission.
    */
   keepAlive(id: string): boolean {
     const session = this.sessions.get(id)
     if (!session || !session.isClaudeSession) return false
-    // This is a programmatic message submission — refresh the countdown
-    // immediately for instant visual feedback.
+    // Refresh the displayed countdown immediately for instant feedback.
     this.refreshCacheCountdown(id)
-    session.process.write(this.keepAliveMessage + '\n')
+    session.process.write(this.keepAliveMessage + '\r')
     return true
   }
 
