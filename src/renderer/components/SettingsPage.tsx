@@ -353,21 +353,25 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
           </svg>
         </a>
       </div>
+      <p className="mb-3 text-[11px] leading-relaxed text-zinc-400">
+        Claude Code writes every API response to a session JSONL log under{' '}
+        <code className="rounded bg-zinc-800/80 px-1 py-px font-mono text-[10px] text-zinc-300">
+          ~/.claude/projects/
+        </code>
+        . AgentCanvas tails these logs live and inspects each turn&apos;s{' '}
+        <code className="rounded bg-zinc-800/80 px-1 py-px font-mono text-[10px] text-zinc-300">
+          cache_creation
+        </code>{' '}
+        usage — if Anthropic wrote to the 1-hour ephemeral bucket, the timer counts down
+        from 1h; otherwise 5m. Before the first turn is logged we optimistically assume
+        5m and upgrade the moment a real value is observed, so the countdown always
+        matches what Anthropic actually served.
+      </p>
       <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
         <SettingRow label="Show Cache Timer" description="Display prompt cache countdown on Claude Code terminal tiles">
           <Toggle
             value={pc.showTimer}
             onChange={(v) => update({ promptCache: { ...pc, showTimer: v } })}
-          />
-        </SettingRow>
-        <SettingRow label="Assumed Cache TTL" description="Claude Code picks 5m or 1h per query using client-side heuristics (subagent, telemetry, query type). Choose the duration this timer should count down from.">
-          <SelectInput
-            value={String(pc.ttlSeconds)}
-            onChange={(v) => update({ promptCache: { ...pc, ttlSeconds: Number(v) } })}
-            options={[
-              { value: '300', label: '5 minutes (default ephemeral)' },
-              { value: '3600', label: '1 hour (extended)' }
-            ]}
           />
         </SettingRow>
         <SettingRow label="Warning Threshold (sec)" description="Seconds before expiry to trigger warning toast + urgency ranking">
@@ -381,7 +385,7 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
         </SettingRow>
         <SettingRow
           label="Detect Real TTL from Logs"
-          description="Tail Claude Code's session JSONL files to learn whether each API call used a 5-minute or 1-hour cache. Overrides the Assumed Cache TTL above with the real value once observed."
+          description="Tail Claude Code's session JSONL files to learn whether each API call used a 5-minute or 1-hour cache. Disable to fall back to the 5-minute default without reading logs."
         >
           <Toggle
             value={pc.detectTtlFromLogs}
