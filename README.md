@@ -325,13 +325,29 @@ Plus custom environment variables configured in Settings > Terminal.
 
 ### 2026-04-15
 
+- **feat:** Claude Code prompt cache TTL timer on terminal tiles — counts down to cache expiry with warning + expiry notifications and an optional auto keep-alive with a per-session cap; links to Anthropic's prompt caching docs
+- **feat:** Real prompt-cache TTL detection from Claude Code JSONL logs — tails `~/.claude/projects/<encoded-cwd>/<uuid>.jsonl` and reads `cache_creation.ephemeral_{5m,1h}_input_tokens` to distinguish 5-minute vs 1-hour cache served by Anthropic
+- **feat:** Pin the log watcher to a specific Claude session via PID registry — resolves the session UUID through `~/.claude/sessions/<pid>.json` so two terminals running Claude in the same cwd no longer cross-wire
+- **feat:** Claude Code usage widget in the titlebar — live subscription-usage readout
 - **feat:** Dictation stream mode — say "start dictation" to open a floating composer panel that streams transcribed words in real-time as you speak, with VAD-aware chunking (7s max), 2s overlap, and LCS deduplication at chunk boundaries
 - **feat:** Edit-before-send workflow — after dictation completes (3s silence or manual stop), transcript becomes an editable textarea for correcting misrecognized words before routing to the LLM
 - **feat:** Inline confirmation panel — after sending, the panel shows what the AI heard alongside the planned actions with Y/N keyboard shortcuts, replacing the small top-center pill for dictation flows
 - **feat:** Whisper model selection via IPC — transcribe calls now forward an optional model parameter, dictation stream uses the `base` model (~23% lower WER than tiny)
 - **feat:** Tier 3 LLM voice routing via local Qwen + coding vocabulary corrections (multi-word: "a p i" → "api", "cube control" → "kubectl"; single-word: "off" → "auth", "jason" → "json")
+- **feat:** Recommended LLM models list in voice settings to steer users toward known-good local models
+- **feat:** Agent selection wizard for terminal spawning — pick a predefined agent role from a wizard when creating a new terminal tile
+- **feat:** Project-specific templates with command execution and interactive layout editor
+- **feat:** Image drag-and-drop into terminal tiles and a new ImageTile canvas tile
+- **feat:** Note tile CRUD API — `POST /api/note/{open,read,update,close,delete}` so coding agents can create and edit canvas notes programmatically
+- **feat:** Persist and restore the last running process across terminal restarts
+- **fix:** Split programmatic PTY writes so keep-alive and voice-submitted messages actually submit — Claude Code's TUI treats multi-byte PTY reads as bracketed paste, which turns `\r` into a literal newline; writing the text, waiting 30ms, then writing `\r` alone makes it register as a real Enter keystroke
 - **fix:** Voice activation only triggers on wake word or push-to-talk (prevents ambient noise from triggering commands)
 - **fix:** Wake word detection tuning — sliding window 3/5 hits, 3s debounce, VAD timing improvements, and listening countdown timer
+- **fix:** Avoid an unnecessary `getUserMedia` call when opening voice settings
+- **fix:** Auto-mark notifications read when a terminal tile gains focus
+- **fix:** Clear the image-drop preview when dragging over tile nodes
+- **fix:** Don't claim Cache TTL is tied to plan tier — the TTL is chosen per-request by Claude Code, not by the account tier
+- **refactor:** Drop the "Assumed Cache TTL" setting in favour of log-based detection; settings UI now explains where the detected TTL comes from
 
 ### 2026-04-14
 
