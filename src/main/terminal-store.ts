@@ -13,6 +13,7 @@ export interface PersistedTerminal {
   metadata: Record<string, unknown>
   createdAt: number
   scrollback?: string
+  command?: string
 }
 
 interface TerminalStoreData {

@@ -21,6 +21,7 @@ export interface TerminalSessionInfo {
   cwd: string
   status: TerminalStatus
   foregroundProcess: string
+  foregroundCommandLine: string
   label: string
   createdAt: number
   cdpPort: number
@@ -36,6 +37,7 @@ export interface TerminalSession {
   cwd: string
   status: TerminalStatus
   foregroundProcess: string
+  foregroundCommandLine: string
   createdAt: number
   lastDataAt: number
   idleTimer: ReturnType<typeof setTimeout> | null
@@ -133,6 +135,7 @@ export class TerminalManager extends EventEmitter {
       cwd: workingDir,
       status: 'running',
       foregroundProcess: shell.split('/').pop() || 'shell',
+      foregroundCommandLine: '',
       createdAt: Date.now(),
       lastDataAt: Date.now(),
       idleTimer: null,
@@ -251,6 +254,23 @@ export class TerminalManager extends EventEmitter {
             changed = true
           }
 
+          // Get full command line for persistence across restarts
+          try {
+            const { stdout: argsResult } = await execFileAsync('/bin/sh', [
+              '-c',
+              `ps -o args= -t $(ps -o tty= -p ${pid} 2>/dev/null) 2>/dev/null | tail -1`
+            ], { timeout: 2000 })
+
+            if (this.sessions.has(id)) {
+              const cmdLine = argsResult.trim()
+              if (cmdLine && cmdLine !== session.foregroundCommandLine) {
+                session.foregroundCommandLine = cmdLine
+              }
+            }
+          } catch {
+            // ps may fail
+          }
+
           // Fallback CWD: read from lsof if OSC 7 hasn't fired
           try {
             const { stdout: cwdResult } = await execFileAsync('lsof', [
@@ -320,6 +340,7 @@ export class TerminalManager extends EventEmitter {
       cwd: s.cwd,
       status: s.status,
       foregroundProcess: s.foregroundProcess,
+      foregroundCommandLine: s.foregroundCommandLine,
       label: s.label,
       createdAt: s.createdAt,
       cdpPort: s.cdpPort,
@@ -333,6 +354,7 @@ export class TerminalManager extends EventEmitter {
       cwd: s.cwd,
       status: s.status,
       foregroundProcess: s.foregroundProcess,
+      foregroundCommandLine: s.foregroundCommandLine,
       label: s.label,
       createdAt: s.createdAt,
       cdpPort: s.cdpPort,

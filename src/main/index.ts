@@ -344,12 +344,15 @@ ipcMain.handle('workspace:pickDirectory', async () => {
 // ── Terminal Tiles Persistence ───────────────────────────
 import { existsSync, writeFileSync } from 'fs'
 
+const SHELL_NAMES = new Set(['zsh', 'bash', 'fish', 'sh', 'csh', 'tcsh', 'dash', 'ksh', 'login', '-zsh', '-bash', '-fish', '-sh'])
+
 ipcMain.on('terminal-tiles:save-layout', (event, layout: Array<{
   sessionId: string
   position: { x: number; y: number }
   width: number
   height: number
   workspaceId: string
+  command?: string
 }>) => {
   const sessions = terminalManager.listSessions()
   const sessionMap = new Map(sessions.map(s => [s.id, s]))
@@ -361,6 +364,14 @@ ipcMain.on('terminal-tiles:save-layout', (event, layout: Array<{
       // Merge any pending data into the scrollback for this session
       const pending = dataBuffers.get(tile.sessionId) || ''
       const scrollback = (scrollbackBuffers.get(tile.sessionId) || '') + pending
+
+      // Persist command: prefer explicit command from node data, fall back to
+      // detected foreground command line (skip if it's just the shell)
+      const isShell = SHELL_NAMES.has(session.foregroundProcess) ||
+        SHELL_NAMES.has(session.foregroundProcess.replace(/^-/, ''))
+      const detectedCmd = (!isShell && session.foregroundCommandLine) || undefined
+      const command = tile.command || detectedCmd
+
       return {
         sessionId: tile.sessionId,
         label: session.label,
@@ -371,7 +382,8 @@ ipcMain.on('terminal-tiles:save-layout', (event, layout: Array<{
         workspaceId: tile.workspaceId,
         metadata: session.metadata,
         createdAt: session.createdAt,
-        scrollback: scrollback || undefined
+        scrollback: scrollback || undefined,
+        command
       }
     })
     .filter((t): t is PersistedTerminal => t !== null)

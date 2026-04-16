@@ -398,6 +398,7 @@ export interface TerminalTileLayout {
   width: number
   height: number
   workspaceId: string
+  command?: string
 }
 
 export interface PersistedTerminalInfo {
@@ -410,6 +411,7 @@ export interface PersistedTerminalInfo {
   workspaceId: string
   metadata: Record<string, unknown>
   createdAt: number
+  command?: string
 }
 
 export interface TerminalTilesAPI {

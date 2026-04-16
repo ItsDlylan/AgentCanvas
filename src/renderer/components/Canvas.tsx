@@ -568,7 +568,8 @@ export default function Canvas() {
               sessionId: pt.sessionId,
               label: pt.label,
               cwd: pt.cwd,
-              metadata: pt.metadata
+              metadata: pt.metadata,
+              command: pt.command
             },
             dragHandle: '.terminal-tile-header'
           })
@@ -812,7 +813,8 @@ export default function Canvas() {
         position: n.position,
         width: (n.style?.width as number) ?? 640,
         height: (n.style?.height as number) ?? 400,
-        workspaceId: currentTileWorkspaceMap.get((n.data as { sessionId: string }).sessionId) ?? 'default'
+        workspaceId: currentTileWorkspaceMap.get((n.data as { sessionId: string }).sessionId) ?? 'default',
+        command: (n.data as { command?: string }).command
       }))
       window.terminalTiles.saveLayout(layout)
 
