@@ -20,6 +20,17 @@ const LEVEL_COLORS: Record<string, string> = {
   error: '#ef4444'
 }
 
+const PRIORITY_RANK: Record<string, number> = {
+  critical: 3,
+  high: 2,
+  normal: 1,
+  low: 0
+}
+
+function priorityOf(toast: ToastItem): number {
+  return PRIORITY_RANK[toast.priority || 'normal'] ?? 1
+}
+
 function playNotificationSound(level: string): void {
   try {
     const ctx = new AudioContext()
@@ -98,11 +109,26 @@ export function NotificationToast({ onFocusTerminal }: NotificationToastProps) {
 
       setToasts(prev => {
         const next = [...prev, notification]
-        // If over max, dismiss the oldest
+        // If over max, dismiss the lowest-priority non-exiting toast
+        // (ties broken by oldest-first via timestamp)
         if (next.length > MAX_VISIBLE) {
-          const oldest = next[0]
-          // Schedule dismiss of oldest (async to avoid state update during render)
-          setTimeout(() => dismiss(oldest.id), 0)
+          const candidates = next.filter(t => !t.exiting)
+          if (candidates.length > 0) {
+            const victim = candidates.reduce((lowest, t) => {
+              const lp = priorityOf(lowest)
+              const tp = priorityOf(t)
+              if (tp < lp) return t
+              if (tp === lp && t.timestamp < lowest.timestamp) return t
+              return lowest
+            })
+            // Only dismiss if the incoming toast outranks the victim, otherwise
+            // drop the incoming one instead (prevents critical from being evicted)
+            if (priorityOf(victim) <= priorityOf(notification)) {
+              setTimeout(() => dismiss(victim.id), 0)
+            } else {
+              setTimeout(() => dismiss(notification.id), 0)
+            }
+          }
         }
         return next
       })
@@ -132,6 +158,14 @@ export function NotificationToast({ onFocusTerminal }: NotificationToastProps) {
 
   if (toasts.length === 0) return null
 
+  // Sort by priority (low first; column-reverse puts highest visually on top)
+  // Ties broken by arrival order (older first in array → older visually lower).
+  const sortedToasts = [...toasts].sort((a, b) => {
+    const diff = priorityOf(a) - priorityOf(b)
+    if (diff !== 0) return diff
+    return a.timestamp - b.timestamp
+  })
+
   return (
     <div
       role="status"
@@ -148,7 +182,7 @@ export function NotificationToast({ onFocusTerminal }: NotificationToastProps) {
         maxWidth: 360
       }}
     >
-      {toasts.map(toast => (
+      {sortedToasts.map(toast => (
         <div
           key={toast.id}
           role="alert"

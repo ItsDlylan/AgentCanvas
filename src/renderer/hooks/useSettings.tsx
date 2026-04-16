@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import type { Settings } from '@/types/settings'
 
 // Re-export for convenience
-export type { Settings, AppearanceSettings, TerminalSettings, BrowserSettings, CanvasSettings, HotkeyAction, HotkeySettings, WorkspaceTemplate, TemplateTile } from '@/types/settings'
+export type { Settings, AppearanceSettings, TerminalSettings, BrowserSettings, CanvasSettings, HotkeyAction, HotkeySettings, WorkspaceTemplate, TemplateTile, PromptCacheSettings } from '@/types/settings'
 
 // ── Fallback defaults (used before async load completes) ─
 
@@ -47,6 +47,16 @@ const FALLBACK: Settings = {
     llmEndpoint: null,
     llmModel: null,
     ambientMonitoring: { onWaiting: true, onError: true, onExit: false, onNotification: false }
+  },
+  promptCache: {
+    showTimer: true,
+    ttlSeconds: 300,
+    warningThresholdSeconds: 60,
+    autoKeepAlive: false,
+    keepAliveMessage: '.',
+    notifyOnWarning: true,
+    notifyOnExpiry: true,
+    rankByUrgency: true
   }
 }
 

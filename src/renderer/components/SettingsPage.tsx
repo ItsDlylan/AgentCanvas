@@ -319,6 +319,8 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
     [settings.terminal, update]
   )
 
+  const pc = settings.promptCache
+
   return (
     <div>
       <h2 className="mb-4 text-sm font-semibold text-zinc-200">Terminal</h2>
@@ -330,6 +332,68 @@ function TerminalSection({ settings, update }: { settings: Settings; update: (pa
             min={500}
             max={100000}
             step={500}
+          />
+        </SettingRow>
+      </div>
+
+      <h3 className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+        Claude Code Prompt Cache
+      </h3>
+      <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
+        <SettingRow label="Show Cache Timer" description="Display prompt cache countdown on Claude Code terminal tiles">
+          <Toggle
+            value={pc.showTimer}
+            onChange={(v) => update({ promptCache: { ...pc, showTimer: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Cache TTL" description="Prompt cache lifetime — depends on your Claude plan">
+          <SelectInput
+            value={String(pc.ttlSeconds)}
+            onChange={(v) => update({ promptCache: { ...pc, ttlSeconds: Number(v) } })}
+            options={[
+              { value: '300', label: '5 minutes (Pro)' },
+              { value: '3600', label: '1 hour (Max)' }
+            ]}
+          />
+        </SettingRow>
+        <SettingRow label="Warning Threshold (sec)" description="Seconds before expiry to trigger warning toast + urgency ranking">
+          <NumberInput
+            value={pc.warningThresholdSeconds}
+            onChange={(v) => update({ promptCache: { ...pc, warningThresholdSeconds: v } })}
+            min={10}
+            max={1800}
+            step={10}
+          />
+        </SettingRow>
+        <SettingRow label="Auto Keep-Alive" description="Automatically send a message to refresh the cache ~5s before it expires">
+          <Toggle
+            value={pc.autoKeepAlive}
+            onChange={(v) => update({ promptCache: { ...pc, autoKeepAlive: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Keep-Alive Message" description="Text sent to Claude (via PTY) to trigger a cache-refreshing API call">
+          <TextInput
+            value={pc.keepAliveMessage}
+            onChange={(v) => update({ promptCache: { ...pc, keepAliveMessage: v } })}
+            placeholder="."
+          />
+        </SettingRow>
+        <SettingRow label="Warning Notification" description="Emit a sticky toast when the cache enters warning threshold">
+          <Toggle
+            value={pc.notifyOnWarning}
+            onChange={(v) => update({ promptCache: { ...pc, notifyOnWarning: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Expiry Notification" description="Emit a sticky toast when the cache expires">
+          <Toggle
+            value={pc.notifyOnExpiry}
+            onChange={(v) => update({ promptCache: { ...pc, notifyOnExpiry: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Rank by Urgency" description="Float Claude terminals close to expiry to the top of the Process Panel">
+          <Toggle
+            value={pc.rankByUrgency}
+            onChange={(v) => update({ promptCache: { ...pc, rankByUrgency: v } })}
           />
         </SettingRow>
       </div>

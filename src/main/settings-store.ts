@@ -116,6 +116,17 @@ export interface NotificationSettings {
   nativeWhenUnfocused: boolean
 }
 
+export interface PromptCacheSettings {
+  showTimer: boolean
+  ttlSeconds: number              // 300 (5min) or 3600 (1hr)
+  warningThresholdSeconds: number
+  autoKeepAlive: boolean
+  keepAliveMessage: string
+  notifyOnWarning: boolean
+  notifyOnExpiry: boolean
+  rankByUrgency: boolean
+}
+
 export interface Settings {
   general: GeneralSettings
   appearance: AppearanceSettings
@@ -126,6 +137,7 @@ export interface Settings {
   templates: WorkspaceTemplate[]
   notifications: NotificationSettings
   voice: VoiceSettings
+  promptCache: PromptCacheSettings
 }
 
 // ── Defaults ─────────────────────────────────────────────
@@ -232,6 +244,16 @@ export const DEFAULT_SETTINGS: Settings = {
       onExit: false,
       onNotification: false
     }
+  },
+  promptCache: {
+    showTimer: true,
+    ttlSeconds: 300,
+    warningThresholdSeconds: 60,
+    autoKeepAlive: false,
+    keepAliveMessage: '.',
+    notifyOnWarning: true,
+    notifyOnExpiry: true,
+    rankByUrgency: true
   }
 }
 

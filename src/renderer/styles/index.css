@@ -769,3 +769,13 @@
   from { transform: translateX(0);    opacity: 1; }
   to   { transform: translateX(100%); opacity: 0; }
 }
+
+/* Pulse used for cache TTL warning/expired states */
+@keyframes cache-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+
+.cache-warning-pulse {
+  animation: cache-pulse 2s ease-in-out infinite;
+}

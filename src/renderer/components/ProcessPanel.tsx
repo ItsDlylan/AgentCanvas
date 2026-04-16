@@ -327,6 +327,59 @@ function UnreadBadge({ sessionId }: { sessionId: string }) {
   )
 }
 
+function CachePill({ info }: {
+  info: TerminalStatusInfo | undefined
+}) {
+  const { settings } = useSettings()
+  if (settings.promptCache?.showTimer === false) return null
+  const warningThresholdMs = (settings.promptCache?.warningThresholdSeconds ?? 60) * 1000
+  const [, setTick] = useState(0)
+  const state = info?.metadata?.cacheState as string | undefined
+  const expiresAt = info?.metadata?.cacheExpiresAt as number | undefined
+  const active = state === 'countdown' || state === 'expired'
+
+  useEffect(() => {
+    if (!active) return
+    const int = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(int)
+  }, [active])
+
+  if (!active) return null
+
+  const now = Date.now()
+  const isExpired = state === 'expired' || (expiresAt !== undefined && expiresAt - now <= 0)
+  const remaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : 0
+  const isWarning = !isExpired && expiresAt !== undefined && (expiresAt - now) <= warningThresholdMs
+
+  const minutes = Math.floor(remaining / 60)
+  const seconds = remaining % 60
+  const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
+
+  const colorClasses = isExpired
+    ? 'bg-red-500/20 text-red-300 cache-warning-pulse'
+    : isWarning
+      ? 'bg-amber-500/20 text-amber-300 cache-warning-pulse'
+      : 'bg-cyan-500/10 text-cyan-300/80'
+
+  const dotClass = isExpired ? 'bg-red-400' : isWarning ? 'bg-amber-400' : 'bg-cyan-400/70'
+
+  return (
+    <span
+      className={`shrink-0 flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-mono leading-none ${colorClasses}`}
+      title={
+        isExpired
+          ? 'Prompt cache expired — next message pays full cost'
+          : isWarning
+            ? 'Prompt cache expiring soon'
+            : 'Time until prompt cache expires'
+      }
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+      {isExpired ? 'Expired' : timeStr}
+    </span>
+  )
+}
+
 function CloseButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
   return (
     <button
@@ -399,6 +452,7 @@ function TerminalEntry({ node, focusedId, statuses, jumpHints, onFocus, onKill, 
           </span>
         )}
       </div>
+      <CachePill info={info} />
       <UnreadBadge sessionId={sessionId} />
       <JumpBadge hint={jumpHints.get(sessionId)} />
       <CloseButton onClick={(e) => { e.stopPropagation(); onKill(sessionId) }} />
@@ -912,10 +966,76 @@ function ProcessPanelComponent({
   }, [])
 
   // Compute tile groups
-  const grouping = useMemo(
+  const groupingRaw = useMemo(
     () => computeGroups(terminals, browsers, notes, diffViewers, draws, statuses, edges),
     [terminals, browsers, notes, diffViewers, draws, statuses, edges]
   )
+
+  // Tick once per second while any terminal has a cache countdown, so that
+  // urgency-based sorting stays fresh as timers elapse.
+  const rankByUrgency = settings.promptCache?.rankByUrgency !== false
+  const warningThresholdMs = (settings.promptCache?.warningThresholdSeconds ?? 60) * 1000
+  const hasActiveCountdown = useMemo(() => {
+    if (!rankByUrgency) return false
+    for (const [, info] of statuses) {
+      const state = info.metadata?.cacheState
+      if (state === 'countdown' || state === 'expired') return true
+    }
+    return false
+  }, [statuses, rankByUrgency])
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    if (!hasActiveCountdown) return
+    const int = setInterval(() => setTick((t) => t + 1), 1000)
+    return () => clearInterval(int)
+  }, [hasActiveCountdown])
+
+  const grouping = useMemo(() => {
+    if (!rankByUrgency) return groupingRaw
+
+    const now = Date.now()
+    const urgencyFor = (sessionId: string): number => {
+      const info = statuses.get(sessionId)
+      const meta = info?.metadata
+      if (!meta) return 0
+      const state = meta.cacheState as string | undefined
+      if (state === 'expired') return 1000
+      if (state !== 'countdown') return 0
+      const expiresAt = meta.cacheExpiresAt as number | undefined
+      if (!expiresAt) return 0
+      const remainingMs = expiresAt - now
+      if (remainingMs > warningThresholdMs) return 0
+      // More urgent (less remaining) → higher score, within [500, 999]
+      return 500 + Math.max(0, (warningThresholdMs - Math.max(0, remainingMs)) / 1000)
+    }
+
+    const sortNodes = (nodes: Node[]): Node[] => {
+      const decorated = nodes.map((n, i) => {
+        const sid = (n.data as Record<string, unknown>).sessionId as string
+        return { node: n, score: urgencyFor(sid), idx: i }
+      })
+      decorated.sort((a, b) => (b.score - a.score) || (a.idx - b.idx))
+      return decorated.map((d) => d.node)
+    }
+
+    const sortedUngrouped = sortNodes(groupingRaw.ungroupedTerminals)
+    const sortedGroups = [...groupingRaw.groups]
+      .map((g, idx) => ({
+        g,
+        idx,
+        score: g.parentType === 'terminal' ? urgencyFor(g.parentSessionId) : 0
+      }))
+      .sort((a, b) => (b.score - a.score) || (a.idx - b.idx))
+      .map((x) => x.g)
+
+    return {
+      ...groupingRaw,
+      groups: sortedGroups,
+      ungroupedTerminals: sortedUngrouped
+    }
+    // tick is intentionally included so sort refreshes each second during countdowns
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupingRaw, statuses, rankByUrgency, warningThresholdMs, tick])
 
   useEffect(() => {
     if (!wizardOpen && !browserPresetsOpen && !templateMenuOpen) return

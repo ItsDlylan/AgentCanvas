@@ -25,6 +25,7 @@ export interface TerminalAPI {
   getStatus: (id: string) => Promise<TerminalStatusInfo | undefined>
   list: () => Promise<Array<{ id: string; cwd: string; status: TerminalStatus; foregroundProcess: string; label: string; createdAt: number; cdpPort: number; metadata: Record<string, unknown> }>>
   setMetadata: (id: string, key: string, value: unknown) => Promise<{ ok: boolean }>
+  keepAlive: (id: string) => Promise<{ ok: boolean }>
   listWorktrees: (cwd: string) => Promise<WorktreeInfo[]>
   onData: (callback: (id: string, data: string) => void) => () => void
   onExit: (callback: (id: string, exitCode: number) => void) => () => void
@@ -53,6 +54,7 @@ const terminalAPI: TerminalAPI = {
   getStatus: (id) => ipcRenderer.invoke('terminal:status', { id }),
   list: () => ipcRenderer.invoke('terminal:list'),
   setMetadata: (id, key, value) => ipcRenderer.invoke('terminal:set-metadata', { id, key, value }),
+  keepAlive: (id) => ipcRenderer.invoke('terminal:keep-alive', { id }),
   listWorktrees: (cwd) => ipcRenderer.invoke('terminal:list-worktrees', { cwd }),
 
   onData: (callback) => {
@@ -585,11 +587,14 @@ contextBridge.exposeInMainWorld('image', imageAPI)
 
 // ── Notify API ──────────────────────────────────────────
 
+export type NotificationPriority = 'low' | 'normal' | 'high' | 'critical'
+
 export interface CanvasNotification {
   id: string
   title?: string
   body: string
   level: 'info' | 'success' | 'warning' | 'error'
+  priority?: NotificationPriority
   terminalId?: string
   duration: number
   sound: boolean

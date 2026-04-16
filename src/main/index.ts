@@ -172,6 +172,10 @@ ipcMain.handle('terminal:set-metadata', (_event, { id, key, value }: { id: strin
   return { ok: true }
 })
 
+ipcMain.handle('terminal:keep-alive', (_event, { id }: { id: string }) => {
+  return { ok: terminalManager.keepAlive(id) }
+})
+
 ipcMain.handle('terminal:rename', (_event, { id, label }: { id: string; label: string }) => {
   return terminalManager.rename(id, label)
 })
@@ -262,9 +266,26 @@ ipcMain.handle('browser:openExtensionsDir', () => {
 // ── Workspace IPC Handlers ───────────────────────────────
 
 // ── Settings IPC ──
+function applyPromptCacheSettings(settings: Settings): void {
+  const pc = settings.promptCache
+  if (!pc) return
+  terminalManager.setCacheSettings({
+    ttlSeconds: pc.ttlSeconds,
+    warningThresholdSeconds: pc.warningThresholdSeconds,
+    autoKeepAlive: pc.autoKeepAlive,
+    keepAliveMessage: pc.keepAliveMessage,
+    notifyOnWarning: pc.notifyOnWarning,
+    notifyOnExpiry: pc.notifyOnExpiry
+  })
+}
+
+// Apply initial prompt cache settings on startup
+applyPromptCacheSettings(loadSettings())
+
 ipcMain.handle('settings:load', () => loadSettings())
 ipcMain.handle('settings:save', (_event, { settings }: { settings: Settings }) => {
   saveSettings(settings)
+  applyPromptCacheSettings(settings)
   mainWindow?.webContents.send('settings:changed', settings)
 })
 ipcMain.handle('settings:defaults', () => DEFAULT_SETTINGS)
@@ -865,6 +886,37 @@ terminalManager.on('status', (id: string, info: { status: string; cwd: string; f
   recordIpc('terminal:status')
 })
 
+terminalManager.on('cache-notify', (info: {
+  terminalId: string; title: string; body: string; level: string; priority: string; duration: number
+}) => {
+  const notifySettings = loadSettings().notifications
+  if (notifySettings && !notifySettings.enabled) return
+  const id = `cache-${info.terminalId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const payload = {
+    id,
+    title: info.title,
+    body: info.body,
+    level: info.level,
+    priority: info.priority,
+    terminalId: info.terminalId,
+    duration: info.duration,
+    sound: info.level === 'error',
+    timestamp: Date.now()
+  }
+  mainWindow?.webContents.send('canvas:notify', payload)
+
+  if (mainWindow && !mainWindow.isFocused() && (!notifySettings || notifySettings.nativeWhenUnfocused)) {
+    const { Notification: ElectronNotification } = require('electron')
+    if (ElectronNotification.isSupported()) {
+      new ElectronNotification({
+        title: payload.title,
+        body: payload.body,
+        silent: true
+      }).show()
+    }
+  }
+})
+
 browserManager.on('status', (id: string, info: Record<string, unknown>) => {
   mainWindow?.webContents.send('browser:status', { id, ...info })
 })
@@ -985,13 +1037,18 @@ canvasApi.on('terminal-write', (info: { terminalId: string; data: string }, repl
   reply({ ok: true })
 })
 
+canvasApi.on('terminal-keep-alive', (info: { terminalId: string }, reply: (result: unknown) => void) => {
+  const ok = terminalManager.keepAlive(info.terminalId)
+  reply(ok ? { ok: true } : { ok: false, error: 'Terminal not found or not a Claude session' })
+})
+
 canvasApi.on('template-spawn', (info: { templateId?: string; templateName?: string; origin?: { x: number; y: number } }, reply: (result: unknown) => void) => {
   mainWindow?.webContents.send('canvas:template-spawn', info)
   reply({ ok: true })
 })
 
 canvasApi.on('notify', (info: {
-  id: string; title?: string; body: string; level: string;
+  id: string; title?: string; body: string; level: string; priority?: string;
   terminalId?: string; duration: number; sound: boolean; timestamp: number
 }, reply: (result: unknown) => void) => {
   const notifySettings = loadSettings().notifications

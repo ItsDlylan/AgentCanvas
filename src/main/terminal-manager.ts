@@ -15,6 +15,7 @@ try {
 }
 
 export type TerminalStatus = 'idle' | 'running' | 'waiting'
+export type CacheState = 'countdown' | 'expired' | null
 
 export interface TerminalSessionInfo {
   id: string
@@ -43,6 +44,22 @@ export interface TerminalSession {
   idleTimer: ReturnType<typeof setTimeout> | null
   cdpPort: number
   metadata: Record<string, unknown>
+  // Claude Code prompt-cache tracking.
+  // The countdown is triggered *only* by user message submission
+  // (newline written to a Claude session), which is the moment Anthropic
+  // cache TTL is refreshed. Other signals (keystroke echoes, poll
+  // detection, status transitions) deliberately do not touch the timer.
+  isClaudeSession: boolean
+  cacheExpiresAt: number | null
+  cacheState: CacheState
+  keepAliveTimer: ReturnType<typeof setTimeout> | null
+  expiryTimer: ReturnType<typeof setTimeout> | null
+  warningTimer: ReturnType<typeof setTimeout> | null
+}
+
+function isClaudeProcessName(name: string): boolean {
+  const n = name.toLowerCase()
+  return n === 'claude' || n === 'claude-code' || n.startsWith('claude ')
 }
 
 // Patterns that indicate the terminal is waiting for user input
@@ -84,6 +101,14 @@ export class TerminalManager extends EventEmitter {
   private polling = false
   private statusThrottleTimers = new Map<string, ReturnType<typeof setTimeout>>()
   private pendingStatusEmit = new Map<string, boolean>()
+
+  // Prompt cache settings (propagated from renderer settings)
+  private cacheTtlSeconds = 300
+  private cacheWarningThresholdSeconds = 60
+  private autoKeepAliveEnabled = false
+  private keepAliveMessage = '.'
+  private notifyOnWarning = true
+  private notifyOnExpiry = true
 
   async create(id: string, label: string, cwd?: string, cols = 80, rows = 24, extraEnv?: Record<string, string>, customShell?: string): Promise<number> {
     if (this.sessions.has(id)) return this.sessions.get(id)!.cdpPort
@@ -140,7 +165,13 @@ export class TerminalManager extends EventEmitter {
       lastDataAt: Date.now(),
       idleTimer: null,
       cdpPort,
-      metadata: {}
+      metadata: {},
+      isClaudeSession: false,
+      cacheExpiresAt: null,
+      cacheState: null,
+      keepAliveTimer: null,
+      expiryTimer: null,
+      warningTimer: null
     }
 
     this.sessions.set(id, session)
@@ -177,6 +208,7 @@ export class TerminalManager extends EventEmitter {
 
     proc.onExit(({ exitCode }) => {
       if (session.idleTimer) clearTimeout(session.idleTimer)
+      this.clearCacheTimers(session)
       this.sessions.delete(id)
       this.emit('exit', id, exitCode)
     })
@@ -204,6 +236,7 @@ export class TerminalManager extends EventEmitter {
       status: session.status,
       cwd: session.cwd,
       foregroundProcess: session.foregroundProcess,
+      foregroundCommandLine: session.foregroundCommandLine,
       metadata: session.metadata
     })
   }
@@ -251,6 +284,20 @@ export class TerminalManager extends EventEmitter {
 
           if (name && name !== session.foregroundProcess) {
             session.foregroundProcess = name
+            changed = true
+          }
+
+          // Detect Claude Code entering/leaving the terminal.
+          // We only flag the session — the countdown starts when the user
+          // submits their first message (handled in write()), since that's
+          // when the Anthropic prompt cache actually gets populated.
+          const nowClaude = isClaudeProcessName(name)
+          if (nowClaude && !session.isClaudeSession) {
+            session.isClaudeSession = true
+            changed = true
+          } else if (!nowClaude && session.isClaudeSession) {
+            session.isClaudeSession = false
+            this.clearCacheState(session)
             changed = true
           }
 
@@ -302,8 +349,163 @@ export class TerminalManager extends EventEmitter {
     }
   }
 
+  // ── Prompt cache TTL tracking ──────────────────────────
+
+  /** Update cache settings — called from main/index.ts on settings load/save. */
+  setCacheSettings(s: {
+    ttlSeconds?: number
+    warningThresholdSeconds?: number
+    autoKeepAlive?: boolean
+    keepAliveMessage?: string
+    notifyOnWarning?: boolean
+    notifyOnExpiry?: boolean
+  }): void {
+    if (typeof s.ttlSeconds === 'number') this.cacheTtlSeconds = s.ttlSeconds
+    if (typeof s.warningThresholdSeconds === 'number') this.cacheWarningThresholdSeconds = s.warningThresholdSeconds
+    if (typeof s.autoKeepAlive === 'boolean') this.autoKeepAliveEnabled = s.autoKeepAlive
+    if (typeof s.keepAliveMessage === 'string') this.keepAliveMessage = s.keepAliveMessage
+    if (typeof s.notifyOnWarning === 'boolean') this.notifyOnWarning = s.notifyOnWarning
+    if (typeof s.notifyOnExpiry === 'boolean') this.notifyOnExpiry = s.notifyOnExpiry
+  }
+
+  /**
+   * Reset the cache countdown to a fresh TTL. Called when the user submits
+   * a message to a Claude session — that's the moment the Anthropic prompt
+   * cache is refreshed. This is the *only* trigger; status transitions and
+   * arbitrary PTY output deliberately don't restart the timer.
+   */
+  private refreshCacheCountdown(id: string): void {
+    const session = this.sessions.get(id)
+    if (!session || !session.isClaudeSession) return
+
+    this.clearCacheTimers(session)
+
+    const now = Date.now()
+    const ttlMs = this.cacheTtlSeconds * 1000
+    const warnMs = this.cacheWarningThresholdSeconds * 1000
+    session.cacheExpiresAt = now + ttlMs
+    session.cacheState = 'countdown'
+    session.metadata.cacheExpiresAt = session.cacheExpiresAt
+    session.metadata.cacheState = 'countdown'
+    session.metadata.cacheTtlSeconds = this.cacheTtlSeconds
+    session.metadata.cacheWarningThresholdSeconds = this.cacheWarningThresholdSeconds
+
+    this.throttledEmitStatus(id)
+
+    // Schedule warning emission
+    const warnDelay = ttlMs - warnMs
+    if (warnDelay > 0 && this.notifyOnWarning) {
+      session.warningTimer = setTimeout(() => {
+        const s = this.sessions.get(id)
+        if (!s || s.cacheState !== 'countdown') return
+        this.emitCacheNotification(s, 'warning')
+      }, warnDelay)
+    }
+
+    // Schedule expiry
+    if (ttlMs > 0) {
+      session.expiryTimer = setTimeout(() => {
+        const s = this.sessions.get(id)
+        if (!s || s.cacheState !== 'countdown') return
+        s.cacheState = 'expired'
+        s.metadata.cacheState = 'expired'
+        this.throttledEmitStatus(id)
+        if (this.notifyOnExpiry) this.emitCacheNotification(s, 'expired')
+      }, ttlMs + 50)
+    }
+
+    // Schedule auto keep-alive (fires ~5s before expiry)
+    if (this.autoKeepAliveEnabled) {
+      const keepAliveDelay = ttlMs - 5_000
+      if (keepAliveDelay > 0) {
+        session.keepAliveTimer = setTimeout(() => {
+          const s = this.sessions.get(id)
+          if (!s || s.cacheState !== 'countdown') return
+          this.keepAlive(id)
+        }, keepAliveDelay)
+      }
+    }
+  }
+
+  /** Clear timers (warning, expiry, keep-alive) without touching state fields. */
+  private clearCacheTimers(session: TerminalSession): void {
+    if (session.warningTimer) {
+      clearTimeout(session.warningTimer)
+      session.warningTimer = null
+    }
+    if (session.expiryTimer) {
+      clearTimeout(session.expiryTimer)
+      session.expiryTimer = null
+    }
+    if (session.keepAliveTimer) {
+      clearTimeout(session.keepAliveTimer)
+      session.keepAliveTimer = null
+    }
+  }
+
+  /** Fully clear cache state + metadata (called when Claude exits the terminal). */
+  private clearCacheState(session: TerminalSession): void {
+    this.clearCacheTimers(session)
+    session.cacheState = null
+    session.cacheExpiresAt = null
+    delete session.metadata.cacheState
+    delete session.metadata.cacheExpiresAt
+    delete session.metadata.cacheTtlSeconds
+    delete session.metadata.cacheWarningThresholdSeconds
+  }
+
+  private emitCacheNotification(session: TerminalSession, kind: 'warning' | 'expired'): void {
+    const remainingSec = session.cacheExpiresAt
+      ? Math.max(0, Math.ceil((session.cacheExpiresAt - Date.now()) / 1000))
+      : 0
+    const payload = kind === 'warning'
+      ? {
+          title: 'Cache expiring soon',
+          body: `${session.label} — ~${remainingSec}s until prompt cache expires`,
+          level: 'warning',
+          priority: 'high',
+          duration: 0 // sticky
+        }
+      : {
+          title: 'Cache expired',
+          body: `${session.label} — next request will pay full cache cost`,
+          level: 'error',
+          priority: 'critical',
+          duration: 0
+        }
+    this.emit('cache-notify', {
+      terminalId: session.id,
+      ...payload
+    })
+  }
+
+  /**
+   * Write the configured keep-alive message to the PTY. Triggers Claude to make
+   * an API call, which refreshes the prompt cache.
+   */
+  keepAlive(id: string): boolean {
+    const session = this.sessions.get(id)
+    if (!session || !session.isClaudeSession) return false
+    // This is a programmatic message submission — refresh the countdown
+    // immediately for instant visual feedback.
+    this.refreshCacheCountdown(id)
+    session.process.write(this.keepAliveMessage + '\n')
+    return true
+  }
+
+  // ───────────────────────────────────────────────────────
+
   write(id: string, data: string): void {
-    this.sessions.get(id)?.process.write(data)
+    const session = this.sessions.get(id)
+    if (!session) return
+    // Enter in xterm sends "\r"; accept "\n" defensively for paste/hotkey
+    // variants. Every user submission to a Claude session refreshes the cache
+    // countdown to the full TTL immediately — no intermediate "active" state,
+    // no waiting for Claude's response.
+    if (session.isClaudeSession && (data.includes('\r') || data.includes('\n'))) {
+      this.refreshCacheCountdown(id)
+    }
+    session.process.write(data)
   }
 
   resize(id: string, cols: number, rows: number): void {
@@ -318,6 +520,7 @@ export class TerminalManager extends EventEmitter {
     const session = this.sessions.get(id)
     if (!session) return
     if (session.idleTimer) clearTimeout(session.idleTimer)
+    this.clearCacheTimers(session)
     session.process.kill()
     this.sessions.delete(id)
     this.emit('exit', id, 0)

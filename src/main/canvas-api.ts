@@ -13,8 +13,9 @@ import { markdownToTiptap } from './markdown-to-tiptap'
  *   POST /api/browser/close     { sessionId }          → close a browser tile
  *   POST /api/terminal/spawn    { label?, cwd?, command?, linkedTerminalId?, width?, height?, metadata? } → spawn a terminal tile
  *   POST /api/terminal/write    { terminalId, data }   → write data to a terminal
+ *   POST /api/terminal/keep-alive { terminalId }       → send Claude keep-alive to refresh prompt cache
  *   POST /api/tile/rename       { sessionId, label }   → rename any tile
- *   POST /api/notify            { body, title?, level?, terminalId?, duration?, sound? } → toast notification
+ *   POST /api/notify            { body, title?, level?, priority?, terminalId?, duration?, sound? } → toast notification
  *   POST /api/note/open         { label?, content?, linkedTerminalId?, position?, width?, height? } → spawn a note tile
  *   POST /api/note/update       { noteId, content }    → update note content
  *   POST /api/note/read         { noteId }             → read note metadata + content
@@ -299,8 +300,9 @@ export class CanvasApi extends EventEmitter {
 
     if (req.method === 'POST' && url === '/api/notify') {
       this.readBody(req).then((body) => {
-        const { title, body: message, level: rawLevel, terminalId, duration: rawDuration, sound: rawSound } = body as {
-          title?: string; body?: string; level?: string; terminalId?: string; duration?: number; sound?: boolean
+        const { title, body: message, level: rawLevel, priority: rawPriority, terminalId, duration: rawDuration, sound: rawSound } = body as {
+          title?: string; body?: string; level?: string; priority?: string;
+          terminalId?: string; duration?: number; sound?: boolean
         }
         if (!message) {
           res.writeHead(400)
@@ -308,6 +310,7 @@ export class CanvasApi extends EventEmitter {
           return
         }
         const level = (['info', 'success', 'warning', 'error'].includes(rawLevel || '') ? rawLevel : 'info') as string
+        const priority = (['low', 'normal', 'high', 'critical'].includes(rawPriority || '') ? rawPriority : 'normal') as string
         const defaultDuration = level === 'error' ? 0 : level === 'warning' ? 7000 : level === 'success' ? 4000 : 5000
         const defaultSound = level === 'success' || level === 'error'
         const id = `notify-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
@@ -316,11 +319,31 @@ export class CanvasApi extends EventEmitter {
           title,
           body: message,
           level,
+          priority,
           terminalId,
           duration: rawDuration ?? defaultDuration,
           sound: rawSound ?? defaultSound,
           timestamp: Date.now()
         }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/terminal/keep-alive') {
+      this.readBody(req).then((body) => {
+        const { terminalId } = body as { terminalId?: string }
+        if (!terminalId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'terminalId is required' }))
+          return
+        }
+        this.emit('terminal-keep-alive', { terminalId }, (result: unknown) => {
           res.writeHead(200)
           res.end(JSON.stringify(result))
         })

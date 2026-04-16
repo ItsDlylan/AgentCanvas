@@ -39,6 +39,67 @@ function shortenPath(path: string): string {
   return parts[0] + '/.../' + parts.slice(-2).join('/')
 }
 
+function CacheCountdown({
+  expiresAt,
+  state,
+  sessionId,
+  warningThreshold
+}: {
+  expiresAt: number
+  state: string
+  sessionId: string
+  warningThreshold: number
+}) {
+  const [remaining, setRemaining] = useState(() => Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)))
+
+  useEffect(() => {
+    const tick = () => {
+      setRemaining(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)))
+    }
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [expiresAt])
+
+  const handleKeepAlive = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    window.terminal.keepAlive(sessionId)
+  }, [sessionId])
+
+  const isExpired = state === 'expired' || remaining <= 0
+  const isWarning = !isExpired && remaining <= warningThreshold
+  const minutes = Math.floor(remaining / 60)
+  const seconds = remaining % 60
+  const timeStr = `${minutes}:${seconds.toString().padStart(2, '0')}`
+
+  const colorClass = isExpired
+    ? 'text-red-400 cache-warning-pulse'
+    : isWarning
+      ? 'text-amber-400 cache-warning-pulse'
+      : 'text-cyan-400'
+
+  return (
+    <div className={`flex items-center gap-1 pl-4 text-[10px] ${colorClass}`}>
+      <svg className="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <circle cx="12" cy="12" r="10" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2" />
+      </svg>
+      <span className="font-mono">
+        {isExpired ? 'Cache expired' : `Cache: ${timeStr}`}
+      </span>
+      {(isWarning || isExpired) && (
+        <button
+          onClick={handleKeepAlive}
+          className="titlebar-no-drag ml-1 rounded bg-zinc-700/60 px-1 py-0.5 text-[9px] font-medium text-zinc-200 hover:bg-zinc-600"
+          title="Send keep-alive message to refresh prompt cache"
+        >
+          Refresh
+        </button>
+      )}
+    </div>
+  )
+}
+
 function TerminalTileComponent({ data, width, height }: NodeProps) {
   registerRender('TerminalTile')
   const { sessionId, label, cwd: initialCwd, metadata: initialMetadata, command } = data as unknown as TerminalNodeData
@@ -244,6 +305,15 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
                 <span className="text-[10px] text-zinc-600">{teamMeta.teamName}</span>
               )}
             </div>
+          )}
+          {settings.promptCache?.showTimer !== false &&
+           statusInfo?.metadata?.cacheState && (
+            <CacheCountdown
+              expiresAt={(statusInfo.metadata.cacheExpiresAt as number | undefined) ?? Date.now()}
+              state={statusInfo.metadata.cacheState as string}
+              sessionId={sessionId}
+              warningThreshold={settings.promptCache?.warningThresholdSeconds ?? 60}
+            />
           )}
         </div>
         <div className="flex items-center gap-1">
