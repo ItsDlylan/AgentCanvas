@@ -24,6 +24,8 @@ import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-sto
 import { DiffService } from './diff-service'
 import { loadExtensions, getLoadedExtensions, getExtensionsDir } from './extension-loader'
 import { TeamWatcher } from './team-watcher'
+import { claudeUsageService } from './claude-usage-service'
+import type { ClaudeUsageSnapshot } from '../renderer/types/claude-usage'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -344,6 +346,13 @@ ipcMain.handle('ide:open', async (_event, { path }: { path: string }) => {
 // ── Pomodoro IPC ──────────────────────────────────────────
 ipcMain.handle('pomodoro:load', () => loadPomodoro())
 ipcMain.handle('pomodoro:save', (_event, { data }) => savePomodoro(data))
+
+// ── Claude Code Usage IPC ────────────────────────────────
+ipcMain.handle('claude-usage:load', () => claudeUsageService.getSnapshot())
+claudeUsageService.on('changed', (snapshot: ClaudeUsageSnapshot) => {
+  mainWindow?.webContents.send('claude-usage:changed', snapshot)
+})
+claudeUsageService.start()
 
 ipcMain.handle('workspace:load', () => {
   return loadWorkspaces()
@@ -1329,5 +1338,6 @@ app.on('window-all-closed', () => {
   cdpProxy.destroyAll()
   canvasApi.stop()
   teamWatcher.stop()
+  claudeUsageService.stop()
   if (process.platform !== 'darwin') app.quit()
 })

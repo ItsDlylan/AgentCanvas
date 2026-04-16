@@ -40,6 +40,7 @@ import { onBrowserOpenRequest, reloadBrowser } from '@/hooks/useBrowserNavigatio
 import { usePerformanceDebug, registerRender } from '@/hooks/usePerformanceDebug'
 import { PerformanceOverlay } from './PerformanceOverlay'
 import { PomodoroWidget } from './PomodoroWidget'
+import { ClaudeUsageWidget } from './ClaudeUsageWidget'
 import { usePomodoro, PomodoroContext } from '@/hooks/usePomodoro'
 import { DEFAULT_WORKSPACE } from '@/types/workspace'
 import { useSettings } from '@/hooks/useSettings'
@@ -1498,6 +1499,7 @@ export default function Canvas() {
           </div>
           <div className="titlebar-no-drag flex items-center gap-2">
             <PomodoroWidget pomodoro={pomodoro} expanded={pomodoroExpanded} onToggle={togglePomodoro} />
+            <ClaudeUsageWidget />
             <NotificationCenter onFocusTerminal={(id) => useCanvasStore.getState().focusTile(id)} />
             <button
               onClick={() => setSettingsOpen(true)}
