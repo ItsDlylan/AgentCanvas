@@ -27,6 +27,7 @@ import { DevToolsTile } from './DevToolsTile'
 import { DrawTile } from './draw/DrawTile'
 import { ImageTile } from './ImageTile'
 import { NotificationToast } from './NotificationToast'
+import { UpdateBanner } from './UpdateBanner'
 import { NotificationCenter } from './NotificationCenter'
 import { parseMermaid } from '@/lib/mermaid-parser'
 import { layoutMermaidGraph } from '@/lib/mermaid-layout'
@@ -1667,6 +1668,7 @@ export default function Canvas() {
             jumpHints={jumpAssignments}
           />
           <NotificationToast onFocusTerminal={(id) => useCanvasStore.getState().focusTile(id)} />
+          <UpdateBanner />
 
           {/* Right-click context menu */}
           {contextMenu && (
