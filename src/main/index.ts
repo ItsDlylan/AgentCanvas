@@ -12,6 +12,33 @@ import { CanvasApi } from './canvas-api'
 import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
+import {
+  ensurePlanDir,
+  createPlan as storeCreatePlan,
+  loadPlan as storeLoadPlan,
+  updatePlan as storeUpdatePlan,
+  transition as storeTransition,
+  approvePlan as storeApprovePlan,
+  unapprovePlan as storeUnapprovePlan,
+  attachVerifierTerminal as storeAttachVerifier,
+  attachExecutorTerminal as storeAttachExecutor,
+  attachPR as storeAttachPR,
+  recordCritique as storeRecordCritique,
+  completeStep as storeCompleteStep,
+  markStepInProgress as storeMarkStepInProgress,
+  addDeviation as storeAddDeviation,
+  markPlanDone as storeMarkPlanDone,
+  markExecutionFailed as storeMarkExecutionFailed,
+  archivePlan as storeArchivePlan,
+  deletePlan as storeDeletePlan,
+  listPlans as storeListPlans,
+  latestVersion as storeLatestVersion,
+  getApprovedVersion as storeGetApprovedVersion,
+  renderProgressSummary as storeRenderProgressSummary,
+  type PlanBody,
+  type PlanDoc,
+  type Verdict
+} from './plan-store'
 import { isValidTiptapDoc } from './tiptap-validator'
 import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachments, sweepNoteAttachments, sweepAllAttachments } from './attachment-store'
 import { ensureDrawDir, loadDraw, saveDraw, deleteDraw, listDraws } from './draw-store'
@@ -530,6 +557,110 @@ ipcMain.handle('note:delete', (_event, { noteId }) => {
 
 ipcMain.handle('note:list', () => {
   return listNotes()
+})
+
+// ── Plan IPC Handlers (renderer → main) ──
+
+ipcMain.handle('plan:load', (_event, { planId }: { planId: string }) => {
+  return storeLoadPlan(planId)
+})
+
+ipcMain.handle('plan:list', () => {
+  return storeListPlans().map((p) => p.meta)
+})
+
+ipcMain.handle('plan:create', async (_event, input: {
+  label?: string; content?: string | Partial<PlanBody>;
+  linkedTerminalId?: string; position?: { x: number; y: number };
+  width?: number; height?: number; workspaceId?: string
+}) => {
+  try {
+    const doc = await storeCreatePlan(input)
+    mainWindow?.webContents.send('canvas:plan-open', { planId: doc.meta.planId, meta: doc.meta })
+    return { ok: true, planId: doc.meta.planId, meta: doc.meta }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+})
+
+ipcMain.handle('plan:update', async (_event, { planId, patch }: { planId: string; patch: Partial<PlanBody> }) => {
+  try {
+    const doc = await storeUpdatePlan(planId, patch, 'human')
+    const version = storeLatestVersion(doc).version
+    mainWindow?.webContents.send('canvas:plan-updated', { planId, version, state: doc.meta.state })
+    return { ok: true, version }
+  } catch (e) {
+    return { ok: false, error: (e as Error).message }
+  }
+})
+
+ipcMain.handle('plan:move', async (_event, { planId, position }: { planId: string; position: { x: number; y: number } }) => {
+  const { movePlan } = await import('./plan-store')
+  await movePlan(planId, position)
+})
+
+ipcMain.handle('plan:resize', async (_event, { planId, width, height }: { planId: string; width: number; height: number }) => {
+  const { resizePlan } = await import('./plan-store')
+  await resizePlan(planId, width, height)
+})
+
+ipcMain.handle('plan:rename', async (_event, { planId, label }: { planId: string; label: string }) => {
+  const { renamePlan } = await import('./plan-store')
+  const doc = await renamePlan(planId, label)
+  mainWindow?.webContents.send('canvas:plan-updated', { planId, label: doc.meta.label })
+})
+
+ipcMain.handle('plan:verify', async (_event, { planId, model }: { planId: string; model?: 'sonnet' | 'opus' }) => {
+  return new Promise((resolve) => {
+    canvasApi.emit('plan-verify', { planId, model }, resolve)
+  })
+})
+
+ipcMain.handle('plan:approve', async (_event, { planId }: { planId: string }) => {
+  return new Promise((resolve) => {
+    canvasApi.emit('plan-approve', { planId }, resolve)
+  })
+})
+
+ipcMain.handle('plan:unapprove', async (_event, { planId }: { planId: string }) => {
+  return new Promise((resolve) => {
+    canvasApi.emit('plan-unapprove', { planId }, resolve)
+  })
+})
+
+ipcMain.handle('plan:execute', async (_event, { planId, cwd }: { planId: string; cwd?: string }) => {
+  return new Promise((resolve) => {
+    canvasApi.emit('plan-execute', { planId, cwd }, resolve)
+  })
+})
+
+ipcMain.handle('plan:resume', async (_event, { planId }: { planId: string }) => {
+  return new Promise((resolve) => {
+    canvasApi.emit('plan-resume', { planId }, resolve)
+  })
+})
+
+ipcMain.handle('plan:archive', async (_event, { planId }: { planId: string }) => {
+  return new Promise((resolve) => {
+    canvasApi.emit('plan-archive', { planId }, resolve)
+  })
+})
+
+ipcMain.handle('plan:delete', async (_event, { planId }: { planId: string }) => {
+  storeDeletePlan(planId)
+  mainWindow?.webContents.send('canvas:plan-deleted', { planId })
+})
+
+ipcMain.handle('plan:link-pr', async (_event, { planId, pr }: { planId: string; pr: string }) => {
+  return new Promise((resolve) => {
+    canvasApi.emit('plan-link-pr', { planId, pr }, resolve)
+  })
+})
+
+ipcMain.handle('plan:mark-done', async (_event, { planId }: { planId: string }) => {
+  return new Promise((resolve) => {
+    canvasApi.emit('plan-mark-done', { planId }, resolve)
+  })
 })
 
 ipcMain.handle(
@@ -1207,6 +1338,496 @@ canvasApi.on('notes-list', (reply: (data: unknown) => void) => {
     }))
   reply({ ok: true, notes })
 })
+
+// ── Plan handlers ──
+
+ensurePlanDir()
+
+// Per-plan last-verify timestamps for 30s debounce.
+const lastVerifyAt = new Map<string, number>()
+const VERIFY_DEBOUNCE_MS = 30_000
+
+function broadcastPlan(planId: string, kind: string, extra: Record<string, unknown> = {}): void {
+  mainWindow?.webContents.send(`canvas:plan-${kind}`, { planId, ...extra })
+}
+
+function fail(reply: (r: unknown) => void, error: string): void {
+  reply({ ok: false, error })
+}
+
+canvasApi.on('plan-open', async (info: {
+  label?: string; content?: string | Record<string, unknown>;
+  linkedTerminalId?: string; position?: { x: number; y: number };
+  width?: number; height?: number; workspaceId?: string;
+  author?: 'human' | 'capture-hook' | 'revision'
+}, reply: (result: unknown) => void) => {
+  try {
+    const contentForStore: string | Partial<PlanBody> | undefined =
+      typeof info.content === 'string'
+        ? info.content
+        : (info.content as Partial<PlanBody> | undefined)
+    const doc = await storeCreatePlan({
+      label: info.label,
+      workspaceId: info.workspaceId,
+      content: contentForStore,
+      linkedTerminalId: info.linkedTerminalId,
+      position: info.position,
+      width: info.width,
+      height: info.height,
+      author: info.author
+    })
+    broadcastPlan(doc.meta.planId, 'open', { meta: doc.meta })
+    reply({ ok: true, planId: doc.meta.planId, meta: doc.meta })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-read', (info: { planId: string }, reply: (result: unknown) => void) => {
+  const doc = storeLoadPlan(info.planId)
+  if (!doc) {
+    fail(reply, 'Plan not found')
+    return
+  }
+  reply({ ok: true, planId: info.planId, doc })
+})
+
+canvasApi.on('plan-update', async (info: {
+  planId: string; patch: Record<string, unknown>;
+  author?: 'human' | 'capture-hook' | 'revision'
+}, reply: (result: unknown) => void) => {
+  try {
+    const doc = await storeUpdatePlan(info.planId, info.patch as Partial<PlanBody>, info.author ?? 'human')
+    broadcastPlan(info.planId, 'updated', { version: storeLatestVersion(doc).version, state: doc.meta.state })
+    reply({ ok: true, version: storeLatestVersion(doc).version })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-verify', async (info: {
+  planId: string; model?: 'sonnet' | 'opus'
+}, reply: (result: unknown) => void) => {
+  try {
+    const doc = storeLoadPlan(info.planId)
+    if (!doc) {
+      fail(reply, 'Plan not found')
+      return
+    }
+    const now = Date.now()
+    const last = lastVerifyAt.get(info.planId) ?? 0
+    if (now - last < VERIFY_DEBOUNCE_MS) {
+      fail(reply, 'Verify debounced; try again in a moment')
+      return
+    }
+    lastVerifyAt.set(info.planId, now)
+
+    const flipped = await storeTransition(info.planId, 'under_critique')
+
+    const verifierTerminalId = crypto.randomUUID()
+    await storeAttachVerifier(info.planId, verifierTerminalId)
+
+    const model = info.model ?? 'sonnet'
+    const planMarkdown = renderPlanAsMarkdown(flipped)
+    const verifierPromptPath = join(app.getAppPath(), 'scripts', 'plan-verifier-prompt.md')
+
+    // Spawn verifier terminal via the existing terminal-spawn broadcast pathway.
+    mainWindow?.webContents.send('canvas:terminal-spawn', {
+      terminalId: verifierTerminalId,
+      label: `Plan Verifier · ${flipped.meta.label}`,
+      cwd: undefined, // inherit from linked authoring terminal (renderer resolves)
+      command: [
+        `export AGENT_CANVAS_PLAN_ID='${info.planId}'`,
+        `export AGENT_CANVAS_PLAN_ROLE='verifier'`,
+        `claude --model ${model} --permission-mode plan --append-system-prompt "$(cat ${shellQuote(verifierPromptPath)})" ${shellQuote(planMarkdown)}`
+      ].join(' && ') + '\n',
+      linkedTerminalId: flipped.meta.linkedTerminalId,
+      metadata: {
+        team: { role: 'plan-verifier', teamName: 'plan-review' },
+        planId: info.planId,
+        planRole: 'verifier'
+      }
+    })
+    broadcastPlan(info.planId, 'state', { state: 'under_critique', verifierTerminalId })
+    reply({ ok: true, verifierTerminalId })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-verify-complete', async (info: {
+  planId: string; verdict: Verdict; critiqueMarkdown?: string
+}, reply: (result: unknown) => void) => {
+  try {
+    const doc = storeLoadPlan(info.planId)
+    if (!doc) {
+      fail(reply, 'Plan not found')
+      return
+    }
+    // Create a linked critique Note Tile via note-store directly.
+    const { randomUUID } = await import('crypto')
+    const critiqueNoteId = randomUUID()
+    const { markdownToTiptap } = await import('./markdown-to-tiptap')
+    const markdown = info.critiqueMarkdown ?? renderVerdictAsMarkdown(info.verdict)
+    await saveNote(critiqueNoteId, {
+      noteId: critiqueNoteId,
+      label: `Critique · ${doc.meta.label} · v${storeLatestVersion(doc).version}`,
+      workspaceId: doc.meta.workspaceId,
+      isSoftDeleted: false,
+      position: { x: doc.meta.position.x + doc.meta.width + 40, y: doc.meta.position.y },
+      width: 420,
+      height: 420,
+      linkedNoteId: undefined, // the plan is not a note; the amber edge is rendered by Canvas from plan.critiqueNoteIds
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }, markdownToTiptap(markdown))
+    mainWindow?.webContents.send('canvas:note-open', { noteId: critiqueNoteId })
+
+    const updated = await storeRecordCritique(info.planId, {
+      version: storeLatestVersion(doc).version,
+      noteId: critiqueNoteId,
+      verdict: info.verdict,
+      timestamp: Date.now()
+    })
+    broadcastPlan(info.planId, 'state', { state: updated.meta.state, critiqueNoteId })
+    reply({ ok: true, critiqueNoteId })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-approve', async (info: { planId: string }, reply: (result: unknown) => void) => {
+  try {
+    const doc = await storeApprovePlan(info.planId)
+    broadcastPlan(info.planId, 'state', { state: doc.meta.state, approvedVersion: doc.meta.approvedVersion })
+    reply({ ok: true, approvedVersion: doc.meta.approvedVersion })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-unapprove', async (info: { planId: string }, reply: (result: unknown) => void) => {
+  try {
+    const doc = await storeUnapprovePlan(info.planId)
+    broadcastPlan(info.planId, 'state', { state: doc.meta.state })
+    reply({ ok: true })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-execute', async (info: { planId: string; cwd?: string }, reply: (result: unknown) => void) => {
+  try {
+    const doc = storeLoadPlan(info.planId)
+    if (!doc) { fail(reply, 'Plan not found'); return }
+    if (doc.meta.state !== 'approved') {
+      fail(reply, `Cannot execute in state: ${doc.meta.state}`)
+      return
+    }
+    const approved = storeGetApprovedVersion(doc)
+    if (!approved) { fail(reply, 'No approved version'); return }
+
+    const flipped = await storeTransition(info.planId, 'executing')
+    const executorTerminalId = crypto.randomUUID()
+    await storeAttachExecutor(info.planId, executorTerminalId)
+
+    const executorPromptPath = join(app.getAppPath(), 'scripts', 'plan-executor-prompt.md')
+    const planMarkdown = renderPlanAsMarkdown(flipped)
+
+    mainWindow?.webContents.send('canvas:terminal-spawn', {
+      terminalId: executorTerminalId,
+      label: `Executing · ${flipped.meta.label}`,
+      cwd: info.cwd,
+      command: [
+        `export AGENT_CANVAS_PLAN_ID='${info.planId}'`,
+        `export AGENT_CANVAS_PLAN_ROLE='executor'`,
+        `claude --permission-mode acceptEdits --append-system-prompt "$(cat ${shellQuote(executorPromptPath)})" ${shellQuote(planMarkdown)}`
+      ].join(' && ') + '\n',
+      linkedTerminalId: flipped.meta.linkedTerminalId,
+      metadata: {
+        team: { role: 'plan-executor', teamName: 'plan-execution' },
+        planId: info.planId,
+        planRole: 'executor'
+      }
+    })
+    broadcastPlan(info.planId, 'state', { state: 'executing', executorTerminalId })
+    reply({ ok: true, executorTerminalId })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-step-complete', async (info: { planId: string; stepId: string; notes?: string }, reply: (result: unknown) => void) => {
+  try {
+    const doc = await storeCompleteStep(info.planId, info.stepId, info.notes)
+    broadcastPlan(info.planId, 'step-updated', { stepId: info.stepId, status: 'done', notes: info.notes })
+    const approved = storeGetApprovedVersion(doc)
+    if (approved && approved.plan.steps.every((s) => s.status === 'done' || s.status === 'skipped') && !doc.meta.linkedPR) {
+      // Auto-complete when all steps are done and no PR gate is set.
+      try {
+        const done = await storeMarkPlanDone(info.planId)
+        broadcastPlan(info.planId, 'state', { state: done.meta.state })
+      } catch { /* swallow: user may prefer manual */ }
+    }
+    reply({ ok: true })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-step-in-progress', async (info: { planId: string; stepId: string }, reply: (result: unknown) => void) => {
+  try {
+    await storeMarkStepInProgress(info.planId, info.stepId)
+    broadcastPlan(info.planId, 'step-updated', { stepId: info.stepId, status: 'in-progress' })
+    reply({ ok: true })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-deviation', async (info: { planId: string; stepId: string; reason: string; proposed_change: string }, reply: (result: unknown) => void) => {
+  try {
+    const doc = await storeAddDeviation(info.planId, info.stepId, info.reason, info.proposed_change)
+    broadcastPlan(info.planId, 'state', { state: doc.meta.state })
+    // Sticky warning toast
+    mainWindow?.webContents.send('canvas:notify', {
+      id: `plan-dev-${info.planId}-${Date.now()}`,
+      title: 'Plan deviation',
+      body: `Step ${info.stepId} needs replan: ${info.reason}`,
+      level: 'warning',
+      priority: 'high',
+      terminalId: doc.meta.linkedExecutorTerminalId,
+      duration: 0,
+      sound: true,
+      timestamp: Date.now()
+    })
+    reply({ ok: true })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-resume', async (info: { planId: string }, reply: (result: unknown) => void) => {
+  try {
+    const doc = storeLoadPlan(info.planId)
+    if (!doc) { fail(reply, 'Plan not found'); return }
+    if (doc.meta.state !== 'execution_failed' && doc.meta.state !== 'paused_needs_replan') {
+      fail(reply, `Cannot resume from state: ${doc.meta.state}`)
+      return
+    }
+    const approved = storeGetApprovedVersion(doc)
+    if (!approved) { fail(reply, 'No approved version to resume'); return }
+
+    const flipped = await storeTransition(info.planId, 'executing')
+    const executorTerminalId = crypto.randomUUID()
+    await storeAttachExecutor(info.planId, executorTerminalId)
+
+    const executorPromptPath = join(app.getAppPath(), 'scripts', 'plan-executor-prompt.md')
+    const planMarkdown = renderPlanAsMarkdown(flipped)
+    const progress = storeRenderProgressSummary(flipped)
+    const resumePreamble = [
+      'RESUMING PREVIOUS EXECUTION.',
+      'Progress so far:',
+      progress,
+      '',
+      'Continue from the next pending step. Do NOT redo already-done steps.'
+    ].join('\n')
+
+    mainWindow?.webContents.send('canvas:terminal-spawn', {
+      terminalId: executorTerminalId,
+      label: `Resuming · ${flipped.meta.label}`,
+      cwd: undefined,
+      command: [
+        `export AGENT_CANVAS_PLAN_ID='${info.planId}'`,
+        `export AGENT_CANVAS_PLAN_ROLE='executor'`,
+        `claude --permission-mode acceptEdits --append-system-prompt "$(cat ${shellQuote(executorPromptPath)})" ${shellQuote(resumePreamble + '\n\n' + planMarkdown)}`
+      ].join(' && ') + '\n',
+      linkedTerminalId: flipped.meta.linkedTerminalId,
+      metadata: {
+        team: { role: 'plan-executor', teamName: 'plan-execution' },
+        planId: info.planId,
+        planRole: 'executor'
+      }
+    })
+    broadcastPlan(info.planId, 'state', { state: 'executing', executorTerminalId })
+    reply({ ok: true, executorTerminalId })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-archive', async (info: { planId: string }, reply: (result: unknown) => void) => {
+  try {
+    const doc = await storeArchivePlan(info.planId)
+    broadcastPlan(info.planId, 'state', { state: doc.meta.state })
+    reply({ ok: true })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-delete', (info: { planId: string }, reply: (result: unknown) => void) => {
+  storeDeletePlan(info.planId)
+  broadcastPlan(info.planId, 'deleted')
+  reply({ ok: true })
+})
+
+canvasApi.on('plan-link-pr', async (info: { planId: string; pr: string }, reply: (result: unknown) => void) => {
+  try {
+    await storeAttachPR(info.planId, info.pr)
+    broadcastPlan(info.planId, 'updated', { linkedPR: info.pr })
+    reply({ ok: true })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plan-mark-done', async (info: { planId: string }, reply: (result: unknown) => void) => {
+  try {
+    const doc = await storeMarkPlanDone(info.planId)
+    broadcastPlan(info.planId, 'state', { state: doc.meta.state })
+    reply({ ok: true })
+  } catch (e) {
+    fail(reply, (e as Error).message)
+  }
+})
+
+canvasApi.on('plans-list', (reply: (data: unknown) => void) => {
+  const plans = storeListPlans().map((p) => p.meta)
+  reply({ ok: true, plans })
+})
+
+// ── Plan helpers ──
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`
+}
+
+function tiptapToPlainText(doc: unknown): string {
+  const walk = (node: unknown): string => {
+    if (!node || typeof node !== 'object') return ''
+    const n = node as { text?: string; content?: unknown[]; type?: string }
+    if (n.type === 'text' && typeof n.text === 'string') return n.text
+    if (Array.isArray(n.content)) {
+      const parts = n.content.map(walk)
+      // Add newlines between block-level nodes.
+      if (n.type === 'paragraph' || n.type === 'heading') return parts.join('') + '\n\n'
+      return parts.join('')
+    }
+    return ''
+  }
+  return walk(doc).trim()
+}
+
+function renderPlanAsMarkdown(doc: PlanDoc): string {
+  const v = storeGetApprovedVersion(doc) ?? storeLatestVersion(doc)
+  const p = v.plan
+  const lines: string[] = []
+  lines.push(`# ${doc.meta.label}`)
+  lines.push('')
+  const problem = tiptapToPlainText(p.problem_statement)
+  if (problem) { lines.push('## Problem', problem, '') }
+  const approach = tiptapToPlainText(p.approach)
+  if (approach) { lines.push('## Approach', approach, '') }
+  if (p.steps.length) {
+    lines.push('## Steps')
+    for (const s of p.steps) {
+      const check = s.status === 'done' ? '[x]' : s.status === 'skipped' ? '[-]' : '[ ]'
+      lines.push(`- ${check} \`${s.id}\` ${s.text}${s.notes ? ` — ${s.notes}` : ''}`)
+    }
+    lines.push('')
+  }
+  if (p.risks.length) {
+    lines.push('## Risks')
+    for (const r of p.risks) lines.push(`- ${r}`)
+    lines.push('')
+  }
+  if (p.open_questions.length) {
+    lines.push('## Open Questions')
+    for (const q of p.open_questions) {
+      lines.push(`- ${q.text}${q.resolution ? ` — Answer: ${q.resolution}` : ''}`)
+    }
+    lines.push('')
+  }
+  if (p.acceptance_criteria) {
+    lines.push('## Acceptance Criteria', p.acceptance_criteria, '')
+  }
+  return lines.join('\n')
+}
+
+function renderVerdictAsMarkdown(verdict: Verdict): string {
+  const lines: string[] = []
+  lines.push(`# Critique — severity: ${verdict.severity}`)
+  lines.push('')
+  lines.push(verdict.summary)
+  lines.push('')
+  if (verdict.findings.length) {
+    lines.push('## Findings')
+    for (const f of verdict.findings) {
+      lines.push(`- **[${f.severity}]** ${f.text}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+// ── Plan-related terminal exit watcher ──
+// If a plan's executor terminal exits while the plan is 'executing', flip to execution_failed.
+terminalManager.on('exit', async (id: string) => {
+  const plans = storeListPlans()
+  for (const p of plans) {
+    if (p.meta.linkedExecutorTerminalId === id && p.meta.state === 'executing') {
+      try {
+        const updated = await storeMarkExecutionFailed(p.meta.planId)
+        broadcastPlan(p.meta.planId, 'state', { state: updated.meta.state })
+        mainWindow?.webContents.send('canvas:notify', {
+          id: `plan-exec-fail-${p.meta.planId}-${Date.now()}`,
+          title: 'Plan execution failed',
+          body: `Executor terminal exited for "${p.meta.label}". Click Resume on the plan tile to continue.`,
+          level: 'error',
+          priority: 'high',
+          duration: 0,
+          sound: true,
+          timestamp: Date.now()
+        })
+      } catch { /* swallow */ }
+    }
+  }
+})
+
+// ── PR merge poll ──
+// Periodically checks `gh pr view` for any plan in `executing` state with linkedPR.
+// If MERGED, flips state to `done`.
+const PR_POLL_INTERVAL_MS = 60_000
+setInterval(async () => {
+  const plans = storeListPlans().filter(
+    (p) => p.meta.state === 'executing' && p.meta.linkedPR
+  )
+  for (const p of plans) {
+    try {
+      const pr = p.meta.linkedPR!
+      const { stdout } = await execFileAsync('gh', ['pr', 'view', pr, '--json', 'state'], { timeout: 10_000 })
+      const parsed = JSON.parse(stdout) as { state?: string }
+      if (parsed.state === 'MERGED') {
+        try {
+          const doc = await storeMarkPlanDone(p.meta.planId)
+          broadcastPlan(p.meta.planId, 'state', { state: doc.meta.state })
+          mainWindow?.webContents.send('canvas:notify', {
+            id: `plan-done-${p.meta.planId}-${Date.now()}`,
+            title: 'Plan complete',
+            body: `PR ${pr} merged — "${p.meta.label}" is done.`,
+            level: 'success',
+            priority: 'normal',
+            duration: 6000,
+            sound: true,
+            timestamp: Date.now()
+          })
+        } catch { /* swallow */ }
+      }
+    } catch {
+      // gh not installed, network error, or PR gone — skip silently.
+    }
+  }
+}, PR_POLL_INTERVAL_MS).unref()
 
 // ── Team Watcher (passive detection of Claude Code Agent Teams) ──
 

@@ -22,7 +22,24 @@ import { markdownToTiptap } from './markdown-to-tiptap'
  *   POST /api/note/close        { noteId }             → soft-delete a note tile
  *   POST /api/note/delete       { noteId }             → hard-delete a note tile
  *   GET  /api/notes                                     → list all notes
- *   GET  /api/status                                    → list all tiles
+ *   POST /api/plan/open         { label?, content?, linkedTerminalId?, ... } → create a plan tile
+ *   POST /api/plan/read         { planId }             → read plan doc
+ *   POST /api/plan/update       { planId, patch }      → append a new plan version
+ *   POST /api/plan/verify       { planId, model? }     → spawn verifier team agent
+ *   POST /api/plan/verify/complete { planId, verdict, critiqueMarkdown }  → (internal) verifier stop-hook callback
+ *   POST /api/plan/approve      { planId }             → lock approved version
+ *   POST /api/plan/unapprove    { planId }             → unlock
+ *   POST /api/plan/execute      { planId, cwd? }       → spawn executor terminal
+ *   POST /api/plan/step/complete { planId, stepId, notes? } → (called by executor agent)
+ *   POST /api/plan/step/in-progress { planId, stepId } → (called by executor agent)
+ *   POST /api/plan/deviation    { planId, stepId, reason, proposed_change } → (called by executor agent)
+ *   POST /api/plan/resume       { planId }             → re-spawn executor with progress in prompt
+ *   POST /api/plan/archive      { planId }             → terminal state
+ *   POST /api/plan/delete       { planId }             → hard-delete
+ *   POST /api/plan/link-pr      { planId, pr }         → attach PR ref for merge detection
+ *   POST /api/plan/mark-done    { planId }             → manual completion
+ *   GET  /api/plans                                    → list all plans
+ *   GET  /api/status                                   → list all tiles
  *
  * Injected into every terminal as AGENT_CANVAS_API=http://127.0.0.1:<port>
  */
@@ -470,6 +487,336 @@ export class CanvasApi extends EventEmitter {
 
     if (req.method === 'GET' && url === '/api/notes') {
       this.emit('notes-list', (data: unknown) => {
+        res.writeHead(200)
+        res.end(JSON.stringify(data))
+      })
+      return
+    }
+
+    // ── Plan endpoints ──
+
+    if (req.method === 'POST' && url === '/api/plan/open') {
+      this.readBody(req).then((body) => {
+        const { label, content, linkedTerminalId, position, width, height, workspaceId, author } = body as {
+          label?: string; content?: string | Record<string, unknown>;
+          linkedTerminalId?: string; position?: { x: number; y: number };
+          width?: number; height?: number; workspaceId?: string;
+          author?: 'human' | 'capture-hook' | 'revision'
+        }
+        this.emit('plan-open', { label, content, linkedTerminalId, position, width, height, workspaceId, author }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/read') {
+      this.readBody(req).then((body) => {
+        const { planId } = body as { planId?: string }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-read', { planId }, (result: unknown) => {
+          const r = result as { ok: boolean }
+          res.writeHead(r.ok ? 200 : 404)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/update') {
+      this.readBody(req).then((body) => {
+        const { planId, patch, author } = body as {
+          planId?: string;
+          patch?: Record<string, unknown>;
+          author?: 'human' | 'capture-hook' | 'revision'
+        }
+        if (!planId || !patch) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId and patch are required' }))
+          return
+        }
+        this.emit('plan-update', { planId, patch, author }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/verify') {
+      this.readBody(req).then((body) => {
+        const { planId, model } = body as { planId?: string; model?: 'sonnet' | 'opus' }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-verify', { planId, model }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    // Internal endpoint called by the verifier stop hook.
+    if (req.method === 'POST' && url === '/api/plan/verify/complete') {
+      this.readBody(req).then((body) => {
+        const { planId, verdict, critiqueMarkdown } = body as {
+          planId?: string;
+          verdict?: { severity: 'none' | 'minor' | 'major'; summary: string; findings: Array<{ severity: 'minor' | 'major'; text: string }> };
+          critiqueMarkdown?: string
+        }
+        if (!planId || !verdict) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId and verdict are required' }))
+          return
+        }
+        this.emit('plan-verify-complete', { planId, verdict, critiqueMarkdown }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/approve') {
+      this.readBody(req).then((body) => {
+        const { planId } = body as { planId?: string }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-approve', { planId }, (result: unknown) => {
+          const r = result as { ok: boolean }
+          res.writeHead(r.ok ? 200 : 409)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/unapprove') {
+      this.readBody(req).then((body) => {
+        const { planId } = body as { planId?: string }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-unapprove', { planId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/execute') {
+      this.readBody(req).then((body) => {
+        const { planId, cwd } = body as { planId?: string; cwd?: string }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-execute', { planId, cwd }, (result: unknown) => {
+          const r = result as { ok: boolean }
+          res.writeHead(r.ok ? 200 : 409)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/step/complete') {
+      this.readBody(req).then((body) => {
+        const { planId, stepId, notes } = body as {
+          planId?: string; stepId?: string; notes?: string
+        }
+        if (!planId || !stepId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId and stepId are required' }))
+          return
+        }
+        this.emit('plan-step-complete', { planId, stepId, notes }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/step/in-progress') {
+      this.readBody(req).then((body) => {
+        const { planId, stepId } = body as { planId?: string; stepId?: string }
+        if (!planId || !stepId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId and stepId are required' }))
+          return
+        }
+        this.emit('plan-step-in-progress', { planId, stepId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/deviation') {
+      this.readBody(req).then((body) => {
+        const { planId, stepId, reason, proposed_change } = body as {
+          planId?: string; stepId?: string; reason?: string; proposed_change?: string
+        }
+        if (!planId || !stepId || !reason || !proposed_change) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId, stepId, reason, and proposed_change are required' }))
+          return
+        }
+        this.emit('plan-deviation', { planId, stepId, reason, proposed_change }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/resume') {
+      this.readBody(req).then((body) => {
+        const { planId } = body as { planId?: string }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-resume', { planId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/archive') {
+      this.readBody(req).then((body) => {
+        const { planId } = body as { planId?: string }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-archive', { planId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/delete') {
+      this.readBody(req).then((body) => {
+        const { planId } = body as { planId?: string }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-delete', { planId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/link-pr') {
+      this.readBody(req).then((body) => {
+        const { planId, pr } = body as { planId?: string; pr?: string }
+        if (!planId || !pr) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId and pr are required' }))
+          return
+        }
+        this.emit('plan-link-pr', { planId, pr }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/plan/mark-done') {
+      this.readBody(req).then((body) => {
+        const { planId } = body as { planId?: string }
+        if (!planId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'planId is required' }))
+          return
+        }
+        this.emit('plan-mark-done', { planId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'GET' && url === '/api/plans') {
+      this.emit('plans-list', (data: unknown) => {
         res.writeHead(200)
         res.end(JSON.stringify(data))
       })

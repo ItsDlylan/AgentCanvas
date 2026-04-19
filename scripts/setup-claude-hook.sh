@@ -66,6 +66,8 @@ SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 HOOK_SCRIPTS=(
     "agentcanvas-notify-stop.sh"
     "agentcanvas-notify-ask-user.sh"
+    "agentcanvas-capture-plan.sh"
+    "agentcanvas-verify-stop.sh"
 )
 
 echo -e "${BOLD}AgentCanvas — Claude Code Notification Hooks Installer${RESET}"
@@ -147,6 +149,18 @@ registrations = [
         "matcher": "AskUserQuestion",
         "command": "~/.claude/scripts/agentcanvas-notify-ask-user.sh",
         "label": "PreToolUse[AskUserQuestion] → agentcanvas-notify-ask-user.sh",
+    },
+    {
+        "event": "PreToolUse",
+        "matcher": "ExitPlanMode",
+        "command": "~/.claude/scripts/agentcanvas-capture-plan.sh",
+        "label": "PreToolUse[ExitPlanMode] → agentcanvas-capture-plan.sh",
+    },
+    {
+        "event": "Stop",
+        "matcher": None,
+        "command": "~/.claude/scripts/agentcanvas-verify-stop.sh",
+        "label": "Stop → agentcanvas-verify-stop.sh (verifier verdict parse)",
     },
 ]
 

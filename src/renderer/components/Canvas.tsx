@@ -22,6 +22,7 @@ import '@xyflow/react/dist/style.css'
 import { TerminalTile } from './TerminalTile'
 import { BrowserTile } from './BrowserTile'
 import { NotesTile } from './NotesTile'
+import { PlanTile } from './PlanTile'
 import { DiffViewerTile } from './DiffViewerTile'
 import { DevToolsTile } from './DevToolsTile'
 import { DrawTile } from './draw/DrawTile'
@@ -59,6 +60,7 @@ const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
   browser: BrowserTile as unknown as NodeTypes['browser'],
   notes: NotesTile as unknown as NodeTypes['notes'],
+  plan: PlanTile as unknown as NodeTypes['plan'],
   diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer'],
   devTools: DevToolsTile as unknown as NodeTypes['devTools'],
   draw: DrawTile as unknown as NodeTypes['draw'],
@@ -69,6 +71,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   terminal: '#22c55e',
   browser:  '#3b82f6',
   notes:    '#f59e0b',
+  plan:     '#14b8a6',
   diffViewer: '#a855f7',
   devTools:   '#f97316',
   draw:       '#ec4899',
@@ -350,6 +353,12 @@ export default function Canvas() {
                   width: n.measured?.width ?? w,
                   height: n.measured?.height ?? h
                 })
+              } else if (n.type === 'plan') {
+                const sid = (n.data as Record<string, unknown>).sessionId as string
+                const w = (n.style?.width as number) ?? 480
+                const h = (n.style?.height as number) ?? 560
+                window.plan.move(sid, n.position)
+                window.plan.resize(sid, n.measured?.width ?? w, n.measured?.height ?? h)
               }
             }
           }, 500)
@@ -546,6 +555,189 @@ export default function Canvas() {
       }
       setNodesLoadedFlags((prev) => ({ ...prev, notes: true }))
     })
+  }, [])
+
+  // ── Load persisted plans on mount + subscribe to plan events ──
+  useEffect(() => {
+    window.plan.list().then((plans) => {
+      const planMetas = plans.filter((p) => !p.isSoftDeleted)
+      // Build nodes for each plan and edges for linkedTerminalId + linkedExecutorTerminalId + latest critique.
+      const planNodes: Node[] = []
+      const planEdges: Edge[] = []
+      const wsMapEntries: [string, string][] = []
+
+      ;(async () => {
+        for (const meta of planMetas) {
+          planNodes.push({
+            id: meta.planId,
+            type: 'plan',
+            position: meta.position,
+            style: { width: meta.width, height: meta.height },
+            data: {
+              sessionId: meta.planId,
+              label: meta.label,
+              linkedTerminalId: meta.linkedTerminalId
+            },
+            dragHandle: '.plan-tile-header'
+          })
+          wsMapEntries.push([meta.planId, meta.workspaceId])
+
+          // Edges
+          if (meta.linkedTerminalId) {
+            planEdges.push({
+              id: `edge-plan-auth-${meta.planId}`,
+              source: meta.linkedTerminalId,
+              target: meta.planId,
+              animated: true,
+              style: { stroke: '#737373', strokeWidth: 1 }
+            })
+          }
+          if (meta.linkedExecutorTerminalId) {
+            planEdges.push({
+              id: `edge-plan-exec-${meta.planId}`,
+              source: meta.planId,
+              target: meta.linkedExecutorTerminalId,
+              animated: true,
+              style: { stroke: '#06b6d4', strokeWidth: 2 }
+            })
+          }
+
+          // Latest critique note: load the full doc to get critiqueNoteIds
+          try {
+            const doc = await window.plan.load(meta.planId)
+            if (doc && doc.critiqueNoteIds.length > 0) {
+              const latest = doc.critiqueNoteIds[doc.critiqueNoteIds.length - 1]
+              planEdges.push({
+                id: `edge-plan-critique-${meta.planId}`,
+                source: meta.planId,
+                target: latest.noteId,
+                animated: true,
+                style: { stroke: '#f59e0b', strokeWidth: 2 }
+              })
+            }
+          } catch {
+            // skip
+          }
+        }
+
+        setAllNodes((nds) => {
+          const existing = new Set(nds.map((n) => n.id))
+          const toAdd = planNodes.filter((n) => !existing.has(n.id))
+          return toAdd.length > 0 ? [...nds, ...toAdd] : nds
+        })
+        if (wsMapEntries.length > 0) {
+          setTileWorkspaceMap((prev) => {
+            const next = new Map(prev)
+            for (const [sid, wsId] of wsMapEntries) next.set(sid, wsId)
+            return next
+          })
+        }
+        if (planEdges.length > 0) {
+          setAllEdges((eds) => {
+            const existing = new Set(eds.map((e) => e.id))
+            const toAdd = planEdges.filter((e) => !existing.has(e.id))
+            return toAdd.length > 0 ? [...eds, ...toAdd] : eds
+          })
+        }
+        setNodesLoadedFlags((prev) => ({ ...prev, plans: true }))
+      })()
+    }).catch(() => {
+      setNodesLoadedFlags((prev) => ({ ...prev, plans: true }))
+    })
+
+    // ── Subscribe to plan events to add/update/remove tiles live ──
+    const offOpen = window.plan.onOpen((info) => {
+      const meta = info.meta
+      setAllNodes((nds) => {
+        if (nds.some((n) => n.id === meta.planId)) return nds
+        return [
+          ...nds,
+          {
+            id: meta.planId,
+            type: 'plan',
+            position: meta.position,
+            style: { width: meta.width, height: meta.height },
+            data: {
+              sessionId: meta.planId,
+              label: meta.label,
+              linkedTerminalId: meta.linkedTerminalId
+            },
+            dragHandle: '.plan-tile-header'
+          }
+        ]
+      })
+      setTileWorkspaceMap((prev) => {
+        const next = new Map(prev)
+        next.set(meta.planId, meta.workspaceId)
+        return next
+      })
+      if (meta.linkedTerminalId) {
+        setAllEdges((eds) => {
+          const edgeId = `edge-plan-auth-${meta.planId}`
+          if (eds.some((e) => e.id === edgeId)) return eds
+          return [
+            ...eds,
+            {
+              id: edgeId,
+              source: meta.linkedTerminalId!,
+              target: meta.planId,
+              animated: true,
+              style: { stroke: '#737373', strokeWidth: 1 }
+            }
+          ]
+        })
+      }
+    })
+
+    // Handle state changes that may change edges (executor attached, critique appeared)
+    const offState = window.plan.onState((info) => {
+      const planId = info.planId
+      const executorId = info.executorTerminalId as string | undefined
+      const critiqueId = info.critiqueNoteId as string | undefined
+      if (executorId) {
+        setAllEdges((eds) => {
+          const edgeId = `edge-plan-exec-${planId}`
+          if (eds.some((e) => e.id === edgeId)) return eds
+          return [
+            ...eds,
+            {
+              id: edgeId,
+              source: planId,
+              target: executorId,
+              animated: true,
+              style: { stroke: '#06b6d4', strokeWidth: 2 }
+            }
+          ]
+        })
+      }
+      if (critiqueId) {
+        setAllEdges((eds) => {
+          // Remove prior critique edge for this plan; render only the latest.
+          const filtered = eds.filter((e) => !e.id.startsWith(`edge-plan-critique-${planId}`))
+          return [
+            ...filtered,
+            {
+              id: `edge-plan-critique-${planId}`,
+              source: planId,
+              target: critiqueId,
+              animated: true,
+              style: { stroke: '#f59e0b', strokeWidth: 2 }
+            }
+          ]
+        })
+      }
+    })
+
+    const offDeleted = window.plan.onDeleted((info) => {
+      setAllNodes((nds) => nds.filter((n) => n.id !== info.planId))
+      setAllEdges((eds) => eds.filter((e) => e.source !== info.planId && e.target !== info.planId))
+    })
+
+    return () => {
+      offOpen()
+      offState()
+      offDeleted()
+    }
   }, [])
 
   // ── Load persisted terminal tiles on mount ──
@@ -779,7 +971,7 @@ export default function Canvas() {
 
   // ── Load persisted edges once all nodes are ready ──
   useEffect(() => {
-    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals || !nodesLoadedFlags.browsers || !nodesLoadedFlags.draws) return
+    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals || !nodesLoadedFlags.browsers || !nodesLoadedFlags.draws || !nodesLoadedFlags.plans) return
 
     window.edges.load().then((persistedEdges) => {
       if (!persistedEdges || persistedEdges.length === 0) return

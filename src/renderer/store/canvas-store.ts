@@ -123,9 +123,9 @@ type EdgeUpdater = Edge[] | ((prev: Edge[]) => Edge[])
 type MapUpdater = Map<string, string> | ((prev: Map<string, string>) => Map<string, string>)
 type WorkspaceUpdater = Workspace[] | ((prev: Workspace[]) => Workspace[])
 type FlagsUpdater =
-  | { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean }
-  | ((prev: { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean }) =>
-      { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean })
+  | { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean; plans: boolean }
+  | ((prev: { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean; plans: boolean }) =>
+      { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean; plans: boolean })
 
 export interface TerminalSpawnInfo {
   terminalId: string
@@ -147,7 +147,7 @@ export interface CanvasStore {
   tileWorkspaceMap: Map<string, string>
   activeWorkspaceId: string
   workspaces: Workspace[]
-  nodesLoadedFlags: { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean }
+  nodesLoadedFlags: { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean; plans: boolean }
 
   // ── Config (set by Canvas on mount) ──
   reactFlowInstance: ReactFlowInstance | null
@@ -242,7 +242,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
     tileWorkspaceMap: new Map(),
     activeWorkspaceId: 'default',
     workspaces: [DEFAULT_WORKSPACE],
-    nodesLoadedFlags: { notes: false, terminals: false, browsers: false, draws: false },
+    nodesLoadedFlags: { notes: false, terminals: false, browsers: false, draws: false, plans: false },
     reactFlowInstance: null,
     tileGap: 40,
     viewportCache: new Map(),
