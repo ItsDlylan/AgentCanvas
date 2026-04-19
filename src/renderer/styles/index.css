@@ -247,6 +247,12 @@
   padding: 1px 0;
 }
 
+.notes-tile-body .tiptap ul:not([data-type="taskList"]) > li > p,
+.notes-tile-body .tiptap ol > li > p {
+  display: inline;
+  margin: 0;
+}
+
 /* Task list */
 .notes-tile-body .tiptap ul[data-type="taskList"] {
   list-style: none;
