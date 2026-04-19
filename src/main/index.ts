@@ -13,7 +13,7 @@ import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabl
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
 import { isValidTiptapDoc } from './tiptap-validator'
-import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachments } from './attachment-store'
+import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachments, sweepNoteAttachments, sweepAllAttachments } from './attachment-store'
 import { ensureDrawDir, loadDraw, saveDraw, deleteDraw, listDraws } from './draw-store'
 import { loadImage, saveImage, deleteImage, listImages, storeImage } from './image-store'
 import { jsonToMarkdown } from './note-converter'
@@ -577,6 +577,33 @@ ipcMain.handle('attachment:delete-all', (_event, { noteId }: { noteId: string })
 
 ipcMain.handle('attachment:list', (_event, { noteId }: { noteId: string }) => {
   return listAttachments(noteId)
+})
+
+function resolveAttachmentSrc(src: string): string | null {
+  const PREFIX = 'agentcanvas://attachment/'
+  if (src.startsWith(PREFIX)) {
+    const { join } = require('path')
+    const { homedir } = require('os')
+    return join(homedir(), 'AgentCanvas', 'attachments', src.slice(PREFIX.length))
+  }
+  if (src.startsWith('file://')) return decodeURI(src.slice('file://'.length))
+  if (src.startsWith('/')) return src
+  return null
+}
+
+ipcMain.handle('attachment:resolve-path', (_event, { src }: { src: string }) => {
+  return resolveAttachmentSrc(src)
+})
+
+ipcMain.handle('attachment:reveal', (_event, { src }: { src: string }) => {
+  const path = resolveAttachmentSrc(src)
+  if (!path) return false
+  shell.showItemInFolder(path)
+  return true
+})
+
+ipcMain.handle('attachment:sweep-note', (_event, { noteId }: { noteId: string }) => {
+  return sweepNoteAttachments(noteId)
 })
 
 ipcMain.handle('attachment:pick-file', async () => {
@@ -1211,6 +1238,19 @@ protocol.registerSchemesAsPrivileged([
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.agentcanvas.app')
+
+  // Garbage-collect orphan note attachments (deleted images, orphan dirs).
+  // Async via setImmediate so it never blocks window creation.
+  setImmediate(() => {
+    try {
+      const result = sweepAllAttachments()
+      if (result.filesRemoved > 0 || result.orphanDirsRemoved > 0) {
+        console.log(`[attachments] startup sweep: ${result.filesRemoved} files, ${result.orphanDirsRemoved} orphan dirs removed across ${result.notesScanned} notes`)
+      }
+    } catch (err) {
+      console.error('[attachments] startup sweep failed:', err)
+    }
+  })
 
   // Serve local files via agentcanvas:// protocol
   protocol.handle('agentcanvas', (request) => {

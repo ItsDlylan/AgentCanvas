@@ -314,6 +314,9 @@ export interface AttachmentAPI {
   deleteAll: (noteId: string) => Promise<void>
   list: (noteId: string) => Promise<string[]>
   pickFile: () => Promise<string[] | null>
+  resolvePath: (src: string) => Promise<string | null>
+  reveal: (src: string) => Promise<boolean>
+  sweepNote: (noteId: string) => Promise<number>
 }
 
 const attachmentAPI: AttachmentAPI = {
@@ -321,7 +324,10 @@ const attachmentAPI: AttachmentAPI = {
   saveFromPath: (noteId, sourcePath) => ipcRenderer.invoke('attachment:save-from-path', { noteId, sourcePath }),
   deleteAll: (noteId) => ipcRenderer.invoke('attachment:delete-all', { noteId }),
   list: (noteId) => ipcRenderer.invoke('attachment:list', { noteId }),
-  pickFile: () => ipcRenderer.invoke('attachment:pick-file')
+  pickFile: () => ipcRenderer.invoke('attachment:pick-file'),
+  resolvePath: (src) => ipcRenderer.invoke('attachment:resolve-path', { src }),
+  reveal: (src) => ipcRenderer.invoke('attachment:reveal', { src }),
+  sweepNote: (noteId) => ipcRenderer.invoke('attachment:sweep-note', { noteId })
 }
 
 contextBridge.exposeInMainWorld('attachment', attachmentAPI)
