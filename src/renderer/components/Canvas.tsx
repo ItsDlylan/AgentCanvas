@@ -1501,7 +1501,14 @@ export default function Canvas() {
           <div className="titlebar-no-drag flex items-center gap-2">
             <PomodoroWidget pomodoro={pomodoro} expanded={pomodoroExpanded} onToggle={togglePomodoro} />
             <ClaudeUsageWidget />
-            <NotificationCenter onFocusTerminal={(id) => useCanvasStore.getState().focusTile(id)} />
+            <NotificationCenter
+              onFocusTerminal={(id) => {
+                const s = useCanvasStore.getState()
+                const wsId = s.tileWorkspaceMap.get(id)
+                if (wsId) s.focusProcess(wsId, id)
+                else s.focusTile(id)
+              }}
+            />
             <button
               onClick={() => setSettingsOpen(true)}
               className="rounded p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200"
@@ -1667,7 +1674,14 @@ export default function Canvas() {
             activeWorkspaceId={activeWorkspaceId}
             jumpHints={jumpAssignments}
           />
-          <NotificationToast onFocusTerminal={(id) => useCanvasStore.getState().focusTile(id)} />
+          <NotificationToast
+            onFocusTerminal={(id) => {
+              const s = useCanvasStore.getState()
+              const wsId = s.tileWorkspaceMap.get(id)
+              if (wsId) s.focusProcess(wsId, id)
+              else s.focusTile(id)
+            }}
+          />
 
           {/* Right-click context menu */}
           {contextMenu && (
