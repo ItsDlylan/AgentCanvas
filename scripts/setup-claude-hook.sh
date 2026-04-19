@@ -1,22 +1,32 @@
 #!/bin/bash
 # ============================================================
-# AgentCanvas — Claude Code Stop Hook Installer
+# AgentCanvas — Claude Code Notification Hooks Installer
 # ============================================================
-# Installs the AgentCanvas notification hook into the user's
+# Installs the AgentCanvas notification hooks into the user's
 # global Claude Code config so that any Claude Code instance
-# running inside an AgentCanvas terminal tile will send a toast
-# notification to the canvas when it finishes a task.
+# running inside an AgentCanvas terminal tile will send toast
+# notifications to the canvas on notable events.
 #
-# What it does:
-#   1. Copies scripts/agentcanvas-notify-stop.sh to
-#      ~/.claude/scripts/agentcanvas-notify-stop.sh
-#   2. Adds the hook to the Stop array in
-#      ~/.claude/settings.json (idempotent — safe to re-run)
-#   3. Backs up the original settings.json before modifying
+# What it installs:
+#   1. agentcanvas-notify-stop.sh
+#      - Registered as a `Stop` hook
+#      - Fires when Claude finishes a task
 #
-# The hook itself is a no-op outside AgentCanvas (it checks for
-# the AGENT_CANVAS_API env var), so installing it globally has
-# zero effect on Claude Code instances run from any other shell.
+#   2. agentcanvas-notify-ask-user.sh
+#      - Registered as a `PreToolUse` hook with
+#        matcher="AskUserQuestion"
+#      - Fires when Claude invokes the AskUserQuestion tool and
+#        is blocked waiting on the user
+#
+# Both hook scripts are copied to ~/.claude/scripts/ and wired
+# into ~/.claude/settings.json (idempotent — safe to re-run).
+# The existing settings.json is backed up once per invocation
+# before any modifications.
+#
+# The hooks themselves are no-ops outside AgentCanvas (they
+# check for the AGENT_CANVAS_API env var), so installing them
+# globally has zero effect on Claude Code instances run from
+# any other shell.
 # ============================================================
 
 set -euo pipefail
@@ -45,59 +55,73 @@ error()   { echo -e "${RED}error${RESET} $*" >&2; }
 
 # Resolve script directory (works when invoked from anywhere)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE_HOOK="$SCRIPT_DIR/agentcanvas-notify-stop.sh"
 
 # Allow override via CLAUDE_CONFIG_DIR; default to ~/.claude
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 TARGET_SCRIPTS_DIR="$CLAUDE_DIR/scripts"
-TARGET_HOOK="$TARGET_SCRIPTS_DIR/agentcanvas-notify-stop.sh"
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 
-echo -e "${BOLD}AgentCanvas — Claude Code Stop Hook Installer${RESET}"
+# Hook scripts to install — filename basenames (resolved against
+# SCRIPT_DIR for the source and TARGET_SCRIPTS_DIR for the target).
+HOOK_SCRIPTS=(
+    "agentcanvas-notify-stop.sh"
+    "agentcanvas-notify-ask-user.sh"
+)
+
+echo -e "${BOLD}AgentCanvas — Claude Code Notification Hooks Installer${RESET}"
 echo
 
 # ── Preflight ────────────────────────────────────────────
 
-if [[ ! -f "$SOURCE_HOOK" ]]; then
-    error "Source hook not found: $SOURCE_HOOK"
-    error "Run this script from the AgentCanvas repo root or via 'npm run setup:claude-hook'."
-    exit 1
-fi
+for script in "${HOOK_SCRIPTS[@]}"; do
+    if [[ ! -f "$SCRIPT_DIR/$script" ]]; then
+        error "Source hook not found: $SCRIPT_DIR/$script"
+        error "Run this script from the AgentCanvas repo root or via 'npm run setup:claude-hook'."
+        exit 1
+    fi
+done
 
 if ! command -v python3 &>/dev/null; then
     error "python3 is required but not installed."
     exit 1
 fi
 
-# ── Step 1: Install the hook script ──────────────────────
-
-info "Installing hook script to: $TARGET_HOOK"
+# ── Step 1: Install the hook scripts ─────────────────────
 
 mkdir -p "$TARGET_SCRIPTS_DIR"
 
-if [[ -f "$TARGET_HOOK" ]]; then
-    if cmp -s "$SOURCE_HOOK" "$TARGET_HOOK"; then
-        ok "Hook script already up to date."
+for script in "${HOOK_SCRIPTS[@]}"; do
+    src="$SCRIPT_DIR/$script"
+    dst="$TARGET_SCRIPTS_DIR/$script"
+
+    info "Installing hook script to: $dst"
+
+    if [[ -f "$dst" ]]; then
+        if cmp -s "$src" "$dst"; then
+            ok "Hook script already up to date: $script"
+        else
+            backup="$dst.backup.$(date +%Y%m%d-%H%M%S)"
+            warn "Existing hook script differs — backing up to: $backup"
+            cp "$dst" "$backup"
+            cp "$src" "$dst"
+            chmod +x "$dst"
+            ok "Hook script updated: $script"
+        fi
     else
-        backup="$TARGET_HOOK.backup.$(date +%Y%m%d-%H%M%S)"
-        warn "Existing hook script differs — backing up to: $backup"
-        cp "$TARGET_HOOK" "$backup"
-        cp "$SOURCE_HOOK" "$TARGET_HOOK"
-        chmod +x "$TARGET_HOOK"
-        ok "Hook script updated."
+        cp "$src" "$dst"
+        chmod +x "$dst"
+        ok "Hook script installed: $script"
     fi
-else
-    cp "$SOURCE_HOOK" "$TARGET_HOOK"
-    chmod +x "$TARGET_HOOK"
-    ok "Hook script installed."
-fi
+done
 
 # ── Step 2: Update settings.json ─────────────────────────
 
 info "Updating $SETTINGS_FILE"
 
-# The python script does the actual JSON manipulation. It is idempotent:
-# if the hook is already registered, it makes no changes.
+# The python script does the actual JSON manipulation. It is
+# idempotent: hooks that are already registered are skipped.
+# Registrations are driven by a single list so adding future
+# hooks is a one-liner.
 SETTINGS_FILE="$SETTINGS_FILE" python3 <<'PYEOF'
 import json
 import os
@@ -106,7 +130,25 @@ import sys
 from datetime import datetime
 
 settings_path = os.environ["SETTINGS_FILE"]
-hook_command = "~/.claude/scripts/agentcanvas-notify-stop.sh"
+
+# Each registration describes one hook command to ensure is
+# present under settings.hooks[event]. `matcher` is the string to
+# match against a group's "matcher" field; None means "catch-all
+# group" (no matcher key, or an empty/missing matcher).
+registrations = [
+    {
+        "event": "Stop",
+        "matcher": None,
+        "command": "~/.claude/scripts/agentcanvas-notify-stop.sh",
+        "label": "Stop → agentcanvas-notify-stop.sh",
+    },
+    {
+        "event": "PreToolUse",
+        "matcher": "AskUserQuestion",
+        "command": "~/.claude/scripts/agentcanvas-notify-ask-user.sh",
+        "label": "PreToolUse[AskUserQuestion] → agentcanvas-notify-ask-user.sh",
+    },
+]
 
 # Load existing settings, or start fresh
 if os.path.exists(settings_path):
@@ -119,41 +161,67 @@ if os.path.exists(settings_path):
 else:
     settings = {}
 
-# Walk down to hooks.Stop, creating intermediate keys
-hooks = settings.setdefault("hooks", {})
-stop_groups = hooks.setdefault("Stop", [])
 
-# Find an existing catch-all matcher group (no matcher key, or empty matcher).
-# If none exists, we will create one.
-target_group = None
-for group in stop_groups:
-    if not group.get("matcher"):
-        target_group = group
-        break
+def find_group(groups, matcher):
+    """Return the existing group matching `matcher`, or None.
 
-if target_group is None:
-    target_group = {"hooks": []}
-    stop_groups.append(target_group)
+    When matcher is None, we look for a catch-all group (no
+    matcher key, or empty matcher). When matcher is a string, we
+    look for a group whose "matcher" field equals that string.
+    """
+    for group in groups:
+        group_matcher = group.get("matcher")
+        if matcher is None:
+            if not group_matcher:
+                return group
+        else:
+            if group_matcher == matcher:
+                return group
+    return None
 
-target_group.setdefault("hooks", [])
 
-# Idempotency: bail out if the command is already registered
-existing_commands = [h.get("command") for h in target_group["hooks"]]
-if hook_command in existing_commands:
-    print(f"ok    Stop hook already registered in settings.json.")
+# Plan the changes first so we only back up / write when
+# something actually needs to happen.
+changes = []  # list of (registration, target_group_will_be_created)
+for reg in registrations:
+    event_groups = settings.get("hooks", {}).get(reg["event"], [])
+    group = find_group(event_groups, reg["matcher"])
+    if group is None:
+        changes.append((reg, True))
+        continue
+    existing_commands = [h.get("command") for h in group.get("hooks", [])]
+    if reg["command"] in existing_commands:
+        print(f"ok    Already registered: {reg['label']}")
+        continue
+    changes.append((reg, False))
+
+if not changes:
+    print("ok    All hooks already registered; no changes needed.")
     sys.exit(0)
 
-# Backup before modifying
+# Backup before modifying (once per invocation)
 if os.path.exists(settings_path):
     backup_path = f"{settings_path}.backup.{datetime.now():%Y%m%d-%H%M%S}"
     shutil.copy2(settings_path, backup_path)
     print(f"info  Backed up existing settings.json to: {backup_path}")
 
-# Append the new hook entry
-target_group["hooks"].append({
-    "type": "command",
-    "command": hook_command,
-})
+# Apply the changes
+hooks = settings.setdefault("hooks", {})
+for reg, _create in changes:
+    event_groups = hooks.setdefault(reg["event"], [])
+    group = find_group(event_groups, reg["matcher"])
+    if group is None:
+        group = {"hooks": []}
+        if reg["matcher"] is not None:
+            group["matcher"] = reg["matcher"]
+        event_groups.append(group)
+
+    group.setdefault("hooks", [])
+    group["hooks"].append({
+        "type": "command",
+        "command": reg["command"],
+    })
+    print(f"ok    Registered: {reg['label']}")
 
 # Write back with pretty formatting
 os.makedirs(os.path.dirname(settings_path), exist_ok=True)
@@ -161,17 +229,19 @@ with open(settings_path, "w") as f:
     json.dump(settings, f, indent=2)
     f.write("\n")
 
-print(f"ok    Stop hook registered in {settings_path}.")
+print(f"ok    Wrote {settings_path}.")
 PYEOF
 
 echo
 ok "${BOLD}Setup complete.${RESET}"
 echo
-echo "  The hook is a no-op outside AgentCanvas, so it's safe to keep installed"
-echo "  globally. Inside an AgentCanvas terminal tile, every Claude Code Stop"
-echo "  event will now post a toast notification to the canvas."
+echo "  The hooks are no-ops outside AgentCanvas, so they're safe to keep"
+echo "  installed globally. Inside an AgentCanvas terminal tile:"
+echo "    - Stop events post a success toast to the canvas."
+echo "    - AskUserQuestion calls post a warning toast so you know the"
+echo "      terminal is waiting on your input."
 echo
-echo "  Test it from inside an AgentCanvas terminal:"
+echo "  Test from inside an AgentCanvas terminal:"
 echo "    curl -s -X POST \$AGENT_CANVAS_API/api/notify \\"
 echo "      -H 'Content-Type: application/json' \\"
 echo "      -d '{\"body\":\"Hello from setup\",\"level\":\"success\"}'"

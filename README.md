@@ -161,21 +161,26 @@ git push origin --tags
 gh release create v0.1.0 dist/*.dmg --title "AgentCanvas v0.1.0" --notes "Initial release"
 ```
 
-### Optional: Claude Code Stop Hook
+### Optional: Claude Code Notification Hooks
 
-If you use Claude Code, install the bundled Stop hook so any Claude Code instance running inside an AgentCanvas terminal tile automatically posts a toast to the canvas when it finishes a task:
+If you use Claude Code, install the bundled notification hooks so any Claude Code instance running inside an AgentCanvas terminal tile automatically posts toasts to the canvas on notable events:
 
 ```bash
 npm run setup:claude-hook
 ```
 
+Two hooks are installed:
+
+- **Stop hook** — posts a success toast when Claude finishes a task, so you can glance at the canvas to see which tile is done.
+- **AskUserQuestion hook** — posts a warning toast when Claude invokes the `AskUserQuestion` tool mid-turn and is blocked waiting on your input. Without this, the picker UI appears silently and it's easy to miss that a tile needs you.
+
 This installer is idempotent — safe to re-run — and:
 
-- Copies `scripts/agentcanvas-notify-stop.sh` to `~/.claude/scripts/`
-- Adds the hook command to the `Stop` array in `~/.claude/settings.json` (backing up the existing file with a timestamped suffix)
-- Leaves any other Stop hooks you have configured untouched
+- Copies `scripts/agentcanvas-notify-stop.sh` and `scripts/agentcanvas-notify-ask-user.sh` to `~/.claude/scripts/`
+- Registers a `Stop` hook command and a `PreToolUse` hook command (matcher `AskUserQuestion`) in `~/.claude/settings.json` (backing up the existing file with a timestamped suffix on any run that makes changes)
+- Leaves any other hooks you have configured untouched
 
-The hook script is a no-op outside AgentCanvas (it checks for the `AGENT_CANVAS_API` env var), so it has zero effect on Claude Code instances running in any other terminal. Honors the `CLAUDE_CONFIG_DIR` env var if you keep your Claude config in a non-default location. Requires `python3` (preinstalled on macOS).
+Both hook scripts are no-ops outside AgentCanvas (they check for the `AGENT_CANVAS_API` env var), so installing them globally has zero effect on Claude Code instances running in any other terminal. The `AskUserQuestion` hook backgrounds its network call so Claude's picker UI isn't delayed by a slow canvas server. Honors the `CLAUDE_CONFIG_DIR` env var if you keep your Claude config in a non-default location. Requires `python3` (preinstalled on macOS).
 
 ## Architecture
 
