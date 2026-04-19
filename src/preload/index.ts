@@ -647,6 +647,29 @@ const notifyAPI: NotifyAPI = {
 
 contextBridge.exposeInMainWorld('notify', notifyAPI)
 
+// ── Flow-mute state mirror ──────────────────────────────
+// Renderer pushes flow-mute state to main so native OS notifications
+// can be suppressed without a round-trip.
+
+export interface FlowMuteMirror {
+  enabled: boolean
+  active: boolean
+  suppressNative: boolean
+  flowGroupIds: string[]
+}
+
+export interface FlowMuteAPI {
+  updateMirror: (mirror: FlowMuteMirror) => void
+}
+
+const flowMuteAPI: FlowMuteAPI = {
+  updateMirror: (mirror) => {
+    ipcRenderer.send('flow-mute:mirror', mirror)
+  }
+}
+
+contextBridge.exposeInMainWorld('flowMute', flowMuteAPI)
+
 // ── Diff API ────────────────────────────────────────────
 
 export interface DiffAPI {

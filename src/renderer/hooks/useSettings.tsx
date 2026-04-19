@@ -60,6 +60,14 @@ const FALLBACK: Settings = {
     notifyOnExpiry: true,
     rankByUrgency: true,
     detectTtlFromLogs: true
+  },
+  flowMute: {
+    enabled: true,
+    idleTimeoutMs: 300_000,
+    entryThresholdMs: 180_000,
+    suppressNative: true,
+    muteSounds: true,
+    showRing: true
   }
 }
 
