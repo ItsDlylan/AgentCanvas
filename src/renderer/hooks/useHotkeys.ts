@@ -122,7 +122,8 @@ export const DEFAULT_HOTKEYS: HotkeySettings = {
   toggleVoice: 'Mod+Shift+V',
   zoomToFocused: 'Mod+0',
   toggleFlow: 'Mod+F',
-  exitFlowReplay: 'Mod+Shift+F'
+  exitFlowReplay: 'Mod+Shift+F',
+  openPalette: 'Mod+K'
 }
 
 // ── Hook ────────────────────────────────────────────────

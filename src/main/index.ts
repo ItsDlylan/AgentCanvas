@@ -25,6 +25,7 @@ import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-sto
 import { DiffService } from './diff-service'
 import { loadExtensions, getLoadedExtensions, getExtensionsDir } from './extension-loader'
 import { TeamWatcher } from './team-watcher'
+import { getScrollbackIndex } from './scrollback-index'
 import { claudeUsageService } from './claude-usage-service'
 import type { ClaudeUsageSnapshot } from '../renderer/types/claude-usage'
 
@@ -42,6 +43,7 @@ const cdpProxy = new CdpProxy()
 const canvasApi = new CanvasApi()
 const diffService = new DiffService()
 const teamWatcher = new TeamWatcher()
+const scrollbackIndex = getScrollbackIndex()
 let mainWindow: BrowserWindow | null = null
 
 // ── Flow-mute mirror ───────────────────────────────────
@@ -707,6 +709,13 @@ ipcMain.handle('diff:compute', (_event, { cwd }: { cwd: string }) => {
   return diffService.computeDiff(cwd)
 })
 
+ipcMain.handle(
+  'search:scrollback',
+  (_event, args: { query: string; terminalIds?: string[]; limit?: number }) => {
+    return scrollbackIndex.searchScrollback(args)
+  }
+)
+
 // ── Performance Monitor IPC ──────────────────────────────
 ipcMain.handle('perf:toggle', () => {
   if (isPerfEnabled()) {
@@ -939,6 +948,9 @@ terminalManager.on('data', (id: string, data: string) => {
   }
   scrollbackBuffers.set(id, buf)
 
+  // Feed the FTS5 scrollback index (line-buffered, 500ms flush)
+  scrollbackIndex.appendPtyData(id, data)
+
   // Only buffer for IPC if not paused (paused during reconnect)
   if (pausedSessions.has(id)) return
   const existing = dataBuffers.get(id) || ''
@@ -951,6 +963,7 @@ terminalManager.on('exit', (id: string, exitCode: number) => {
   pausedSessions.delete(id)
   dataBuffers.delete(id)
   cdpProxy.detach(id)
+  scrollbackIndex.dropTerminal(id)
   mainWindow?.webContents.send('terminal:exit', { id, exitCode })
 })
 

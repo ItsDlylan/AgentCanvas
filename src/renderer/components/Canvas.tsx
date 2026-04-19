@@ -56,6 +56,8 @@ import { useVoice } from '@/hooks/useVoice'
 import { useCanvasStore, snapToGrid } from '@/store/canvas-store'
 import { useFlowMuteStore } from '@/store/flow-mute-store'
 import { useActivityTracker } from '@/hooks/useActivityTracker'
+import { CommandPalette } from './palette/CommandPalette'
+import { PALETTE_ACTION_EVENT, type PaletteUiAction } from '@/lib/palette-commands'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
@@ -1382,12 +1384,27 @@ export default function Canvas() {
         const fm = useFlowMuteStore.getState()
         if (fm.mode === 'off') return
         fm.exitFlow({ reason: 'manual', replay: true })
-      }
+      },
+      openPalette: () => useCanvasStore.getState().togglePalette()
     }),
     [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, cycleFocus, togglePomodoro, voice]
   )
 
   useHotkeys(settings.hotkeys, hotkeyActions)
+
+  // ── Palette-dispatched UI actions ──
+  // Commands registry (`>` prefix) emits CustomEvents for toggles/actions that
+  // live in Canvas.tsx local state; route them through the same hotkey actions.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const action = (e as CustomEvent<{ action: PaletteUiAction }>).detail?.action
+      if (!action) return
+      const fn = hotkeyActions[action]
+      if (fn) fn()
+    }
+    window.addEventListener(PALETTE_ACTION_EVENT, handler)
+    return () => window.removeEventListener(PALETTE_ACTION_EVENT, handler)
+  }, [hotkeyActions])
 
   // ── Ctrl-hold jump hints ──
   // Hold Ctrl for 300ms (without pressing another key) to show jump badges.
@@ -1845,6 +1862,9 @@ export default function Canvas() {
 
           {/* Settings overlay */}
           {settingsOpen && <SettingsPage onClose={() => setSettingsOpen(false)} />}
+
+          {/* Command palette */}
+          <CommandPalette />
         </div>
       </div>
     </FocusedTerminalContext.Provider>

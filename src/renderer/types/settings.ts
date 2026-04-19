@@ -108,6 +108,7 @@ export type HotkeyAction =
   | 'zoomToFocused'
   | 'toggleFlow'
   | 'exitFlowReplay'
+  | 'openPalette'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 

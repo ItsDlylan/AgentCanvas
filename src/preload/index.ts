@@ -682,6 +682,35 @@ const diffAPI: DiffAPI = {
 
 contextBridge.exposeInMainWorld('diff', diffAPI)
 
+// ── Search API ──────────────────────────────────────────
+
+export interface ScrollbackSearchResult {
+  terminalId: string
+  lineNo: number
+  snippet: string
+  ts: number
+}
+
+export interface ScrollbackSearchOpts {
+  terminalIds?: string[]
+  limit?: number
+}
+
+export interface SearchAPI {
+  scrollback: (query: string, opts?: ScrollbackSearchOpts) => Promise<ScrollbackSearchResult[]>
+}
+
+const searchAPI: SearchAPI = {
+  scrollback: (query, opts) =>
+    ipcRenderer.invoke('search:scrollback', {
+      query,
+      terminalIds: opts?.terminalIds,
+      limit: opts?.limit
+    })
+}
+
+contextBridge.exposeInMainWorld('search', searchAPI)
+
 // Voice API
 export interface VoiceModelStatus {
   model: string
