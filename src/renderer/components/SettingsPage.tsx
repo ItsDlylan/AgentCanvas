@@ -7,7 +7,7 @@ import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS } from '@/constants/devicePrese
 import { DEVICE_PRESETS } from '@/constants/devicePresets'
 import { v4 as uuid } from 'uuid'
 
-type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates' | 'notifications' | 'voice'
+type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates' | 'notifications' | 'focus' | 'voice'
 
 interface SettingsPageProps {
   onClose: () => void
@@ -22,6 +22,7 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'hotkeys', label: 'Hotkeys' },
   { id: 'templates', label: 'Templates' },
   { id: 'notifications', label: 'Notifications' },
+  { id: 'focus', label: 'Focus' },
   { id: 'voice', label: 'Voice' }
 ]
 
@@ -1429,6 +1430,75 @@ function NotificationsSection({ settings, update }: { settings: Settings; update
   )
 }
 
+// ── Focus (flow-mute) settings ───────────────────────────
+
+const FLOW_MUTE_DEFAULT = {
+  enabled: true,
+  idleTimeoutMs: 300_000,
+  entryThresholdMs: 180_000,
+  suppressNative: true,
+  muteSounds: true,
+  showRing: true
+}
+
+function FocusSection({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }) {
+  const f = settings.flowMute ?? FLOW_MUTE_DEFAULT
+  const idleMin = Math.round(f.idleTimeoutMs / 60_000)
+  const entryMin = Math.round(f.entryThresholdMs / 60_000)
+  return (
+    <div>
+      <h2 className="mb-4 text-sm font-semibold text-zinc-200">Focus</h2>
+      <p className="mb-4 text-[11px] text-zinc-500">
+        When you&apos;re heads-down on one tile, flow-mute suppresses non-critical notifications
+        from other tiles into a rollup that surfaces when you disengage. Critical events and
+        errors always come through.
+      </p>
+      <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
+        <SettingRow label="Enable Flow-Mute" description="Master on/off switch for flow-aware suppression">
+          <Toggle
+            value={f.enabled}
+            onChange={(v) => update({ flowMute: { ...f, enabled: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Idle Timeout (minutes)" description="Exit flow after this much inactivity. Pending notifications surface as a rollup.">
+          <NumberInput
+            value={idleMin}
+            onChange={(v) => update({ flowMute: { ...f, idleTimeoutMs: Math.max(1, Math.min(30, v)) * 60_000 } })}
+            min={1}
+            max={30}
+          />
+        </SettingRow>
+        <SettingRow label="Entry Threshold (minutes)" description="How long you must stay on a tile before flow-mute kicks in automatically. ⌘F bypasses this.">
+          <NumberInput
+            value={entryMin}
+            onChange={(v) => update({ flowMute: { ...f, entryThresholdMs: Math.max(1, Math.min(10, v)) * 60_000 } })}
+            min={1}
+            max={10}
+          />
+        </SettingRow>
+        <SettingRow label="Suppress OS Notifications" description="Also silence native macOS toasts when flow is active. Critical events still fire.">
+          <Toggle
+            value={f.suppressNative}
+            onChange={(v) => update({ flowMute: { ...f, suppressNative: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Mute Notification Sounds" description="Critical events still play sound.">
+          <Toggle
+            value={f.muteSounds}
+            onChange={(v) => update({ flowMute: { ...f, muteSounds: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Show Focus Ring" description="Thin border around the tile you&apos;re in flow on, plus its linked group.">
+          <Toggle
+            value={f.showRing}
+            onChange={(v) => update({ flowMute: { ...f, showRing: v } })}
+          />
+        </SettingRow>
+      </div>
+    </div>
+  )
+}
+
 // ── Voice settings ───────────────────────────────────────
 
 function VoiceSection({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }) {
@@ -1888,6 +1958,7 @@ function SettingsPageComponent({ onClose }: SettingsPageProps) {
           {activeCategory === 'hotkeys' && <HotkeysSection settings={settings} update={update} />}
           {activeCategory === 'templates' && <TemplatesSection settings={settings} update={update} />}
           {activeCategory === 'notifications' && <NotificationsSection settings={settings} update={update} />}
+          {activeCategory === 'focus' && <FocusSection settings={settings} update={update} />}
           {activeCategory === 'voice' && <VoiceSection settings={settings} update={update} />}
         </div>
       </div>

@@ -54,6 +54,8 @@ import { VoiceNumberOverlay } from './VoiceNumberOverlay'
 import { VoiceGridOverlay } from './VoiceGridOverlay'
 import { useVoice } from '@/hooks/useVoice'
 import { useCanvasStore, snapToGrid } from '@/store/canvas-store'
+import { useFlowMuteStore } from '@/store/flow-mute-store'
+import { useActivityTracker } from '@/hooks/useActivityTracker'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
@@ -204,6 +206,57 @@ export default function Canvas() {
     useCanvasStore.getState().setBrowserDefaultUrl(settings.browser.defaultUrl)
   }, [settings.canvas.tileGap, settings.browser.defaultUrl])
 
+  // ── Flow-mute wiring ──
+  useActivityTracker()
+
+  useEffect(() => {
+    useFlowMuteStore.getState().setSettings(settings.flowMute)
+  }, [settings.flowMute])
+
+  useEffect(() => {
+    useFlowMuteStore.getState().setFocus(focusedId)
+  }, [focusedId])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      useFlowMuteStore.getState().tick()
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Exit flow if the target tile is removed (killed, crashed, etc.)
+  useEffect(() => {
+    const fm = useFlowMuteStore.getState()
+    if (fm.mode === 'off' || !fm.targetId) return
+    const exists = allNodes.some(
+      (n) => (n.data as Record<string, unknown>).sessionId === fm.targetId
+    )
+    if (!exists) {
+      fm.exitFlow({ reason: 'tile-killed', replay: true })
+    }
+  }, [allNodes])
+
+  // Push flow-mute snapshot to main so it can suppress native OS notifications
+  // without an IPC round-trip per notification.
+  const flowMuteMode = useFlowMuteStore(s => s.mode)
+  const flowMuteTarget = useFlowMuteStore(s => s.targetId)
+  useEffect(() => {
+    const flowGroupIds: string[] = []
+    if (flowMuteMode === 'active' && flowMuteTarget) {
+      flowGroupIds.push(flowMuteTarget)
+      for (const e of allEdges) {
+        if (e.source === flowMuteTarget) flowGroupIds.push(e.target)
+        else if (e.target === flowMuteTarget) flowGroupIds.push(e.source)
+      }
+    }
+    window.flowMute.updateMirror({
+      enabled: settings.flowMute?.enabled ?? true,
+      active: flowMuteMode === 'active',
+      suppressNative: settings.flowMute?.suppressNative ?? true,
+      flowGroupIds
+    })
+  }, [flowMuteMode, flowMuteTarget, allEdges, settings.flowMute?.enabled, settings.flowMute?.suppressNative])
+
   // ── Refs that sync from store (for beforeunload handler and onConnect) ──
   const allNodesRef = useRef(allNodes)
   allNodesRef.current = allNodes
@@ -222,6 +275,19 @@ export default function Canvas() {
     )
     return focusedNode ? (focusedNode.data as Record<string, unknown>).linkedBrowserId as string : null
   }, [focusedId, allNodes])
+
+  // ── Flow-mute ring: tiles in the active flow group get a className that CSS hooks. ──
+  const flowTargetId = useFlowMuteStore(s => s.mode === 'active' ? s.targetId : null)
+  const flowRingEnabled = useFlowMuteStore(s => s.settings.enabled && s.settings.showRing)
+  const flowGroup = useMemo(() => {
+    if (!flowTargetId || !flowRingEnabled) return new Set<string>()
+    const group = new Set<string>([flowTargetId])
+    for (const e of allEdges) {
+      if (e.source === flowTargetId) group.add(e.target)
+      else if (e.target === flowTargetId) group.add(e.source)
+    }
+    return group
+  }, [flowTargetId, flowRingEnabled, allEdges])
 
   const visibleNodes = useMemo(
     () =>
@@ -292,8 +358,11 @@ export default function Canvas() {
             }
           }
           return n
-        }),
-    [allNodes, tileWorkspaceMap, activeWorkspaceId, focusedDevToolsLinkedBrowser]
+        })
+        .map((n) => flowGroup.has(n.id)
+          ? { ...n, className: [n.className, 'flow-ring'].filter(Boolean).join(' ') }
+          : n),
+    [allNodes, tileWorkspaceMap, activeWorkspaceId, focusedDevToolsLinkedBrowser, flowGroup]
   )
 
   const visibleNodeIds = useMemo(
@@ -1297,7 +1366,23 @@ export default function Canvas() {
         if (voice.mode === 'idle') voice.startListening()
         else voice.stopListening()
       },
-      zoomToFocused: () => useCanvasStore.getState().zoomToFocused()
+      zoomToFocused: () => useCanvasStore.getState().zoomToFocused(),
+      toggleFlow: () => {
+        const fm = useFlowMuteStore.getState()
+        if (!fm.settings.enabled) return
+        if (fm.mode === 'active') {
+          fm.exitFlow({ reason: 'manual', replay: true })
+          return
+        }
+        const currentFocusedId = useCanvasStore.getState().focusedId
+        if (!currentFocusedId) return
+        fm.enterFlow(currentFocusedId, { manual: true })
+      },
+      exitFlowReplay: () => {
+        const fm = useFlowMuteStore.getState()
+        if (fm.mode === 'off') return
+        fm.exitFlow({ reason: 'manual', replay: true })
+      }
     }),
     [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, cycleFocus, togglePomodoro, voice]
   )

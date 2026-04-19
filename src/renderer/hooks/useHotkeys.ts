@@ -120,7 +120,9 @@ export const DEFAULT_HOTKEYS: HotkeySettings = {
   openInIde: 'Mod+Shift+O',
   togglePomodoro: 'Mod+P',
   toggleVoice: 'Mod+Shift+V',
-  zoomToFocused: 'Mod+0'
+  zoomToFocused: 'Mod+0',
+  toggleFlow: 'Mod+F',
+  exitFlowReplay: 'Mod+Shift+F'
 }
 
 // ── Hook ────────────────────────────────────────────────
