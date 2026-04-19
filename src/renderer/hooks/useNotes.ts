@@ -6,6 +6,10 @@ import { LinkedTaskItem } from '@/extensions/LinkedTaskItem'
 import Placeholder from '@tiptap/extension-placeholder'
 import { ResizableImage } from '@/extensions/ResizableImage'
 import { VideoNode } from '@/extensions/VideoNode'
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableHeader } from '@tiptap/extension-table-header'
+import { TableCell } from '@tiptap/extension-table-cell'
 import { Fragment, Slice } from '@tiptap/pm/model'
 import type { Editor } from '@tiptap/react'
 import type { JSONContent } from '@tiptap/core'
@@ -73,6 +77,10 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
       LinkedTaskItem.configure({ nested: true }),
       ResizableImage.configure({ allowBase64: true }),
       VideoNode,
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
       Placeholder.configure({ placeholder: 'Type or paste...  # ## - [ ] for formatting' })
     ],
     content: '',
@@ -172,7 +180,12 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
     if (!editor) return
     window.note.load(noteId).then((noteFile) => {
       if (noteFile?.content && editor && !editor.isDestroyed) {
-        editor.commands.setContent(noteFile.content)
+        try {
+          editor.commands.setContent(noteFile.content)
+        } catch (err) {
+          console.error('[useNotes] setContent (load) failed', err)
+          editor.commands.setContent('')
+        }
       }
     })
   }, [editor, noteId])
@@ -185,7 +198,12 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
       if (updatedId === noteIdRef.current && !editor.isDestroyed) {
         window.note.load(noteIdRef.current).then((noteFile) => {
           if (noteFile?.content && !editor.isDestroyed) {
-            editor.commands.setContent(noteFile.content)
+            try {
+              editor.commands.setContent(noteFile.content)
+            } catch (err) {
+              console.error('[useNotes] setContent (pomodoro) failed', err)
+              editor.commands.setContent('')
+            }
           }
         })
       }
@@ -202,7 +220,12 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
       if (updatedId === noteIdRef.current && !editor.isDestroyed) {
         window.note.load(noteIdRef.current).then((noteFile) => {
           if (noteFile?.content && !editor.isDestroyed) {
-            editor.commands.setContent(noteFile.content)
+            try {
+              editor.commands.setContent(noteFile.content)
+            } catch (err) {
+              console.error('[useNotes] setContent (api) failed', err)
+              editor.commands.setContent('')
+            }
           }
         })
       }

@@ -364,7 +364,14 @@ export class CanvasApi extends EventEmitter {
           position?: { x: number; y: number }; width?: number; height?: number
         }
         const noteId = randomUUID()
-        const tiptapContent = typeof content === 'string' ? markdownToTiptap(content) : content
+        let tiptapContent: Record<string, unknown> | undefined
+        try {
+          tiptapContent = typeof content === 'string' ? markdownToTiptap(content) : content
+        } catch {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'Invalid markdown' }))
+          return
+        }
         this.emit('note-open', { noteId, label, content: tiptapContent, linkedTerminalId, linkedNoteId, position, width, height }, (result: unknown) => {
           res.writeHead(200)
           res.end(JSON.stringify(result))
@@ -384,7 +391,14 @@ export class CanvasApi extends EventEmitter {
           res.end(JSON.stringify({ error: 'noteId and content are required' }))
           return
         }
-        const tiptapContent = typeof content === 'string' ? markdownToTiptap(content) : content
+        let tiptapContent: Record<string, unknown> | undefined
+        try {
+          tiptapContent = typeof content === 'string' ? markdownToTiptap(content) : content
+        } catch {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'Invalid markdown' }))
+          return
+        }
         this.emit('note-update', { noteId, content: tiptapContent }, (result: unknown) => {
           res.writeHead(200)
           res.end(JSON.stringify(result))

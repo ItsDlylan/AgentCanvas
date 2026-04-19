@@ -123,6 +123,32 @@ function renderNode(node: TipTapNode, indent = ''): string {
     case 'horizontalRule':
       return '---'
 
+    case 'table': {
+      const rows = node.content ?? []
+      const lines: string[] = []
+      let headerRendered = false
+      for (const row of rows) {
+        const cells = (row.content ?? []).map((cell) => {
+          const cellText = (cell.content ?? [])
+            .map((c) => renderInline(c.content))
+            .join(' ')
+            .replace(/\|/g, '\\|')
+            .replace(/\n+/g, ' ')
+            .trim()
+          return cellText
+        })
+        lines.push(`| ${cells.join(' | ')} |`)
+        if (!headerRendered) {
+          const isHeaderRow = (row.content ?? []).every((cell) => cell.type === 'tableHeader')
+          if (isHeaderRow) {
+            lines.push(`|${cells.map(() => ' --- ').join('|')}|`)
+            headerRendered = true
+          }
+        }
+      }
+      return lines.join('\n')
+    }
+
     default:
       return renderInline(node.content)
   }

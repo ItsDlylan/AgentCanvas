@@ -1,8 +1,11 @@
 import { homedir } from 'os'
 import { join } from 'path'
-import { readFileSync, writeFileSync, unlinkSync, readdirSync, mkdirSync, existsSync } from 'fs'
+import { readFileSync, unlinkSync, readdirSync, mkdirSync, existsSync, promises as fsp } from 'fs'
 
 const NOTE_DIR = join(homedir(), 'AgentCanvas', 'tmp')
+
+// Per-noteId write queue to serialize concurrent saves on the same note.
+const saveQueues = new Map<string, Promise<void>>()
 
 export interface NoteMeta {
   noteId: string
@@ -56,38 +59,55 @@ export function loadNote(noteId: string): NoteFile | null {
   }
 }
 
-export function saveNote(noteId: string, meta: Partial<NoteMeta>, content?: Record<string, unknown>): void {
+export async function saveNote(
+  noteId: string,
+  meta: Partial<NoteMeta>,
+  content?: Record<string, unknown>
+): Promise<void> {
   ensureNoteDir()
   const filePath = join(NOTE_DIR, `note-${noteId}.json`)
-  // Load existing to merge
-  let existing: NoteFile | null = null
-  try {
-    const raw = readFileSync(filePath, 'utf-8')
-    existing = JSON.parse(raw) as NoteFile
-  } catch {
-    // new file
-  }
 
-  const now = Date.now()
-  const file: NoteFile = {
-    meta: {
-      noteId,
-      label: meta.label ?? existing?.meta?.label ?? 'Note',
-      workspaceId: meta.workspaceId ?? existing?.meta?.workspaceId ?? 'default',
-      isSoftDeleted: meta.isSoftDeleted ?? existing?.meta?.isSoftDeleted ?? false,
-      position: meta.position ?? existing?.meta?.position ?? { x: 100, y: 100 },
-      width: meta.width ?? existing?.meta?.width ?? 400,
-      height: meta.height ?? existing?.meta?.height ?? 400,
-      linkedTerminalId: meta.linkedTerminalId ?? existing?.meta?.linkedTerminalId,
-      linkedNoteId: meta.linkedNoteId ?? existing?.meta?.linkedNoteId,
-      parentTaskInfo: meta.parentTaskInfo ?? existing?.meta?.parentTaskInfo,
-      createdAt: existing?.meta?.createdAt ?? now,
-      updatedAt: now
-    },
-    content: content ?? existing?.content ?? {}
-  }
+  const prev = saveQueues.get(noteId) ?? Promise.resolve()
+  const next = prev.then(async () => {
+    let existing: NoteFile | null = null
+    try {
+      const raw = await fsp.readFile(filePath, 'utf-8')
+      existing = JSON.parse(raw) as NoteFile
+    } catch {
+      // new file
+    }
 
-  writeFileSync(filePath, JSON.stringify(file, null, 2))
+    const now = Date.now()
+    const file: NoteFile = {
+      meta: {
+        noteId,
+        label: meta.label ?? existing?.meta?.label ?? 'Note',
+        workspaceId: meta.workspaceId ?? existing?.meta?.workspaceId ?? 'default',
+        isSoftDeleted: meta.isSoftDeleted ?? existing?.meta?.isSoftDeleted ?? false,
+        position: meta.position ?? existing?.meta?.position ?? { x: 100, y: 100 },
+        width: meta.width ?? existing?.meta?.width ?? 400,
+        height: meta.height ?? existing?.meta?.height ?? 400,
+        linkedTerminalId: meta.linkedTerminalId ?? existing?.meta?.linkedTerminalId,
+        linkedNoteId: meta.linkedNoteId ?? existing?.meta?.linkedNoteId,
+        parentTaskInfo: meta.parentTaskInfo ?? existing?.meta?.parentTaskInfo,
+        createdAt: existing?.meta?.createdAt ?? now,
+        updatedAt: now
+      },
+      content: content ?? existing?.content ?? {}
+    }
+
+    await fsp.writeFile(filePath, JSON.stringify(file, null, 2))
+  })
+
+  const chained = next.catch((err) => {
+    console.error(`[note-store] saveNote failed for ${noteId}:`, err)
+  })
+  saveQueues.set(noteId, chained)
+  chained.finally(() => {
+    if (saveQueues.get(noteId) === chained) saveQueues.delete(noteId)
+  })
+
+  return next
 }
 
 export function deleteNote(noteId: string): void {

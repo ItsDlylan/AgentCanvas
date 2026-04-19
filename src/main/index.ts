@@ -12,6 +12,7 @@ import { CanvasApi } from './canvas-api'
 import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabled } from './perf-monitor'
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
+import { isValidTiptapDoc } from './tiptap-validator'
 import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachments } from './attachment-store'
 import { ensureDrawDir, loadDraw, saveDraw, deleteDraw, listDraws } from './draw-store'
 import { loadImage, saveImage, deleteImage, listImages, storeImage } from './image-store'
@@ -518,8 +519,8 @@ ipcMain.handle('note:load', (_event, { noteId }) => {
   return loadNote(noteId)
 })
 
-ipcMain.handle('note:save', (_event, { noteId, meta, content }) => {
-  saveNote(noteId, meta, content)
+ipcMain.handle('note:save', async (_event, { noteId, meta, content }) => {
+  await saveNote(noteId, meta, content)
 })
 
 ipcMain.handle('note:delete', (_event, { noteId }) => {
@@ -1104,12 +1105,16 @@ canvasApi.on('status-request', (reply: (data: unknown) => void) => {
 
 // ── Note API endpoints ──
 
-canvasApi.on('note-open', (info: {
+canvasApi.on('note-open', async (info: {
   noteId: string; label?: string; content?: Record<string, unknown>;
   linkedTerminalId?: string; linkedNoteId?: string;
   position?: { x: number; y: number }; width?: number; height?: number
 }, reply: (result: unknown) => void) => {
-  saveNote(info.noteId, {
+  if (info.content !== undefined && !isValidTiptapDoc(info.content)) {
+    reply({ ok: false, error: 'Invalid TipTap content' })
+    return
+  }
+  await saveNote(info.noteId, {
     noteId: info.noteId,
     label: info.label || 'Note',
     workspaceId: 'default',
@@ -1126,8 +1131,12 @@ canvasApi.on('note-open', (info: {
   reply({ ok: true, noteId: info.noteId })
 })
 
-canvasApi.on('note-update', (info: { noteId: string; content: Record<string, unknown> }, reply: (result: unknown) => void) => {
-  saveNote(info.noteId, {}, info.content)
+canvasApi.on('note-update', async (info: { noteId: string; content: Record<string, unknown> }, reply: (result: unknown) => void) => {
+  if (!isValidTiptapDoc(info.content)) {
+    reply({ ok: false, error: 'Invalid TipTap content' })
+    return
+  }
+  await saveNote(info.noteId, {}, info.content)
   mainWindow?.webContents.send('canvas:note-update', { noteId: info.noteId })
   reply({ ok: true })
 })
