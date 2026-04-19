@@ -328,6 +328,20 @@ Plus custom environment variables configured in Settings > Terminal.
 
 ## Changelog
 
+### 2026-04-19
+
+- **feat:** ⌘K tile palette — fuzzy-jump to any tile by label and search through terminal scrollback in a single command bar; pick a result to focus the tile and jump to the match
+- **feat:** Flow-mute — while a tile is focused, notifications from other tiles stay silent so you can stay heads-down; the titlebar shows a mute indicator and queued toasts surface the moment focus shifts away
+- **feat:** AskUserQuestion canvas notification — Claude Code's `AskUserQuestion` tool now fires a warning toast on the canvas the instant a tile is blocked on your input, so you don't miss a silently-appearing picker; ships with a `PreToolUse` hook in the bundled installer
+
+### 2026-04-18
+
+- **feat:** Image support for note tiles — drag-and-drop images directly into a note, with a hover toolbar for quick actions and automatic attachment garbage collection that cleans up orphaned files when notes are edited or deleted
+- **feat:** `Cmd+0` hotkey to zoom and center the viewport on the currently focused tile — one shortcut to snap back from any zoom level
+- **fix:** Cross-workspace notification clicks now switch to the originating workspace before focusing the tile, instead of silently failing when the tile lives elsewhere
+- **fix:** Renderer no longer crashes when agents POST notes rapidly with large markdown payloads — the pipeline now chunks and debounces conversion work
+- **fix:** Note tile bullets and numbered list markers now align properly with their list item text
+
 ### 2026-04-15
 
 - **feat:** Claude Code prompt cache TTL timer on terminal tiles — counts down to cache expiry with warning + expiry notifications and an optional auto keep-alive with a per-session cap; links to Anthropic's prompt caching docs
