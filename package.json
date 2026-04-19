@@ -16,6 +16,7 @@
     "postinstall": "electron-builder install-app-deps --arch=$(node -p process.arch) && node scripts/copy-vad-assets.js",
     "dist": "npm run build && electron-builder --publish never",
     "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "release": "npm run build && electron-builder --mac --arm64 --x64 --publish always",
     "setup:claude-hook": "bash scripts/setup-claude-hook.sh",
     "test:notifications": "bash scripts/test-notifications.sh"
   },
@@ -40,6 +41,7 @@
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
     "@xyflow/react": "^12.6.0",
+    "dompurify": "^3.2.4",
     "konva": "^10.2.3",
     "marked": "^18.0.2",
     "meyda": "^5.6.3",
@@ -48,7 +50,9 @@
     "perfect-freehand": "^1.2.3",
     "react-konva": "^19.2.3",
     "roughjs": "^4.6.6",
+    "semver": "^7.6.3",
     "uuid": "^11.1.0",
+    "yaml": "^2.6.1",
     "vosk-browser": "^0.0.8",
     "whisper-node": "^1.1.1",
     "ws": "^8.20.0",
@@ -60,6 +64,7 @@
     "@types/node": "^22.15.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
+    "@types/semver": "^7.5.8",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
     "electron": "^35.0.0",
@@ -119,6 +124,12 @@
           "path": "/Applications"
         }
       ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ItsDlylan",
+      "repo": "AgentCanvas",
+      "releaseType": "draft"
     }
   }
 }

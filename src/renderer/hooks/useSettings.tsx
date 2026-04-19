@@ -59,6 +59,11 @@ const FALLBACK: Settings = {
     notifyOnExpiry: true,
     rankByUrgency: true,
     detectTtlFromLogs: true
+  },
+  updates: {
+    autoCheckOnLaunch: true,
+    autoCheckPeriodic: true,
+    checkIntervalHours: 4
   }
 }
 

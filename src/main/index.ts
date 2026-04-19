@@ -27,6 +27,7 @@ import { loadExtensions, getLoadedExtensions, getExtensionsDir } from './extensi
 import { TeamWatcher } from './team-watcher'
 import { claudeUsageService } from './claude-usage-service'
 import type { ClaudeUsageSnapshot } from '../renderer/types/claude-usage'
+import { initUpdater, reschedule as rescheduleUpdater } from './updater'
 
 // GPU compositing flags for smooth panning
 app.commandLine.appendSwitch('enable-gpu-rasterization')
@@ -291,6 +292,7 @@ ipcMain.handle('settings:load', () => loadSettings())
 ipcMain.handle('settings:save', (_event, { settings }: { settings: Settings }) => {
   saveSettings(settings)
   applyPromptCacheSettings(settings)
+  rescheduleUpdater()
   mainWindow?.webContents.send('settings:changed', settings)
 })
 ipcMain.handle('settings:defaults', () => DEFAULT_SETTINGS)
@@ -1335,6 +1337,8 @@ app.whenReady().then(async () => {
   mainWindow!.on('blur', unregisterRefreshShortcuts)
   // Window already has focus right after creation
   registerRefreshShortcuts()
+
+  initUpdater(mainWindow!, () => loadSettings())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -131,6 +131,12 @@ export interface PromptCacheSettings {
   detectTtlFromLogs: boolean
 }
 
+export interface UpdateSettings {
+  autoCheckOnLaunch: boolean
+  autoCheckPeriodic: boolean
+  checkIntervalHours: number
+}
+
 export interface Settings {
   general: GeneralSettings
   appearance: AppearanceSettings
@@ -142,4 +148,5 @@ export interface Settings {
   notifications: NotificationSettings
   voice: VoiceSettings
   promptCache: PromptCacheSettings
+  updates: UpdateSettings
 }
