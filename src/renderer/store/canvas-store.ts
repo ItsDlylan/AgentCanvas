@@ -143,6 +143,7 @@ export interface CanvasStore {
   allNodes: Node[]
   allEdges: Edge[]
   focusedId: string | null
+  preFocusViewport: { viewport: Viewport; tileId: string } | null
   tileWorkspaceMap: Map<string, string>
   activeWorkspaceId: string
   workspaces: Workspace[]
@@ -180,6 +181,7 @@ export interface CanvasStore {
   addTerminalForTerminal: (info: TerminalSpawnInfo) => void
   addNoteForApi: (info: { noteId: string; label?: string; linkedTerminalId?: string; linkedNoteId?: string; position?: { x: number; y: number }; width?: number; height?: number }) => void
   focusTile: (sessionId: string) => void
+  zoomToFocused: () => void
   renameTile: (sessionId: string, newLabel: string) => void
 
   // ── Note management ──
@@ -236,6 +238,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
     allNodes: [],
     allEdges: [],
     focusedId: null,
+    preFocusViewport: null,
     tileWorkspaceMap: new Map(),
     activeWorkspaceId: 'default',
     workspaces: [DEFAULT_WORKSPACE],
@@ -761,6 +764,30 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       const cx = (node.measured?.width ?? (node.style?.width as number) ?? w) / 2
       const cy = (node.measured?.height ?? (node.style?.height as number) ?? h) / 2
       centerOn(node.position.x + cx, node.position.y + cy)
+    },
+
+    zoomToFocused: () => {
+      const { focusedId, reactFlowInstance, preFocusViewport } = get()
+      if (!focusedId || !reactFlowInstance) return
+
+      if (preFocusViewport && preFocusViewport.tileId === focusedId) {
+        reactFlowInstance.setViewport(preFocusViewport.viewport, { duration: 300 })
+        set({ preFocusViewport: null })
+        return
+      }
+
+      const node = findNode(focusedId)
+      if (!node) return
+
+      const snapshot = reactFlowInstance.getViewport()
+      set({ preFocusViewport: { viewport: snapshot, tileId: focusedId } })
+
+      reactFlowInstance.fitView({
+        nodes: [{ id: node.id }],
+        duration: 300,
+        padding: 0.08,
+        maxZoom: 1.5
+      })
     },
 
     renameTile: (sessionId, newLabel) => {

@@ -105,6 +105,7 @@ export type HotkeyAction =
   | 'openInIde'
   | 'togglePomodoro'
   | 'toggleVoice'
+  | 'zoomToFocused'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 

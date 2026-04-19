@@ -107,6 +107,7 @@ export type HotkeyAction =
   | 'openInIde'
   | 'togglePomodoro'
   | 'toggleVoice'
+  | 'zoomToFocused'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -191,7 +192,8 @@ export const DEFAULT_SETTINGS: Settings = {
     killFocused: 'Mod+D',
     openInIde: 'Mod+Shift+O',
     togglePomodoro: 'Mod+P',
-    toggleVoice: 'Mod+Shift+V'
+    toggleVoice: 'Mod+Shift+V',
+    zoomToFocused: 'Mod+0'
   },
   templates: [
     {

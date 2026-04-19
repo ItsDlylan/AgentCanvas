@@ -1296,7 +1296,8 @@ export default function Canvas() {
       toggleVoice: () => {
         if (voice.mode === 'idle') voice.startListening()
         else voice.stopListening()
-      }
+      },
+      zoomToFocused: () => useCanvasStore.getState().zoomToFocused()
     }),
     [togglePanel, toggleWorkspacePanel, updateSettings, settings.canvas, cycleFocus, togglePomodoro, voice]
   )

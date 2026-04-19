@@ -30,7 +30,8 @@ const FALLBACK: Settings = {
     cycleFocusBackward: 'Ctrl+Shift+Tab',
     killFocused: 'Mod+D',
     openInIde: 'Mod+Shift+O',
-    toggleVoice: 'Mod+Shift+V'
+    toggleVoice: 'Mod+Shift+V',
+    zoomToFocused: 'Mod+0'
   },
   templates: [],
   notifications: { enabled: true, soundEnabled: true, nativeWhenUnfocused: true },

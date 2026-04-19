@@ -676,7 +676,9 @@ const HOTKEY_ACTION_META: Record<HotkeyAction, { label: string; description: str
   cycleFocusBackward: { label: 'Previous Tile', description: 'Cycle focus to the previous tile' },
   killFocused: { label: 'Kill Focused Tile', description: 'Close the currently focused tile' },
   openInIde: { label: 'Open in IDE', description: 'Open the focused terminal\'s directory in your IDE' },
-  togglePomodoro: { label: 'Toggle Pomodoro', description: 'Show/hide the Pomodoro timer popover' }
+  togglePomodoro: { label: 'Toggle Pomodoro', description: 'Show/hide the Pomodoro timer popover' },
+  toggleVoice: { label: 'Toggle Voice', description: 'Start or stop voice input' },
+  zoomToFocused: { label: 'Zoom to Focused Tile', description: 'Fit the focused tile to the viewport; press again to restore' }
 }
 
 function HotkeyInput({
