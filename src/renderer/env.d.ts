@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { TerminalAPI, BrowserAPI, WorkspaceAPI, NoteAPI, TaskAPI, AttachmentAPI, DrawAPI, ImageAPI, SettingsAPI, IdeAPI, TerminalTilesAPI, BrowserTilesAPI, DiffAPI, EdgeAPI, PomodoroAPI, NotifyAPI, VoiceAPI, TemplateAPI, ClaudeUsageAPI, UpdaterAPI, PlanAPI,FlowMuteAPI, SearchAPI } from '../preload/index'
+import type { TerminalAPI, BrowserAPI, WorkspaceAPI, NoteAPI, TaskAPI, TaskLensAPI, AttachmentAPI, DrawAPI, ImageAPI, SettingsAPI, IdeAPI, TerminalTilesAPI, BrowserTilesAPI, DiffAPI, EdgeAPI, PomodoroAPI, NotifyAPI, VoiceAPI, TemplateAPI, ClaudeUsageAPI, UpdaterAPI, PlanAPI,FlowMuteAPI, SearchAPI } from '../preload/index'
 
 declare global {
   interface Window {
@@ -9,6 +9,7 @@ declare global {
     workspace: WorkspaceAPI
     note: NoteAPI
     task: TaskAPI
+    taskLens: TaskLensAPI
     plan: PlanAPI
     attachment: AttachmentAPI
     draw: DrawAPI

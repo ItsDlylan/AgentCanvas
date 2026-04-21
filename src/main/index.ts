@@ -65,6 +65,11 @@ import {
 import { classify as classifyTask } from './task-classifier'
 import { deriveTaskState } from './task-state-derive'
 import { loadPomodoro, savePomodoro } from './pomodoro-store'
+import {
+  loadTaskLensConfig,
+  saveTaskLensConfig,
+  type TaskLensUserConfig
+} from './task-lens-config'
 import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-store'
 import { DiffService } from './diff-service'
 import { loadExtensions, getLoadedExtensions, getExtensionsDir } from './extension-loader'
@@ -824,6 +829,12 @@ ipcMain.handle(
     return { ok: true, taskId, classification }
   }
 )
+
+// ── Task Lens IPC ──────────────────────────────────────────
+ipcMain.handle('tasklens:load', () => loadTaskLensConfig())
+ipcMain.handle('tasklens:save', (_event, { config }: { config: TaskLensUserConfig }) => {
+  saveTaskLensConfig(config)
+})
 
 // ── Plan IPC Handlers (renderer → main) ──
 
