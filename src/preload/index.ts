@@ -306,6 +306,173 @@ const noteAPI: NoteAPI = {
 
 contextBridge.exposeInMainWorld('note', noteAPI)
 
+// ── Plan API ─────────────────────────────────────────────
+
+export type PlanState =
+  | 'draft'
+  | 'under_critique'
+  | 'verified'
+  | 'needs_revision'
+  | 'approved'
+  | 'executing'
+  | 'paused_needs_replan'
+  | 'done'
+  | 'archived'
+  | 'execution_failed'
+
+export interface PlanMeta {
+  planId: string
+  workspaceId: string
+  label: string
+  state: PlanState
+  position: { x: number; y: number }
+  width: number
+  height: number
+  linkedTerminalId?: string
+  linkedExecutorTerminalId?: string
+  linkedVerifierTerminalId?: string
+  linkedPR?: string
+  approvedVersion?: number
+  createdAt: number
+  updatedAt: number
+  isSoftDeleted: boolean
+}
+
+export interface PlanStep {
+  id: string
+  text: string
+  status: 'pending' | 'in-progress' | 'done' | 'skipped'
+  notes?: string
+}
+
+export interface PlanOpenQuestion {
+  id: string
+  text: string
+  resolution?: string
+}
+
+export interface PlanVerdict {
+  severity: 'none' | 'minor' | 'major'
+  summary: string
+  findings: Array<{ severity: 'minor' | 'major'; text: string }>
+}
+
+export interface PlanBody {
+  problem_statement: Record<string, unknown>
+  approach: Record<string, unknown>
+  steps: PlanStep[]
+  risks: string[]
+  open_questions: PlanOpenQuestion[]
+  acceptance_criteria: string
+}
+
+export interface PlanVersion {
+  version: number
+  timestamp: number
+  author: 'human' | 'capture-hook' | 'revision'
+  plan: PlanBody
+}
+
+export interface PlanCritiqueRef {
+  version: number
+  noteId: string
+  verdict: PlanVerdict
+  timestamp: number
+}
+
+export interface PlanDeviation {
+  stepId: string
+  reason: string
+  proposed_change: string
+  timestamp: number
+  resolved: boolean
+}
+
+export interface PlanDoc {
+  meta: PlanMeta
+  versions: PlanVersion[]
+  critiqueNoteIds: PlanCritiqueRef[]
+  deviations: PlanDeviation[]
+}
+
+export interface PlanAPI {
+  load: (planId: string) => Promise<PlanDoc | null>
+  list: () => Promise<PlanMeta[]>
+  create: (input: {
+    label?: string
+    content?: string | Partial<PlanBody>
+    linkedTerminalId?: string
+    position?: { x: number; y: number }
+    width?: number
+    height?: number
+    workspaceId?: string
+  }) => Promise<{ ok: boolean; planId?: string; meta?: PlanMeta; error?: string }>
+  update: (planId: string, patch: Partial<PlanBody>) => Promise<{ ok: boolean; version?: number; error?: string }>
+  move: (planId: string, position: { x: number; y: number }) => Promise<void>
+  resize: (planId: string, width: number, height: number) => Promise<void>
+  rename: (planId: string, label: string) => Promise<void>
+  verify: (planId: string, model?: 'sonnet' | 'opus') => Promise<{ ok: boolean; verifierTerminalId?: string; error?: string }>
+  approve: (planId: string) => Promise<{ ok: boolean; approvedVersion?: number; error?: string }>
+  unapprove: (planId: string) => Promise<{ ok: boolean; error?: string }>
+  execute: (planId: string, cwd?: string) => Promise<{ ok: boolean; executorTerminalId?: string; error?: string }>
+  resume: (planId: string) => Promise<{ ok: boolean; executorTerminalId?: string; error?: string }>
+  archive: (planId: string) => Promise<{ ok: boolean; error?: string }>
+  delete: (planId: string) => Promise<void>
+  linkPR: (planId: string, pr: string) => Promise<{ ok: boolean; error?: string }>
+  markDone: (planId: string) => Promise<{ ok: boolean; error?: string }>
+  onOpen: (callback: (info: { planId: string; meta: PlanMeta }) => void) => () => void
+  onState: (callback: (info: { planId: string; state: PlanState; [k: string]: unknown }) => void) => () => void
+  onStepUpdated: (callback: (info: { planId: string; stepId: string; status: string; notes?: string }) => void) => () => void
+  onUpdated: (callback: (info: { planId: string; version?: number; linkedPR?: string; state?: PlanState }) => void) => () => void
+  onDeleted: (callback: (info: { planId: string }) => void) => () => void
+}
+
+const planAPI: PlanAPI = {
+  load: (planId) => ipcRenderer.invoke('plan:load', { planId }),
+  list: () => ipcRenderer.invoke('plan:list'),
+  create: (input) => ipcRenderer.invoke('plan:create', input),
+  update: (planId, patch) => ipcRenderer.invoke('plan:update', { planId, patch }),
+  move: (planId, position) => ipcRenderer.invoke('plan:move', { planId, position }),
+  resize: (planId, width, height) => ipcRenderer.invoke('plan:resize', { planId, width, height }),
+  rename: (planId, label) => ipcRenderer.invoke('plan:rename', { planId, label }),
+  verify: (planId, model) => ipcRenderer.invoke('plan:verify', { planId, model }),
+  approve: (planId) => ipcRenderer.invoke('plan:approve', { planId }),
+  unapprove: (planId) => ipcRenderer.invoke('plan:unapprove', { planId }),
+  execute: (planId, cwd) => ipcRenderer.invoke('plan:execute', { planId, cwd }),
+  resume: (planId) => ipcRenderer.invoke('plan:resume', { planId }),
+  archive: (planId) => ipcRenderer.invoke('plan:archive', { planId }),
+  delete: (planId) => ipcRenderer.invoke('plan:delete', { planId }),
+  linkPR: (planId, pr) => ipcRenderer.invoke('plan:link-pr', { planId, pr }),
+  markDone: (planId) => ipcRenderer.invoke('plan:mark-done', { planId }),
+  onOpen: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { planId: string; meta: PlanMeta }): void => callback(info)
+    ipcRenderer.on('canvas:plan-open', handler)
+    return () => ipcRenderer.removeListener('canvas:plan-open', handler)
+  },
+  onState: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { planId: string; state: PlanState }): void => callback(info)
+    ipcRenderer.on('canvas:plan-state', handler)
+    return () => ipcRenderer.removeListener('canvas:plan-state', handler)
+  },
+  onStepUpdated: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { planId: string; stepId: string; status: string; notes?: string }): void => callback(info)
+    ipcRenderer.on('canvas:plan-step-updated', handler)
+    return () => ipcRenderer.removeListener('canvas:plan-step-updated', handler)
+  },
+  onUpdated: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { planId: string; version?: number; linkedPR?: string; state?: PlanState }): void => callback(info)
+    ipcRenderer.on('canvas:plan-updated', handler)
+    return () => ipcRenderer.removeListener('canvas:plan-updated', handler)
+  },
+  onDeleted: (callback) => {
+    const handler = (_event: Electron.IpcRendererEvent, info: { planId: string }): void => callback(info)
+    ipcRenderer.on('canvas:plan-deleted', handler)
+    return () => ipcRenderer.removeListener('canvas:plan-deleted', handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('plan', planAPI)
+
 // ── Attachment API ───────────────────────────────────────
 
 export interface AttachmentAPI {
