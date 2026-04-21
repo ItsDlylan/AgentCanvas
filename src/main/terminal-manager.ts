@@ -297,15 +297,57 @@ export class TerminalManager extends EventEmitter {
         try {
           const pid = session.process.pid
 
-          // Get foreground process name (async — does not block event loop)
-          const { stdout: result } = await execFileAsync('/bin/sh', [
-            '-c',
-            `ps -o comm= -t $(ps -o tty= -p ${pid} 2>/dev/null) 2>/dev/null | tail -1`
-          ], { timeout: 2000 })
+          // Resolve the shell's TTY, then list *every* process on that TTY in
+          // a single `ps` call. Iterating the list (rather than `tail -1`-ing
+          // it) is the only way to reliably detect Claude when it has spawned
+          // children — node/bash/gh/agent-browser often land last in ps output
+          // and would otherwise mask the claude process. Mirrors the pattern
+          // in claude-session-registry.ts:findClaudePidForShell.
+          const { stdout: ttyOut } = await execFileAsync(
+            'ps',
+            ['-o', 'tty=', '-p', String(pid)],
+            { timeout: 2000 }
+          )
+          if (!this.sessions.has(id)) return
+          const tty = ttyOut.trim()
+          if (!tty) return
 
-          if (!this.sessions.has(id)) return // Session may have been killed during await
+          const { stdout: listOut } = await execFileAsync(
+            'ps',
+            ['-t', tty, '-o', 'pid=,stat=,comm=,args='],
+            { timeout: 2000 }
+          )
+          if (!this.sessions.has(id)) return
 
-          const name = result.trim().split('/').pop() || ''
+          const psLines = listOut.split('\n').filter((l) => l.trim().length > 0)
+          // stat and comm are single tokens; args is the rest of the line.
+          const entries = psLines
+            .map((line) => {
+              const m = line.match(/^\s*(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/)
+              if (!m) return null
+              const entryPid = Number(m[1])
+              if (entryPid === pid) return null // skip the shell itself
+              return {
+                pid: entryPid,
+                stat: m[2],
+                comm: (m[3].split('/').pop() || m[3]).trim(),
+                args: m[4].trim()
+              }
+            })
+            .filter((e): e is NonNullable<typeof e> => e !== null)
+
+          const nowClaude = entries.some((e) => isClaudeProcessName(e.comm))
+
+          // Pick a display entry for foregroundProcess / foregroundCommandLine.
+          // Prefer entries in the foreground process group (stat contains '+'),
+          // then any claude entry, else the last entry on the TTY.
+          const fgEntries = entries.filter((e) => e.stat.includes('+'))
+          const displayPool = fgEntries.length > 0 ? fgEntries : entries
+          const claudeInPool = displayPool.find((e) => isClaudeProcessName(e.comm))
+          const display = claudeInPool ?? displayPool[displayPool.length - 1]
+          const name = display?.comm ?? ''
+          const cmdLine = display?.args ?? ''
+
           let changed = false
 
           if (name && name !== session.foregroundProcess) {
@@ -313,11 +355,15 @@ export class TerminalManager extends EventEmitter {
             changed = true
           }
 
+          if (cmdLine && cmdLine !== session.foregroundCommandLine) {
+            session.foregroundCommandLine = cmdLine
+          }
+
           // Detect Claude Code entering/leaving the terminal.
           // We only flag the session — the countdown starts when the user
           // submits their first message (handled in write()), since that's
           // when the Anthropic prompt cache actually gets populated.
-          const nowClaude = isClaudeProcessName(name)
+          const prevClaude = session.isClaudeSession
           if (nowClaude && !session.isClaudeSession) {
             session.isClaudeSession = true
             this.startLogWatcher(session)
@@ -333,6 +379,14 @@ export class TerminalManager extends EventEmitter {
             changed = true
           }
 
+          if (prevClaude !== nowClaude && process.env.NODE_ENV !== 'production') {
+            // eslint-disable-next-line no-console
+            console.debug(
+              `[cache-timer] ${session.id} isClaudeSession: ${prevClaude} → ${nowClaude}`,
+              { psLines }
+            )
+          }
+
           // V2: while Claude is running but we haven't yet pinned the
           // watcher to its session UUID, retry the registry lookup each
           // poll. Handles the startup race where we see `claude` in the
@@ -345,23 +399,6 @@ export class TerminalManager extends EventEmitter {
             session.sessionLookupAttempts += 1
             // Fire-and-forget — don't block polling on this.
             void this.resolveClaudeSession(session)
-          }
-
-          // Get full command line for persistence across restarts
-          try {
-            const { stdout: argsResult } = await execFileAsync('/bin/sh', [
-              '-c',
-              `ps -o args= -t $(ps -o tty= -p ${pid} 2>/dev/null) 2>/dev/null | tail -1`
-            ], { timeout: 2000 })
-
-            if (this.sessions.has(id)) {
-              const cmdLine = argsResult.trim()
-              if (cmdLine && cmdLine !== session.foregroundCommandLine) {
-                session.foregroundCommandLine = cmdLine
-              }
-            }
-          } catch {
-            // ps may fail
           }
 
           // Fallback CWD: read from lsof if OSC 7 hasn't fired
@@ -503,7 +540,18 @@ export class TerminalManager extends EventEmitter {
    */
   private applyDetectedCacheTtl(e: ClaudeCacheEvent): void {
     const session = this.sessions.get(e.terminalId)
-    if (!session || !session.isClaudeSession) return
+    if (!session) return
+    if (!session.isClaudeSession) {
+      // Rescue: a cache event whose UUID matches this terminal's pinned
+      // session UUID is ground truth — Claude IS running, even if ps missed
+      // it. claudeSessionUuid is only set after readSessionRegistry(pid)
+      // succeeds for a live Claude PID on this TTY, and Claude Code writes a
+      // new session file per PID, so a stale JSONL record carries a
+      // different UUID and gets rejected here.
+      if (!e.sessionUuid || e.sessionUuid !== session.claudeSessionUuid) return
+      session.isClaudeSession = true
+      this.throttledEmitStatus(session.id)
+    }
 
     const expiresAt = e.timestampMs + e.ttlSeconds * 1000
     if (expiresAt <= Date.now()) return // already stale
