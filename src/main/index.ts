@@ -647,6 +647,11 @@ ipcMain.handle(
   ) => {
     await saveTask(taskId, meta, intent, acceptanceCriteria)
     checkTaskStateChange(taskId)
+    if (meta.isSoftDeleted) {
+      mainWindow?.webContents.send('canvas:task-close', { taskId })
+    } else {
+      mainWindow?.webContents.send('canvas:task-update', { taskId })
+    }
   }
 )
 
