@@ -161,21 +161,26 @@ git push origin --tags
 gh release create v0.1.0 dist/*.dmg --title "AgentCanvas v0.1.0" --notes "Initial release"
 ```
 
-### Optional: Claude Code Stop Hook
+### Optional: Claude Code Notification Hooks
 
-If you use Claude Code, install the bundled Stop hook so any Claude Code instance running inside an AgentCanvas terminal tile automatically posts a toast to the canvas when it finishes a task:
+If you use Claude Code, install the bundled notification hooks so any Claude Code instance running inside an AgentCanvas terminal tile automatically posts toasts to the canvas on notable events:
 
 ```bash
 npm run setup:claude-hook
 ```
 
+Two hooks are installed:
+
+- **Stop hook** — posts a success toast when Claude finishes a task, so you can glance at the canvas to see which tile is done.
+- **AskUserQuestion hook** — posts a warning toast when Claude invokes the `AskUserQuestion` tool mid-turn and is blocked waiting on your input. Without this, the picker UI appears silently and it's easy to miss that a tile needs you.
+
 This installer is idempotent — safe to re-run — and:
 
-- Copies `scripts/agentcanvas-notify-stop.sh` to `~/.claude/scripts/`
-- Adds the hook command to the `Stop` array in `~/.claude/settings.json` (backing up the existing file with a timestamped suffix)
-- Leaves any other Stop hooks you have configured untouched
+- Copies `scripts/agentcanvas-notify-stop.sh` and `scripts/agentcanvas-notify-ask-user.sh` to `~/.claude/scripts/`
+- Registers a `Stop` hook command and a `PreToolUse` hook command (matcher `AskUserQuestion`) in `~/.claude/settings.json` (backing up the existing file with a timestamped suffix on any run that makes changes)
+- Leaves any other hooks you have configured untouched
 
-The hook script is a no-op outside AgentCanvas (it checks for the `AGENT_CANVAS_API` env var), so it has zero effect on Claude Code instances running in any other terminal. Honors the `CLAUDE_CONFIG_DIR` env var if you keep your Claude config in a non-default location. Requires `python3` (preinstalled on macOS).
+Both hook scripts are no-ops outside AgentCanvas (they check for the `AGENT_CANVAS_API` env var), so installing them globally has zero effect on Claude Code instances running in any other terminal. The `AskUserQuestion` hook backgrounds its network call so Claude's picker UI isn't delayed by a slow canvas server. Honors the `CLAUDE_CONFIG_DIR` env var if you keep your Claude config in a non-default location. Requires `python3` (preinstalled on macOS).
 
 ## Architecture
 
@@ -322,6 +327,20 @@ Plus custom environment variables configured in Settings > Terminal.
 - Optional runtime performance monitor with FPS, frame times, and render counts
 
 ## Changelog
+
+### 2026-04-19
+
+- **feat:** ⌘K tile palette — fuzzy-jump to any tile by label and search through terminal scrollback in a single command bar; pick a result to focus the tile and jump to the match
+- **feat:** Flow-mute — while a tile is focused, notifications from other tiles stay silent so you can stay heads-down; the titlebar shows a mute indicator and queued toasts surface the moment focus shifts away
+- **feat:** AskUserQuestion canvas notification — Claude Code's `AskUserQuestion` tool now fires a warning toast on the canvas the instant a tile is blocked on your input, so you don't miss a silently-appearing picker; ships with a `PreToolUse` hook in the bundled installer
+
+### 2026-04-18
+
+- **feat:** Image support for note tiles — drag-and-drop images directly into a note, with a hover toolbar for quick actions and automatic attachment garbage collection that cleans up orphaned files when notes are edited or deleted
+- **feat:** `Cmd+0` hotkey to zoom and center the viewport on the currently focused tile — one shortcut to snap back from any zoom level
+- **fix:** Cross-workspace notification clicks now switch to the originating workspace before focusing the tile, instead of silently failing when the tile lives elsewhere
+- **fix:** Renderer no longer crashes when agents POST notes rapidly with large markdown payloads — the pipeline now chunks and debounces conversion work
+- **fix:** Note tile bullets and numbered list markers now align properly with their list item text
 
 ### 2026-04-15
 

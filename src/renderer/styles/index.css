@@ -247,6 +247,12 @@
   padding: 1px 0;
 }
 
+.notes-tile-body .tiptap ul:not([data-type="taskList"]) > li > p,
+.notes-tile-body .tiptap ol > li > p {
+  display: inline;
+  margin: 0;
+}
+
 /* Task list */
 .notes-tile-body .tiptap ul[data-type="taskList"] {
   list-style: none;
@@ -527,6 +533,22 @@
   line-height: 0;
 }
 
+.notes-tile-body .tiptap .resizable-image-wrapper[data-align="center"] {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.notes-tile-body .tiptap .resizable-image-wrapper[data-align="full"] {
+  display: block;
+  width: 100%;
+}
+
+.notes-tile-body .tiptap .resizable-image-wrapper[data-align="full"] img {
+  width: 100%;
+  max-width: 100%;
+}
+
 .notes-tile-body .tiptap .resizable-image-wrapper img {
   max-width: 100%;
   border-radius: 4px;
@@ -549,6 +571,74 @@
 
 .notes-tile-body .tiptap .resizable-image-wrapper:hover .resize-handle {
   opacity: 1;
+}
+
+.notes-tile-body .tiptap .image-toolbar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  background: rgba(24, 24, 27, 0.95);
+  border: 1px solid #3f3f46;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+  line-height: 1;
+  z-index: 5;
+}
+
+.notes-tile-body .tiptap .resizable-image-wrapper:hover .image-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.notes-tile-body .tiptap .image-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: #a1a1aa;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: inherit;
+  transition: background 0.1s, color 0.1s;
+}
+
+.notes-tile-body .tiptap .image-toolbar-btn:hover {
+  background: #3f3f46;
+  color: #f4f4f5;
+}
+
+.notes-tile-body .tiptap .image-toolbar-btn--text {
+  padding: 0 7px;
+}
+
+.notes-tile-body .tiptap .image-toolbar-btn--danger:hover {
+  background: #7f1d1d;
+  color: #fee2e2;
+}
+
+.notes-tile-body .tiptap .image-toolbar-btn--success {
+  background: #065f46;
+  color: #d1fae5;
+}
+
+.notes-tile-body .tiptap .image-toolbar-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: #3f3f46;
 }
 
 /* Videos in notes */
@@ -821,4 +911,16 @@
 
 .cache-warning-pulse {
   animation: cache-pulse 2s ease-in-out infinite;
+}
+
+/* Flow-mute: thin ring on the focused tile + its one-hop linked group while
+   flow mode is active. Applied via className on react-flow nodes. */
+.react-flow__node.flow-ring {
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.7), 0 0 16px 2px rgba(168, 85, 247, 0.25);
+  border-radius: 8px;
+  transition: box-shadow 200ms ease-out;
+}
+
+.react-flow__node:not(.flow-ring) {
+  transition: box-shadow 200ms ease-in;
 }

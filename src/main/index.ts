@@ -13,7 +13,7 @@ import { startPerfMonitor, stopPerfMonitor, getPerfStats, recordIpc, isPerfEnabl
 import { loadWorkspaces, saveWorkspaces } from './workspace-store'
 import { ensureNoteDir, loadNote, saveNote, deleteNote, listNotes } from './note-store'
 import { isValidTiptapDoc } from './tiptap-validator'
-import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachments } from './attachment-store'
+import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachments, sweepNoteAttachments, sweepAllAttachments } from './attachment-store'
 import { ensureDrawDir, loadDraw, saveDraw, deleteDraw, listDraws } from './draw-store'
 import { loadImage, saveImage, deleteImage, listImages, storeImage } from './image-store'
 import { jsonToMarkdown } from './note-converter'
@@ -25,6 +25,7 @@ import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-sto
 import { DiffService } from './diff-service'
 import { loadExtensions, getLoadedExtensions, getExtensionsDir } from './extension-loader'
 import { TeamWatcher } from './team-watcher'
+import { getScrollbackIndex } from './scrollback-index'
 import { claudeUsageService } from './claude-usage-service'
 import type { ClaudeUsageSnapshot } from '../renderer/types/claude-usage'
 import { initUpdater, reschedule as rescheduleUpdater } from './updater'
@@ -43,7 +44,42 @@ const cdpProxy = new CdpProxy()
 const canvasApi = new CanvasApi()
 const diffService = new DiffService()
 const teamWatcher = new TeamWatcher()
+const scrollbackIndex = getScrollbackIndex()
 let mainWindow: BrowserWindow | null = null
+
+// ── Flow-mute mirror ───────────────────────────────────
+// Renderer pushes current flow-mute state here so native OS notifications
+// can be suppressed without IPC round-trip. See preload `flowMuteAPI`.
+interface FlowMuteMirror {
+  enabled: boolean
+  active: boolean
+  suppressNative: boolean
+  flowGroupIds: string[]
+}
+let flowMuteMirror: FlowMuteMirror = {
+  enabled: true,
+  active: false,
+  suppressNative: true,
+  flowGroupIds: []
+}
+
+ipcMain.on('flow-mute:mirror', (_event, mirror: FlowMuteMirror) => {
+  flowMuteMirror = mirror
+})
+
+function shouldSuppressNativeForFlow(payload: {
+  level: string
+  priority?: string
+  terminalId?: string
+}): boolean {
+  if (!flowMuteMirror.enabled) return false
+  if (!flowMuteMirror.active) return false
+  if (!flowMuteMirror.suppressNative) return false
+  if (payload.priority === 'critical') return false
+  if (payload.level === 'error') return false
+  if (payload.terminalId && flowMuteMirror.flowGroupIds.includes(payload.terminalId)) return false
+  return true
+}
 let canvasApiPort = 0
 
 function createWindow(): void {
@@ -581,6 +617,33 @@ ipcMain.handle('attachment:list', (_event, { noteId }: { noteId: string }) => {
   return listAttachments(noteId)
 })
 
+function resolveAttachmentSrc(src: string): string | null {
+  const PREFIX = 'agentcanvas://attachment/'
+  if (src.startsWith(PREFIX)) {
+    const { join } = require('path')
+    const { homedir } = require('os')
+    return join(homedir(), 'AgentCanvas', 'attachments', src.slice(PREFIX.length))
+  }
+  if (src.startsWith('file://')) return decodeURI(src.slice('file://'.length))
+  if (src.startsWith('/')) return src
+  return null
+}
+
+ipcMain.handle('attachment:resolve-path', (_event, { src }: { src: string }) => {
+  return resolveAttachmentSrc(src)
+})
+
+ipcMain.handle('attachment:reveal', (_event, { src }: { src: string }) => {
+  const path = resolveAttachmentSrc(src)
+  if (!path) return false
+  shell.showItemInFolder(path)
+  return true
+})
+
+ipcMain.handle('attachment:sweep-note', (_event, { noteId }: { noteId: string }) => {
+  return sweepNoteAttachments(noteId)
+})
+
 ipcMain.handle('attachment:pick-file', async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -647,6 +710,13 @@ ipcMain.handle('image:getUrl', (_event, { imageId }: { imageId: string }) => {
 ipcMain.handle('diff:compute', (_event, { cwd }: { cwd: string }) => {
   return diffService.computeDiff(cwd)
 })
+
+ipcMain.handle(
+  'search:scrollback',
+  (_event, args: { query: string; terminalIds?: string[]; limit?: number }) => {
+    return scrollbackIndex.searchScrollback(args)
+  }
+)
 
 // ── Performance Monitor IPC ──────────────────────────────
 ipcMain.handle('perf:toggle', () => {
@@ -880,6 +950,9 @@ terminalManager.on('data', (id: string, data: string) => {
   }
   scrollbackBuffers.set(id, buf)
 
+  // Feed the FTS5 scrollback index (line-buffered, 500ms flush)
+  scrollbackIndex.appendPtyData(id, data)
+
   // Only buffer for IPC if not paused (paused during reconnect)
   if (pausedSessions.has(id)) return
   const existing = dataBuffers.get(id) || ''
@@ -892,6 +965,7 @@ terminalManager.on('exit', (id: string, exitCode: number) => {
   pausedSessions.delete(id)
   dataBuffers.delete(id)
   cdpProxy.detach(id)
+  scrollbackIndex.dropTerminal(id)
   mainWindow?.webContents.send('terminal:exit', { id, exitCode })
 })
 
@@ -920,6 +994,7 @@ terminalManager.on('cache-notify', (info: {
   mainWindow?.webContents.send('canvas:notify', payload)
 
   if (mainWindow && !mainWindow.isFocused() && (!notifySettings || notifySettings.nativeWhenUnfocused)) {
+    if (shouldSuppressNativeForFlow(payload)) return
     const { Notification: ElectronNotification } = require('electron')
     if (ElectronNotification.isSupported()) {
       new ElectronNotification({
@@ -1075,13 +1150,15 @@ canvasApi.on('notify', (info: {
 
   // Native OS notification when window is unfocused
   if (mainWindow && !mainWindow.isFocused() && (!notifySettings || notifySettings.nativeWhenUnfocused)) {
-    const { Notification: ElectronNotification } = require('electron')
-    if (ElectronNotification.isSupported()) {
-      new ElectronNotification({
-        title: info.title || 'Agent Canvas',
-        body: info.body,
-        silent: true
-      }).show()
+    if (!shouldSuppressNativeForFlow(info)) {
+      const { Notification: ElectronNotification } = require('electron')
+      if (ElectronNotification.isSupported()) {
+        new ElectronNotification({
+          title: info.title || 'Agent Canvas',
+          body: info.body,
+          silent: true
+        }).show()
+      }
     }
   }
 
@@ -1213,6 +1290,19 @@ protocol.registerSchemesAsPrivileged([
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.agentcanvas.app')
+
+  // Garbage-collect orphan note attachments (deleted images, orphan dirs).
+  // Async via setImmediate so it never blocks window creation.
+  setImmediate(() => {
+    try {
+      const result = sweepAllAttachments()
+      if (result.filesRemoved > 0 || result.orphanDirsRemoved > 0) {
+        console.log(`[attachments] startup sweep: ${result.filesRemoved} files, ${result.orphanDirsRemoved} orphan dirs removed across ${result.notesScanned} notes`)
+      }
+    } catch (err) {
+      console.error('[attachments] startup sweep failed:', err)
+    }
+  })
 
   // Serve local files via agentcanvas:// protocol
   protocol.handle('agentcanvas', (request) => {

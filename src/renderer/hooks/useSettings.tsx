@@ -30,7 +30,8 @@ const FALLBACK: Settings = {
     cycleFocusBackward: 'Ctrl+Shift+Tab',
     killFocused: 'Mod+D',
     openInIde: 'Mod+Shift+O',
-    toggleVoice: 'Mod+Shift+V'
+    toggleVoice: 'Mod+Shift+V',
+    zoomToFocused: 'Mod+0'
   },
   templates: [],
   notifications: { enabled: true, soundEnabled: true, nativeWhenUnfocused: true },
@@ -64,6 +65,14 @@ const FALLBACK: Settings = {
     autoCheckOnLaunch: true,
     autoCheckPeriodic: true,
     checkIntervalHours: 4
+  },
+  flowMute: {
+    enabled: true,
+    idleTimeoutMs: 300_000,
+    entryThresholdMs: 180_000,
+    suppressNative: true,
+    muteSounds: true,
+    showRing: true
   }
 }
 

@@ -85,6 +85,7 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
   const isFocused = focusedId === sessionId
   const bodyElRef = useRef<HTMLDivElement | null>(null)
   const [isResizing, setIsResizing] = useState(false)
+  const [isDragOver, setIsDragOver] = useState(false)
   const [showToolbar, setShowToolbar] = useState(false)
   const [contentVersion, setContentVersion] = useState(0)
   const [pomodoroPickerOpen, setPomodoroPickerOpen] = useState(false)
@@ -144,6 +145,43 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
 
   const onResizeStart = useCallback(() => setIsResizing(true), [])
   const onResizeEnd = useCallback(() => setIsResizing(false), [])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setIsDragOver(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return
+    setIsDragOver(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    setIsDragOver(false)
+    if (!e.dataTransfer.types.includes('Files')) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (!editor) return
+
+    const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp']
+    const VIDEO_EXTS = ['.mp4', '.webm', '.mov', '.avi', '.mkv']
+    const files = Array.from(e.dataTransfer.files)
+    for (const file of files) {
+      const filePath = window.fileUtils.getPathForFile(file)
+      if (!filePath) continue
+      const lower = filePath.toLowerCase()
+      const isImage = file.type.startsWith('image/') || IMAGE_EXTS.some((ext) => lower.endsWith(ext))
+      const isVideo = file.type.startsWith('video/') || VIDEO_EXTS.some((ext) => lower.endsWith(ext))
+      if (!isImage && !isVideo) continue
+      window.attachment.saveFromPath(sessionId, filePath).then((url) => {
+        if (!url) return
+        if (isImage) editor.chain().focus().setImage({ src: url }).run()
+        else editor.chain().focus().setVideo({ src: url, type: 'local' }).run()
+      })
+    }
+  }, [editor, sessionId])
 
   // Prevent canvas pan when scrolling inside note body
   useEffect(() => {
@@ -207,6 +245,9 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
       }`}
       style={{ width: '100%', height: '100%', pointerEvents: isPanning ? 'none' : 'auto' }}
       onMouseDown={handleFocus}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
     >
       <NodeResizer
         minWidth={300}
@@ -455,6 +496,15 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
           <EditorContent editor={editor} />
         </div>
       </div>
+
+      {isDragOver && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center rounded-lg bg-zinc-900/90 border-2 border-dashed border-blue-500/60 pointer-events-none">
+          <svg className="w-8 h-8 text-blue-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0 0 22.5 18.75V5.25A2.25 2.25 0 0 0 20.25 3H3.75A2.25 2.25 0 0 0 1.5 5.25v13.5A2.25 2.25 0 0 0 3.75 21Z" />
+          </svg>
+          <span className="text-xs text-blue-300 font-medium">Drop image to embed</span>
+        </div>
+      )}
 
       <Handle type="target" position={Position.Left} className="!bg-zinc-600" />
       <Handle type="source" position={Position.Right} className="!bg-zinc-600" />

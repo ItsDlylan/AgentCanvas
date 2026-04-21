@@ -314,6 +314,9 @@ export interface AttachmentAPI {
   deleteAll: (noteId: string) => Promise<void>
   list: (noteId: string) => Promise<string[]>
   pickFile: () => Promise<string[] | null>
+  resolvePath: (src: string) => Promise<string | null>
+  reveal: (src: string) => Promise<boolean>
+  sweepNote: (noteId: string) => Promise<number>
 }
 
 const attachmentAPI: AttachmentAPI = {
@@ -321,7 +324,10 @@ const attachmentAPI: AttachmentAPI = {
   saveFromPath: (noteId, sourcePath) => ipcRenderer.invoke('attachment:save-from-path', { noteId, sourcePath }),
   deleteAll: (noteId) => ipcRenderer.invoke('attachment:delete-all', { noteId }),
   list: (noteId) => ipcRenderer.invoke('attachment:list', { noteId }),
-  pickFile: () => ipcRenderer.invoke('attachment:pick-file')
+  pickFile: () => ipcRenderer.invoke('attachment:pick-file'),
+  resolvePath: (src) => ipcRenderer.invoke('attachment:resolve-path', { src }),
+  reveal: (src) => ipcRenderer.invoke('attachment:reveal', { src }),
+  sweepNote: (noteId) => ipcRenderer.invoke('attachment:sweep-note', { noteId })
 }
 
 contextBridge.exposeInMainWorld('attachment', attachmentAPI)
@@ -707,6 +713,29 @@ const updaterAPI: UpdaterAPI = {
 
 contextBridge.exposeInMainWorld('updater', updaterAPI)
 
+// ── Flow-mute state mirror ──────────────────────────────
+// Renderer pushes flow-mute state to main so native OS notifications
+// can be suppressed without a round-trip.
+
+export interface FlowMuteMirror {
+  enabled: boolean
+  active: boolean
+  suppressNative: boolean
+  flowGroupIds: string[]
+}
+
+export interface FlowMuteAPI {
+  updateMirror: (mirror: FlowMuteMirror) => void
+}
+
+const flowMuteAPI: FlowMuteAPI = {
+  updateMirror: (mirror) => {
+    ipcRenderer.send('flow-mute:mirror', mirror)
+  }
+}
+
+contextBridge.exposeInMainWorld('flowMute', flowMuteAPI)
+
 // ── Diff API ────────────────────────────────────────────
 
 export interface DiffAPI {
@@ -718,6 +747,35 @@ const diffAPI: DiffAPI = {
 }
 
 contextBridge.exposeInMainWorld('diff', diffAPI)
+
+// ── Search API ──────────────────────────────────────────
+
+export interface ScrollbackSearchResult {
+  terminalId: string
+  lineNo: number
+  snippet: string
+  ts: number
+}
+
+export interface ScrollbackSearchOpts {
+  terminalIds?: string[]
+  limit?: number
+}
+
+export interface SearchAPI {
+  scrollback: (query: string, opts?: ScrollbackSearchOpts) => Promise<ScrollbackSearchResult[]>
+}
+
+const searchAPI: SearchAPI = {
+  scrollback: (query, opts) =>
+    ipcRenderer.invoke('search:scrollback', {
+      query,
+      terminalIds: opts?.terminalIds,
+      limit: opts?.limit
+    })
+}
+
+contextBridge.exposeInMainWorld('search', searchAPI)
 
 // Voice API
 export interface VoiceModelStatus {

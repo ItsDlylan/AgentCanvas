@@ -6,6 +6,7 @@ import { useFocusedTerminal } from '@/hooks/useFocusedTerminal'
 import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { useSettings } from '@/hooks/useSettings'
+import { useCanvasStore } from '@/store/canvas-store'
 import { WorktreePicker } from './WorktreePicker'
 import { EditableLabel } from './EditableLabel'
 import type { TerminalStatus } from '@/hooks/useTerminalStatus'
@@ -138,7 +139,62 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
     scrollback: settings.terminal.scrollback
   }
 
-  const { containerRef, fit } = useTerminal({ sessionId, label, cwd: initialCwd, metadata: initialMetadata, command, appearance, hotkeys: settings.hotkeys, onExit: killTerminal })
+  const { containerRef, fit, terminal: termRef } = useTerminal({ sessionId, label, cwd: initialCwd, metadata: initialMetadata, command, appearance, hotkeys: settings.hotkeys, onExit: killTerminal })
+
+  // ── Scrollback palette wiring: expose scrollToLine + highlight ──
+  const [highlight, setHighlight] = useState<{ lineNo: number; seq: number } | null>(null)
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const highlightSeqRef = useRef(0)
+
+  useEffect(() => {
+    const register = useCanvasStore.getState().registerTerminalRef
+    const unregister = useCanvasStore.getState().unregisterTerminalRef
+    register(sessionId, {
+      scrollToLine: (lineNo: number) => {
+        const term = termRef.current
+        if (!term) return
+        try {
+          term.scrollToLine(lineNo)
+        } catch {
+          // no-op — line may be out of range if scrollback is trimmed
+        }
+      },
+      highlightLine: (lineNo: number) => {
+        highlightSeqRef.current += 1
+        setHighlight({ lineNo, seq: highlightSeqRef.current })
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+        highlightTimerRef.current = setTimeout(() => setHighlight(null), 1500)
+      }
+    })
+    return () => {
+      unregister(sessionId)
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+    }
+  }, [sessionId, termRef])
+
+  // Compute highlight overlay position based on viewport + xterm row height
+  const highlightStyle: React.CSSProperties | null = (() => {
+    if (!highlight) return null
+    const term = termRef.current
+    if (!term) return null
+    const rowEl = (term.element?.querySelector('.xterm-rows > div') as HTMLElement | null)
+    const rowHeight = rowEl?.getBoundingClientRect().height ?? 16
+    const viewportY = term.buffer.active.viewportY
+    const offset = (highlight.lineNo - viewportY) * rowHeight
+    if (offset < 0 || offset > term.rows * rowHeight) return null
+    return {
+      position: 'absolute',
+      top: offset,
+      left: 0,
+      right: 0,
+      height: rowHeight,
+      background: 'rgba(255,230,100,0.35)',
+      pointerEvents: 'none',
+      transition: 'opacity 1.2s ease-out',
+      opacity: 1,
+      zIndex: 30
+    }
+  })()
 
   const handleFocus = useCallback(() => {
     setFocusedId(sessionId)
@@ -371,6 +427,8 @@ function TerminalTileComponent({ data, width, height }: NodeProps) {
             will-change:transform + contain on .react-flow__node ensures the compositor
             handles pan transforms without re-rasterizing the WebGL canvas. */}
         <div ref={containerRef} className="h-full w-full" style={{ pointerEvents: isFocused ? 'auto' : 'none' }} />
+
+        {highlightStyle && <div key={highlight?.seq} style={highlightStyle} />}
 
         {/* Drop overlay */}
         {isDragOver && (

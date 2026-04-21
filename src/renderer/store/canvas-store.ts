@@ -138,11 +138,39 @@ export interface TerminalSpawnInfo {
   metadata?: Record<string, unknown>
 }
 
+export interface TerminalTileRef {
+  scrollToLine: (lineNo: number) => void
+  highlightLine: (lineNo: number) => void
+}
+
+const RECENCY_CAP = 50
+const RECENCY_STORAGE_KEY = 'agentcanvas.palette.recencyList'
+
+function loadRecencyList(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENCY_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string').slice(0, RECENCY_CAP) : []
+  } catch {
+    return []
+  }
+}
+
+function saveRecencyList(list: string[]): void {
+  try {
+    localStorage.setItem(RECENCY_STORAGE_KEY, JSON.stringify(list))
+  } catch {
+    // ignore quota errors
+  }
+}
+
 export interface CanvasStore {
   // ── Core state ──
   allNodes: Node[]
   allEdges: Edge[]
   focusedId: string | null
+  preFocusViewport: { viewport: Viewport; tileId: string } | null
   tileWorkspaceMap: Map<string, string>
   activeWorkspaceId: string
   workspaces: Workspace[]
@@ -180,6 +208,7 @@ export interface CanvasStore {
   addTerminalForTerminal: (info: TerminalSpawnInfo) => void
   addNoteForApi: (info: { noteId: string; label?: string; linkedTerminalId?: string; linkedNoteId?: string; position?: { x: number; y: number }; width?: number; height?: number }) => void
   focusTile: (sessionId: string) => void
+  zoomToFocused: () => void
   renameTile: (sessionId: string, newLabel: string) => void
 
   // ── Note management ──
@@ -214,6 +243,22 @@ export interface CanvasStore {
 
   // ── Template ──
   spawnTemplate: (template: { tiles: Array<{ type: string; relativePosition: { x: number; y: number }; width: number; height: number; command?: string; label?: string; cwd?: string }> }, origin?: { x: number; y: number }) => void
+  spawnTemplateInWorkspace: (
+    template: { tiles: Array<{ type: string; relativePosition: { x: number; y: number }; width: number; height: number; command?: string; label?: string; cwd?: string }> },
+    workspaceId: string,
+    origin?: { x: number; y: number }
+  ) => void
+
+  // ── Palette ──
+  recencyList: string[]
+  paletteOpen: boolean
+  terminalRefs: Map<string, TerminalTileRef>
+  openPalette: () => void
+  closePalette: () => void
+  togglePalette: () => void
+  registerTerminalRef: (id: string, ref: TerminalTileRef) => void
+  unregisterTerminalRef: (id: string) => void
+  jumpToScrollbackMatch: (terminalId: string, lineNo: number) => void
 }
 
 // ── Store ──────────────────────────────────────────────────
@@ -236,6 +281,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
     allNodes: [],
     allEdges: [],
     focusedId: null,
+    preFocusViewport: null,
     tileWorkspaceMap: new Map(),
     activeWorkspaceId: 'default',
     workspaces: [DEFAULT_WORKSPACE],
@@ -244,6 +290,9 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
     tileGap: 40,
     viewportCache: new Map(),
     browserDefaultUrl: 'https://google.com',
+    recencyList: loadRecencyList(),
+    paletteOpen: false,
+    terminalRefs: new Map(),
 
     // ── Config setters ──
     setReactFlowInstance: (instance) => set({ reactFlowInstance: instance }),
@@ -292,16 +341,24 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
     // ── Tile CRUD ──
 
     removeTileFromCanvas: (sessionId) => {
-      set((s) => ({
-        allNodes: s.allNodes.filter((n) => sid(n) !== sessionId),
-        allEdges: s.allEdges.filter((e) => e.source !== sessionId && e.target !== sessionId),
-        focusedId: s.focusedId === sessionId ? null : s.focusedId,
-        tileWorkspaceMap: (() => {
-          const next = new Map(s.tileWorkspaceMap)
-          next.delete(sessionId)
-          return next
-        })()
-      }))
+      set((s) => {
+        const nextRecency = s.recencyList.filter((id) => id !== sessionId)
+        if (nextRecency.length !== s.recencyList.length) saveRecencyList(nextRecency)
+        const nextRefs = new Map(s.terminalRefs)
+        nextRefs.delete(sessionId)
+        return {
+          allNodes: s.allNodes.filter((n) => sid(n) !== sessionId),
+          allEdges: s.allEdges.filter((e) => e.source !== sessionId && e.target !== sessionId),
+          focusedId: s.focusedId === sessionId ? null : s.focusedId,
+          tileWorkspaceMap: (() => {
+            const next = new Map(s.tileWorkspaceMap)
+            next.delete(sessionId)
+            return next
+          })(),
+          recencyList: nextRecency,
+          terminalRefs: nextRefs
+        }
+      })
     },
 
     killTile: (sessionId) => {
@@ -752,7 +809,12 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
     },
 
     focusTile: (sessionId) => {
-      set({ focusedId: sessionId })
+      set((s) => {
+        const deduped = s.recencyList.filter((id) => id !== sessionId)
+        const nextRecency = [sessionId, ...deduped].slice(0, RECENCY_CAP)
+        saveRecencyList(nextRecency)
+        return { focusedId: sessionId, recencyList: nextRecency }
+      })
       markTerminalRead(sessionId)
       const node = findNode(sessionId)
       if (!node) return
@@ -761,6 +823,30 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       const cx = (node.measured?.width ?? (node.style?.width as number) ?? w) / 2
       const cy = (node.measured?.height ?? (node.style?.height as number) ?? h) / 2
       centerOn(node.position.x + cx, node.position.y + cy)
+    },
+
+    zoomToFocused: () => {
+      const { focusedId, reactFlowInstance, preFocusViewport } = get()
+      if (!focusedId || !reactFlowInstance) return
+
+      if (preFocusViewport && preFocusViewport.tileId === focusedId) {
+        reactFlowInstance.setViewport(preFocusViewport.viewport, { duration: 300 })
+        set({ preFocusViewport: null })
+        return
+      }
+
+      const node = findNode(focusedId)
+      if (!node) return
+
+      const snapshot = reactFlowInstance.getViewport()
+      set({ preFocusViewport: { viewport: snapshot, tileId: focusedId } })
+
+      reactFlowInstance.fitView({
+        nodes: [{ id: node.id }],
+        duration: 300,
+        padding: 0.08,
+        maxZoom: 1.5
+      })
     },
 
     renameTile: (sessionId, newLabel) => {
@@ -1161,12 +1247,15 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
       set((s) => {
         const nextMap = new Map(s.tileWorkspaceMap)
         for (const sid of tilesToKill) nextMap.delete(sid)
+        const nextRecency = s.recencyList.filter((rid) => !killSet.has(rid))
+        if (nextRecency.length !== s.recencyList.length) saveRecencyList(nextRecency)
 
         return {
           allNodes: s.allNodes.filter((n) => !killSet.has(sid(n))),
           allEdges: s.allEdges.filter((e) => !killSet.has(e.source) && !killSet.has(e.target)),
           tileWorkspaceMap: nextMap,
           workspaces: s.workspaces.filter((w) => w.id !== id),
+          recencyList: nextRecency,
           ...(activeWorkspaceId === id
             ? { activeWorkspaceId: 'default', focusedId: null }
             : {})
@@ -1252,6 +1341,79 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
         else if (tile.type === 'browser') addBrowserAt(pos)
         else if (tile.type === 'notes') addNoteAt(pos)
         else if (tile.type === 'draw') addDrawAt(pos)
+      }
+    },
+
+    spawnTemplateInWorkspace: (template, workspaceId, origin) => {
+      const { activeWorkspaceId, selectWorkspace, spawnTemplate, focusedId } = get()
+      const run = () => {
+        const before = new Set(get().allNodes.map((n) => (n.data as Record<string, unknown>).sessionId as string))
+        spawnTemplate(template, origin)
+        // Focus the first newly-spawned tile
+        const after = get().allNodes
+        const firstNew = after.find((n) => !before.has((n.data as Record<string, unknown>).sessionId as string))
+        if (firstNew) {
+          const newId = (firstNew.data as Record<string, unknown>).sessionId as string
+          if (newId !== focusedId) get().focusTile(newId)
+        }
+      }
+      if (workspaceId !== activeWorkspaceId) {
+        selectWorkspace(workspaceId)
+        requestAnimationFrame(run)
+      } else {
+        run()
+      }
+    },
+
+    // ── Palette ──
+
+    openPalette: () => set({ paletteOpen: true }),
+    closePalette: () => set({ paletteOpen: false }),
+    togglePalette: () => set((s) => ({ paletteOpen: !s.paletteOpen })),
+
+    registerTerminalRef: (id, ref) => {
+      set((s) => {
+        const next = new Map(s.terminalRefs)
+        next.set(id, ref)
+        return { terminalRefs: next }
+      })
+    },
+
+    unregisterTerminalRef: (id) => {
+      set((s) => {
+        if (!s.terminalRefs.has(id)) return {}
+        const next = new Map(s.terminalRefs)
+        next.delete(id)
+        return { terminalRefs: next }
+      })
+    },
+
+    jumpToScrollbackMatch: (terminalId, lineNo) => {
+      const { tileWorkspaceMap, activeWorkspaceId, selectWorkspace, focusTile, zoomToFocused } = get()
+      const targetWs = tileWorkspaceMap.get(terminalId)
+      if (!targetWs) return
+
+      const applyScroll = () => {
+        const refs = get().terminalRefs
+        const ref = refs.get(terminalId)
+        ref?.scrollToLine(lineNo)
+        ref?.highlightLine(lineNo)
+      }
+
+      const doJump = () => {
+        requestAnimationFrame(() => {
+          focusTile(terminalId)
+          zoomToFocused()
+          requestAnimationFrame(applyScroll)
+        })
+      }
+
+      if (targetWs !== activeWorkspaceId) {
+        selectWorkspace(targetWs)
+        // Allow the workspace-switch rAF + viewport restore to run first
+        requestAnimationFrame(doJump)
+      } else {
+        doJump()
       }
     }
   }

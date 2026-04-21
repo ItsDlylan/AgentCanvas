@@ -15,9 +15,6 @@ import type { Editor } from '@tiptap/react'
 import type { JSONContent } from '@tiptap/core'
 
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp']
-const VIDEO_TYPES = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska']
-const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp']
-const VIDEO_EXTS = ['.mp4', '.webm', '.mov', '.avi', '.mkv']
 
 const SAVE_DEBOUNCE_MS = 500
 
@@ -87,38 +84,6 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
     editorProps: {
       attributes: {
         class: 'outline-none min-h-full'
-      },
-      handleDrop(view, event) {
-        if (!event.dataTransfer?.files?.length) return false
-        const files = Array.from(event.dataTransfer.files)
-        const mediaFiles = files.filter(
-          (f) => IMAGE_TYPES.includes(f.type) || VIDEO_TYPES.includes(f.type)
-        )
-        if (mediaFiles.length === 0) return false
-
-        event.preventDefault()
-        // Electron drag-and-drop provides file paths via path property
-        for (const file of mediaFiles) {
-          const filePath = (file as File & { path?: string }).path
-          if (!filePath) continue
-          const isImage = IMAGE_TYPES.includes(file.type) || IMAGE_EXTS.some((ext) => filePath.toLowerCase().endsWith(ext))
-          window.attachment.saveFromPath(noteIdRef.current, filePath).then((url) => {
-            if (isImage) {
-              view.dispatch(
-                view.state.tr.replaceSelectionWith(
-                  view.state.schema.nodes.image.create({ src: url })
-                )
-              )
-            } else {
-              view.dispatch(
-                view.state.tr.replaceSelectionWith(
-                  view.state.schema.nodes.video.create({ src: url, type: 'local' })
-                )
-              )
-            }
-          })
-        }
-        return true
       },
       handlePaste(view, event) {
         // Check for image files in clipboard (screenshot paste)
@@ -272,13 +237,18 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
     editor.on('update', handler)
     return () => {
       editor.off('update', handler)
+      const id = noteIdRef.current
+      const pendingSave = saveTimerRef.current !== null
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current)
         saveTimerRef.current = null
-        if (!editor.isDestroyed) {
-          window.note.save(noteIdRef.current, {}, editor.getJSON())
-        }
       }
+      if (editor.isDestroyed) return
+      const finalSave = pendingSave
+        ? window.note.save(id, {}, editor.getJSON())
+        : Promise.resolve()
+      // GC orphan attachments (images deleted from the note) once the final save lands.
+      finalSave.then(() => window.attachment.sweepNote(id))
     }
   }, [editor])
 
