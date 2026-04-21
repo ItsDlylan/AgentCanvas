@@ -647,6 +647,72 @@ const notifyAPI: NotifyAPI = {
 
 contextBridge.exposeInMainWorld('notify', notifyAPI)
 
+// ── Updater API ─────────────────────────────────────────
+
+export interface UpdateAvailableInfo {
+  version: string
+  currentVersion: string
+  downloadUrl: string
+  changelog: string
+  sizeBytes: number
+  sha512: string
+  releaseUrl: string
+}
+
+export interface UpdateProgress {
+  percent: number
+  transferredBytes: number
+  totalBytes: number
+}
+
+export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error'
+
+export interface UpdateStatus {
+  phase: UpdatePhase
+  available: UpdateAvailableInfo | null
+  progress: UpdateProgress | null
+  filePath: string | null
+  error: string | null
+}
+
+export interface UpdaterAPI {
+  check: () => Promise<UpdateStatus>
+  download: () => Promise<UpdateStatus>
+  install: () => Promise<UpdateStatus>
+  cancel: () => Promise<void>
+  getVersion: () => Promise<string>
+  getStatus: () => Promise<UpdateStatus>
+  onAvailable: (cb: (info: UpdateAvailableInfo) => void) => () => void
+  onProgress: (cb: (progress: UpdateProgress) => void) => () => void
+  onDownloaded: (cb: (info: { filePath: string }) => void) => () => void
+  onError: (cb: (info: { message: string }) => void) => () => void
+  onUpToDate: (cb: (info: { version: string }) => void) => () => void
+  onStatusChange: (cb: (status: UpdateStatus) => void) => () => void
+}
+
+function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
+  const handler = (_event: Electron.IpcRendererEvent, payload: T): void => cb(payload)
+  ipcRenderer.on(channel, handler)
+  return () => ipcRenderer.removeListener(channel, handler)
+}
+
+const updaterAPI: UpdaterAPI = {
+  check: () => ipcRenderer.invoke('updater:check'),
+  download: () => ipcRenderer.invoke('updater:download'),
+  install: () => ipcRenderer.invoke('updater:install'),
+  cancel: () => ipcRenderer.invoke('updater:cancel'),
+  getVersion: () => ipcRenderer.invoke('updater:get-version'),
+  getStatus: () => ipcRenderer.invoke('updater:get-status'),
+  onAvailable: (cb) => subscribe('updater:available', cb),
+  onProgress: (cb) => subscribe('updater:progress', cb),
+  onDownloaded: (cb) => subscribe('updater:downloaded', cb),
+  onError: (cb) => subscribe('updater:error', cb),
+  onUpToDate: (cb) => subscribe('updater:up-to-date', cb),
+  onStatusChange: (cb) => subscribe('updater:status', cb)
+}
+
+contextBridge.exposeInMainWorld('updater', updaterAPI)
+
 // ── Flow-mute state mirror ──────────────────────────────
 // Renderer pushes flow-mute state to main so native OS notifications
 // can be suppressed without a round-trip.

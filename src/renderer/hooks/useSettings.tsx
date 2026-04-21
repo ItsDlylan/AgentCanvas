@@ -61,6 +61,11 @@ const FALLBACK: Settings = {
     rankByUrgency: true,
     detectTtlFromLogs: true
   },
+  updates: {
+    autoCheckOnLaunch: true,
+    autoCheckPeriodic: true,
+    checkIntervalHours: 4
+  },
   flowMute: {
     enabled: true,
     idleTimeoutMs: 300_000,

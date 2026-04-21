@@ -7,7 +7,7 @@ import { TERMINAL_PRESETS, BROWSER_SPAWN_PRESETS } from '@/constants/devicePrese
 import { DEVICE_PRESETS } from '@/constants/devicePresets'
 import { v4 as uuid } from 'uuid'
 
-type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates' | 'notifications' | 'focus' | 'voice'
+type Category = 'general' | 'appearance' | 'terminal' | 'browser' | 'canvas' | 'hotkeys' | 'templates' | 'notifications' | 'focus' | 'voice' | 'updates'
 
 interface SettingsPageProps {
   onClose: () => void
@@ -23,7 +23,8 @@ const CATEGORIES: { id: Category; label: string }[] = [
   { id: 'templates', label: 'Templates' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'focus', label: 'Focus' },
-  { id: 'voice', label: 'Voice' }
+  { id: 'voice', label: 'Voice' },
+  { id: 'updates', label: 'Updates' }
 ]
 
 // ── Shared input components ──────────────────────────────
@@ -1885,6 +1886,79 @@ function LLMDiscoverButton({ endpoint, model }: { endpoint: string | null; model
   )
 }
 
+// ── Updates settings ─────────────────────────────────────
+
+function UpdatesSection({ settings, update }: { settings: Settings; update: (patch: Partial<Settings>) => void }) {
+  const u = settings.updates ?? { autoCheckOnLaunch: true, autoCheckPeriodic: true, checkIntervalHours: 4 }
+  const [version, setVersion] = useState<string>('')
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.updater.getVersion().then(setVersion)
+    const offUpToDate = window.updater.onUpToDate(({ version: v }) => setFeedback(`You're up to date (v${v}).`))
+    const offError = window.updater.onError(({ message }) => setFeedback(`Update check failed: ${message}`))
+    const offAvailable = window.updater.onAvailable(({ version: v }) => setFeedback(`v${v} is available — see the banner in the corner.`))
+    return () => {
+      offUpToDate()
+      offError()
+      offAvailable()
+    }
+  }, [])
+
+  const handleCheckNow = async (): Promise<void> => {
+    setBusy(true)
+    setFeedback(null)
+    try {
+      await window.updater.check()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="mb-4 text-sm font-semibold text-zinc-200">Updates</h2>
+      <div className="divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/50 px-4">
+        <SettingRow label="Current version" description={version ? `AgentCanvas v${version}` : 'Loading...'}>
+          <button
+            onClick={handleCheckNow}
+            disabled={busy}
+            className="rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {busy ? 'Checking...' : 'Check now'}
+          </button>
+        </SettingRow>
+        <SettingRow label="Check on launch" description="Look for updates ~10 seconds after the app opens">
+          <Toggle
+            value={u.autoCheckOnLaunch}
+            onChange={(v) => update({ updates: { ...u, autoCheckOnLaunch: v } })}
+          />
+        </SettingRow>
+        <SettingRow label="Check periodically" description={`While the app is running, re-check every ${u.checkIntervalHours} hour${u.checkIntervalHours === 1 ? '' : 's'}`}>
+          <Toggle
+            value={u.autoCheckPeriodic}
+            onChange={(v) => update({ updates: { ...u, autoCheckPeriodic: v } })}
+          />
+        </SettingRow>
+      </div>
+      {feedback && <p className="mt-3 text-[11px] text-zinc-500">{feedback}</p>}
+      <p className="mt-4 text-[10px] text-zinc-600">
+        Updates are downloaded from{' '}
+        <a
+          href="https://github.com/ItsDlylan/AgentCanvas/releases"
+          target="_blank"
+          rel="noreferrer"
+          className="underline hover:text-zinc-400"
+        >
+          GitHub Releases
+        </a>
+        . When ready, Finder will open the installer and you'll drag AgentCanvas to /Applications.
+      </p>
+    </div>
+  )
+}
+
 // ── Main settings page ───────────────────────────────────
 
 function SettingsPageComponent({ onClose }: SettingsPageProps) {
@@ -1960,6 +2034,7 @@ function SettingsPageComponent({ onClose }: SettingsPageProps) {
           {activeCategory === 'notifications' && <NotificationsSection settings={settings} update={update} />}
           {activeCategory === 'focus' && <FocusSection settings={settings} update={update} />}
           {activeCategory === 'voice' && <VoiceSection settings={settings} update={update} />}
+          {activeCategory === 'updates' && <UpdatesSection settings={settings} update={update} />}
         </div>
       </div>
     </div>

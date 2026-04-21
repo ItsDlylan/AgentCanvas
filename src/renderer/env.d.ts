@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import type { TerminalAPI, BrowserAPI, WorkspaceAPI, NoteAPI, AttachmentAPI, DrawAPI, ImageAPI, SettingsAPI, IdeAPI, TerminalTilesAPI, BrowserTilesAPI, DiffAPI, EdgeAPI, PomodoroAPI, NotifyAPI, VoiceAPI, TemplateAPI, ClaudeUsageAPI, FlowMuteAPI, SearchAPI } from '../preload/index'
+import type { TerminalAPI, BrowserAPI, WorkspaceAPI, NoteAPI, AttachmentAPI, DrawAPI, ImageAPI, SettingsAPI, IdeAPI, TerminalTilesAPI, BrowserTilesAPI, DiffAPI, EdgeAPI, PomodoroAPI, NotifyAPI, VoiceAPI, TemplateAPI, ClaudeUsageAPI, UpdaterAPI, FlowMuteAPI, SearchAPI } from '../preload/index'
 
 declare global {
   interface Window {
@@ -23,6 +23,7 @@ declare global {
     voice: VoiceAPI
     templates: TemplateAPI
     image: ImageAPI
+    updater: UpdaterAPI
     search: SearchAPI
     fileUtils: { getPathForFile: (file: File) => string }
   }
