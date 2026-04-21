@@ -243,7 +243,7 @@ export interface NoteMeta {
   height: number
   linkedTerminalId?: string
   linkedNoteId?: string
-  parentTaskInfo?: { noteId: string; taskId: string }
+  parentTaskInfo?: { noteId?: string; taskId: string; taskItemId?: string }
   createdAt: number
   updatedAt: number
 }
@@ -461,6 +461,33 @@ const taskAPI: TaskAPI = {
 }
 
 contextBridge.exposeInMainWorld('task', taskAPI)
+
+// ── Task Lens API ────────────────────────────────────────
+
+export interface TaskLensView {
+  id: string
+  label: string
+  query: string
+  builtIn?: boolean
+}
+
+export interface TaskLensUserConfig {
+  version: 1
+  views: TaskLensView[]
+  order: string[]
+}
+
+export interface TaskLensAPI {
+  load: () => Promise<TaskLensUserConfig>
+  save: (config: TaskLensUserConfig) => Promise<void>
+}
+
+const taskLensAPI: TaskLensAPI = {
+  load: () => ipcRenderer.invoke('tasklens:load'),
+  save: (config) => ipcRenderer.invoke('tasklens:save', { config })
+}
+
+contextBridge.exposeInMainWorld('taskLens', taskLensAPI)
 
 // ── Plan API ─────────────────────────────────────────────
 
