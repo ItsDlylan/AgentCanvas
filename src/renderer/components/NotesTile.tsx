@@ -9,6 +9,8 @@ import { usePomodoroContext } from '@/hooks/usePomodoro'
 import { useIsPanning, isPanningNow } from '@/hooks/usePanState'
 import { registerRender } from '@/hooks/usePerformanceDebug'
 import { EditableLabel } from './EditableLabel'
+import { TileContextMenu, type TileContextMenuItem } from './TileContextMenu'
+import { ConvertNoteToTaskModal } from './ConvertNoteToTaskModal'
 
 function getChecklistInfo(editor: Editor | null): { isChecklist: boolean; checked: number; total: number } {
   if (!editor) return { isChecklist: false, checked: 0, total: 0 }
@@ -85,6 +87,8 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
   const isFocused = focusedId === sessionId
   const bodyElRef = useRef<HTMLDivElement | null>(null)
   const [isResizing, setIsResizing] = useState(false)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+  const [showConvertModal, setShowConvertModal] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
   const [showToolbar, setShowToolbar] = useState(false)
   const [contentVersion, setContentVersion] = useState(0)
@@ -248,6 +252,11 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setContextMenu({ x: e.clientX, y: e.clientY })
+      }}
     >
       <NodeResizer
         minWidth={300}
@@ -508,6 +517,29 @@ function NotesTileComponent({ data, width, height }: NodeProps) {
 
       <Handle type="target" position={Position.Left} className="!bg-zinc-600" />
       <Handle type="source" position={Position.Right} className="!bg-zinc-600" />
+
+      {contextMenu && (
+        <TileContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            {
+              label: 'Convert to Task…',
+              onClick: () => {
+                setShowConvertModal(true)
+              }
+            }
+          ] satisfies TileContextMenuItem[]}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+
+      {showConvertModal && (
+        <ConvertNoteToTaskModal
+          noteId={sessionId}
+          onClose={() => setShowConvertModal(false)}
+        />
+      )}
     </div>
   )
 }

@@ -306,6 +306,162 @@ const noteAPI: NoteAPI = {
 
 contextBridge.exposeInMainWorld('note', noteAPI)
 
+// ── Task API ─────────────────────────────────────────────
+
+export type TaskClassification = 'QUICK' | 'NEEDS_RESEARCH' | 'DEEP_FOCUS' | 'BENCHMARK'
+export type TaskTimeline = 'urgent' | 'this-week' | 'this-month' | 'whenever'
+export type DerivedTaskState =
+  | 'raw'
+  | 'researched'
+  | 'planned'
+  | 'executing'
+  | 'review'
+  | 'done'
+
+export interface TaskMeta {
+  taskId: string
+  label: string
+  workspaceId: string
+  classification: TaskClassification
+  timelinePressure: TaskTimeline
+  manualReviewDone: boolean
+  position: { x: number; y: number }
+  width: number
+  height: number
+  isSoftDeleted: boolean
+  softDeletedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface TaskFile {
+  meta: TaskMeta
+  intent: string
+  acceptanceCriteria: Record<string, unknown>
+}
+
+export interface TaskOpenInfo {
+  taskId: string
+  meta?: TaskMeta
+}
+
+export interface TaskDerivedState {
+  state: DerivedTaskState
+  reason: string
+}
+
+export interface TaskClassifyResult {
+  classification: TaskClassification
+  confidence: 'high' | 'low'
+  source: 'heuristic' | 'llm' | 'default'
+  rationale?: string
+}
+
+export interface TaskReviewProposal {
+  noteId: string
+  label: string
+  proposedClassification: TaskClassification
+  confidence: string
+}
+
+export interface TaskCreateInput {
+  label?: string
+  intent?: string
+  acceptanceCriteria?: string
+  classification?: TaskClassification
+  timelinePressure?: TaskTimeline
+  workspaceId?: string
+  position?: { x: number; y: number }
+}
+
+export interface TaskAPI {
+  load: (taskId: string) => Promise<TaskFile | null>
+  save: (
+    taskId: string,
+    meta: Partial<TaskMeta>,
+    intent?: string,
+    acceptanceCriteria?: Record<string, unknown>
+  ) => Promise<void>
+  delete: (taskId: string) => Promise<void>
+  list: () => Promise<TaskFile[]>
+  deriveState: (taskId: string) => Promise<TaskDerivedState | null>
+  classify: (
+    intent: string,
+    acceptance?: string
+  ) => Promise<{ ok: boolean; result?: TaskClassifyResult; error?: string }>
+  link: (
+    sourceId: string,
+    targetId: string,
+    kind: EdgeKind
+  ) => Promise<{ ok: boolean; edge?: PersistedEdge; error?: string }>
+  convertFromNote: (
+    noteId: string,
+    classification: TaskClassification,
+    timelinePressure?: TaskTimeline
+  ) => Promise<{ ok: boolean; taskId?: string; error?: string }>
+  reviewAll: () => Promise<{ ok: boolean; proposals: TaskReviewProposal[] }>
+  create: (
+    input: TaskCreateInput
+  ) => Promise<{ ok: boolean; taskId?: string; classification?: TaskClassification; error?: string }>
+  onTaskOpen: (cb: (info: TaskOpenInfo) => void) => () => void
+  onTaskUpdate: (cb: (info: { taskId: string }) => void) => () => void
+  onTaskClose: (cb: (info: { taskId: string }) => void) => () => void
+  onTaskDelete: (cb: (info: { taskId: string }) => void) => () => void
+  onTaskStateChange: (cb: (info: { taskId: string; state: DerivedTaskState }) => void) => () => void
+  onTaskLink: (cb: (info: PersistedEdge) => void) => () => void
+}
+
+const taskAPI: TaskAPI = {
+  load: (taskId) => ipcRenderer.invoke('task:load', { taskId }),
+  save: (taskId, meta, intent, acceptanceCriteria) =>
+    ipcRenderer.invoke('task:save', { taskId, meta, intent, acceptanceCriteria }),
+  delete: (taskId) => ipcRenderer.invoke('task:delete', { taskId }),
+  list: () => ipcRenderer.invoke('task:list'),
+  deriveState: (taskId) => ipcRenderer.invoke('task:derive-state', { taskId }),
+  classify: (intent, acceptance) => ipcRenderer.invoke('task:classify', { intent, acceptance }),
+  link: (sourceId, targetId, kind) =>
+    ipcRenderer.invoke('task:link', { sourceId, targetId, kind }),
+  convertFromNote: (noteId, classification, timelinePressure) =>
+    ipcRenderer.invoke('task:convert-from-note', { noteId, classification, timelinePressure }),
+  reviewAll: () => ipcRenderer.invoke('task:review-all'),
+  create: (input) => ipcRenderer.invoke('task:create', input),
+  onTaskOpen: (callback) => {
+    const handler = (_e: Electron.IpcRendererEvent, info: TaskOpenInfo): void => callback(info)
+    ipcRenderer.on('canvas:task-open', handler)
+    return () => ipcRenderer.removeListener('canvas:task-open', handler)
+  },
+  onTaskUpdate: (callback) => {
+    const handler = (_e: Electron.IpcRendererEvent, info: { taskId: string }): void => callback(info)
+    ipcRenderer.on('canvas:task-update', handler)
+    return () => ipcRenderer.removeListener('canvas:task-update', handler)
+  },
+  onTaskClose: (callback) => {
+    const handler = (_e: Electron.IpcRendererEvent, info: { taskId: string }): void => callback(info)
+    ipcRenderer.on('canvas:task-close', handler)
+    return () => ipcRenderer.removeListener('canvas:task-close', handler)
+  },
+  onTaskDelete: (callback) => {
+    const handler = (_e: Electron.IpcRendererEvent, info: { taskId: string }): void => callback(info)
+    ipcRenderer.on('canvas:task-delete', handler)
+    return () => ipcRenderer.removeListener('canvas:task-delete', handler)
+  },
+  onTaskStateChange: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { taskId: string; state: DerivedTaskState }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:task-state-change', handler)
+    return () => ipcRenderer.removeListener('canvas:task-state-change', handler)
+  },
+  onTaskLink: (callback) => {
+    const handler = (_e: Electron.IpcRendererEvent, info: PersistedEdge): void => callback(info)
+    ipcRenderer.on('canvas:task-link', handler)
+    return () => ipcRenderer.removeListener('canvas:task-link', handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('task', taskAPI)
+
 // ── Plan API ─────────────────────────────────────────────
 
 export type PlanState =
@@ -662,14 +818,24 @@ contextBridge.exposeInMainWorld('browserTiles', browserTilesAPI)
 
 // ── Edge Persistence API ─────────────────────────────────
 
+export type EdgeKind =
+  | 'has-plan'
+  | 'executing-in'
+  | 'research-output'
+  | 'linked-pr'
+  | 'depends-on'
+  | 'legacy'
+
 export interface PersistedEdge {
   id: string
   source: string
   target: string
+  kind: EdgeKind
   sourceHandle?: string | null
   targetHandle?: string | null
   animated?: boolean
   style?: Record<string, unknown>
+  data?: Record<string, unknown>
 }
 
 export interface EdgeAPI {

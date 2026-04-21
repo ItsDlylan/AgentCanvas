@@ -3,13 +3,17 @@ import type { Node } from '@xyflow/react'
 import { useCanvasStore } from '@/store/canvas-store'
 import { useAllTerminalStatuses, type TerminalStatus, type TerminalStatusInfo } from '@/hooks/useTerminalStatus'
 
-export type PaletteTileType = 'terminal' | 'browser' | 'notes' | 'draw' | 'image'
+export type PaletteTileType = 'terminal' | 'browser' | 'notes' | 'draw' | 'image' | 'task'
 
 export interface PaletteTileMetadata {
   team?: string
   role?: string
   agent?: string
 }
+
+export type PaletteTaskClassification = 'QUICK' | 'NEEDS_RESEARCH' | 'DEEP_FOCUS' | 'BENCHMARK'
+export type PaletteTaskState = 'raw' | 'researched' | 'planned' | 'executing' | 'review' | 'done'
+export type PaletteTaskTimeline = 'urgent' | 'this-week' | 'this-month' | 'whenever'
 
 export interface PaletteTile {
   id: string
@@ -21,6 +25,9 @@ export interface PaletteTile {
   workspaceId: string
   status?: TerminalStatus
   foregroundProcess?: string
+  taskClassification?: PaletteTaskClassification
+  taskState?: PaletteTaskState
+  taskTimeline?: PaletteTaskTimeline
 }
 
 const INDEXED_TYPES: ReadonlySet<string> = new Set<PaletteTileType>([
@@ -28,7 +35,8 @@ const INDEXED_TYPES: ReadonlySet<string> = new Set<PaletteTileType>([
   'browser',
   'notes',
   'draw',
-  'image'
+  'image',
+  'task'
 ])
 
 function flattenMetadata(raw: unknown): PaletteTileMetadata {
@@ -107,6 +115,13 @@ function tileForNode(
   }
 
   if (type === 'notes' || type === 'draw' || type === 'image') {
+    return base
+  }
+
+  if (type === 'task') {
+    base.taskClassification = data.classification as PaletteTaskClassification | undefined
+    base.taskState = data.derivedState as PaletteTaskState | undefined
+    base.taskTimeline = data.timelinePressure as PaletteTaskTimeline | undefined
     return base
   }
 

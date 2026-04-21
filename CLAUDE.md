@@ -126,3 +126,81 @@ Parameters for `note/open`:
 - **`linkedNoteId`** — Link to a parent note (amber edge)
 - **`position`** — `{ x, y }` canvas coordinates
 - **`width`** / **`height`** — Tile dimensions (default 400x400)
+
+### Task tiles
+
+Task tiles are first-class "thing to do" containers that agents can read and write. Each task has a required **classification** (`QUICK`, `NEEDS_RESEARCH`, `DEEP_FOCUS`, `BENCHMARK`), an optional **timeline pressure** (`urgent`, `this-week`, `this-month`, `whenever`), and a **derived state** computed from linked artifacts (`raw` → `researched` → `planned` → `executing` → `review` → `done`).
+
+```bash
+# Create a task (classifier proposes a classification if you don't supply one)
+curl -s -X POST $AGENT_CANVAS_API/api/task/open \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"label\": \"Add audit logging\",
+    \"intent\": \"Track who modified each record\",
+    \"acceptanceCriteria\": \"- [ ] All writes log user_id + timestamp\",
+    \"workspaceId\": \"agentcanvas\"
+  }"
+# Returns: { "ok": true, "taskId": "<uuid>", "classification": "QUICK", ... }
+
+# Read a task (returns meta + intent markdown + acceptanceCriteria TipTap + derived state)
+curl -s -X POST $AGENT_CANVAS_API/api/task/read \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<id>"}'
+
+# Update fields (classification, timeline, label, intent, acceptanceCriteria, manualReviewDone)
+curl -s -X POST $AGENT_CANVAS_API/api/task/update \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<id>","classification":"DEEP_FOCUS","timelinePressure":"this-week"}'
+
+# Classify intent text via heuristics + LLM fallback (does not modify the task)
+curl -s -X POST $AGENT_CANVAS_API/api/task/classify \
+  -H 'Content-Type: application/json' \
+  -d '{"intent":"Investigate slow query"}'
+
+# Attach a typed edge (kinds: has-plan | executing-in | research-output | linked-pr | depends-on)
+curl -s -X POST $AGENT_CANVAS_API/api/task/link \
+  -H 'Content-Type: application/json' \
+  -d '{"sourceTaskId":"<task>","targetId":"<plan|terminal|note|task>","kind":"has-plan"}'
+
+# Compute derived state (raw | researched | planned | executing | review | done)
+curl -s -X POST $AGENT_CANVAS_API/api/task/state-derive \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<id>"}'
+
+# Convert an existing note tile to a task (note is soft-closed)
+curl -s -X POST $AGENT_CANVAS_API/api/task/convert-from-note \
+  -H 'Content-Type: application/json' \
+  -d '{"noteId":"<note-id>","classification":"QUICK","timelinePressure":"this-week"}'
+
+# Bulk classify every open note (returns proposals — does not convert)
+curl -s -X POST $AGENT_CANVAS_API/api/task/review-all
+
+# List tasks with filters (any of classification, state, timeline, workspaceId, includeDone)
+curl -s "$AGENT_CANVAS_API/api/tasks?classification=QUICK&state=raw&workspaceId=agentcanvas"
+
+# Soft-close (auto-swept after 7 days; recoverable before that)
+curl -s -X POST $AGENT_CANVAS_API/api/task/close \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<id>"}'
+
+# Hard delete
+curl -s -X POST $AGENT_CANVAS_API/api/task/delete \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<id>"}'
+```
+
+**Derived state rules:**
+- `QUICK` / `BENCHMARK`: `raw` (no linked terminal) → `executing` (terminal running) → `review` (terminal exited) → `done` (human marks reviewed)
+- `NEEDS_RESEARCH` / `DEEP_FOCUS`: `raw` → `researched` (research-output edge to a note) → `planned` → `executing` → `review` (all three follow the linked Plan Tile's state) → `done`
+
+Agents inside a terminal linked to a task can spawn subtasks with a `depends-on` edge to track discovered work. The `→review` transition fires a success-level `/api/notify` toast automatically.
+
+### ⌘K palette task tokens
+
+In the command palette, task tiles can be filtered inline:
+- `!class:QUICK` / `!class:NEEDS_RESEARCH` / `!class:DEEP_FOCUS` / `!class:BENCHMARK`
+- `!state:raw` / `!state:researched` / `!state:planned` / `!state:executing` / `!state:review` / `!state:done`
+- `!when:urgent` / `!when:this-week` / `!when:this-month` / `!when:whenever`
+
+Tokens can be combined with workspace (`@workspace`) or plain text search. The Task Lens sidebar (`Cmd+Shift+T`) exposes 4 built-in views: Morning Quick Burst, This Week Deep Focus, Needs-Research Inbox, In Flight.
