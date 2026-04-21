@@ -9,6 +9,11 @@ import type {
 } from '../../preload/index'
 import { useSemanticZoom } from '../hooks/useSemanticZoom'
 import { TileContextMenu, type TileContextMenuItem } from './TileContextMenu'
+import { DependencyWarningModal } from './DependencyWarningModal'
+import {
+  unsatisfiedDependencies,
+  type UnsatisfiedDep
+} from '../lib/task-dependency-check'
 
 const CLASSIFICATION_COLOR: Record<TaskClassification, string> = {
   QUICK: '#22c55e',
@@ -57,6 +62,11 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const [classifyBusy, setClassifyBusy] = useState(false)
   const [copiedPrompt, setCopiedPrompt] = useState(false)
+  const [depWarning, setDepWarning] = useState<{
+    actionLabel: string
+    unsatisfied: UnsatisfiedDep[]
+    proceed: () => void
+  } | null>(null)
   const tier = useSemanticZoom()
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -114,10 +124,31 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
     [taskId]
   )
 
+  const runWithDepCheck = useCallback(
+    async (actionLabel: string, run: () => void | Promise<void>) => {
+      const unsatisfied = await unsatisfiedDependencies(taskId)
+      if (unsatisfied.length === 0) {
+        await run()
+        return
+      }
+      setDepWarning({
+        actionLabel,
+        unsatisfied,
+        proceed: () => {
+          setDepWarning(null)
+          void run()
+        }
+      })
+    },
+    [taskId]
+  )
+
   const markReviewed = useCallback(async () => {
-    await window.task.save(taskId, { manualReviewDone: true })
-    reloadDerivedState()
-  }, [taskId, reloadDerivedState])
+    await runWithDepCheck('Mark Reviewed', async () => {
+      await window.task.save(taskId, { manualReviewDone: true })
+      reloadDerivedState()
+    })
+  }, [taskId, reloadDerivedState, runWithDepCheck])
 
   const unmarkReviewed = useCallback(async () => {
     await window.task.save(taskId, { manualReviewDone: false })
@@ -169,19 +200,21 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
 
   const spawnLinkedPlan = useCallback(async () => {
     if (!meta) return
-    const content =
-      `# Problem statement\n${intent}\n\n` +
-      `# Acceptance criteria\n${acceptanceMarkdown || '- [ ] Define at least one measurable success condition'}\n`
-    const res = await window.plan.create({
-      label: `Plan: ${meta.label}`,
-      content,
-      workspaceId: meta.workspaceId
+    await runWithDepCheck('Spawn Plan', async () => {
+      const content =
+        `# Problem statement\n${intent}\n\n` +
+        `# Acceptance criteria\n${acceptanceMarkdown || '- [ ] Define at least one measurable success condition'}\n`
+      const res = await window.plan.create({
+        label: `Plan: ${meta.label}`,
+        content,
+        workspaceId: meta.workspaceId
+      })
+      if (res.ok && res.planId) {
+        await window.task.link(taskId, res.planId, 'has-plan')
+        reloadDerivedState()
+      }
     })
-    if (res.ok && res.planId) {
-      await window.task.link(taskId, res.planId, 'has-plan')
-      reloadDerivedState()
-    }
-  }, [meta, intent, acceptanceMarkdown, taskId, reloadDerivedState])
+  }, [meta, intent, acceptanceMarkdown, taskId, reloadDerivedState, runWithDepCheck])
 
   const copyAgentPrompt = useCallback(async () => {
     if (!meta) return
@@ -205,23 +238,25 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
 
   const spawnLinkedTerminal = useCallback(async () => {
     if (!meta) return
-    const store = (await import('../store/canvas-store')).useCanvasStore
-    const existingBefore = new Set(
-      store.getState().allNodes.filter((n) => n.type === 'terminal').map((n) => n.id)
-    )
-    store.getState().addTerminalAt(undefined, 640, 400, undefined, `Task: ${meta.label}`)
-    // Wait for ReactFlow to mount the new terminal tile + register its handles.
-    // 50ms wasn't enough — the terminal component measures CWD etc. async.
-    await new Promise((r) => setTimeout(r, 600))
-    const newTerminal = store
-      .getState()
-      .allNodes.filter((n) => n.type === 'terminal')
-      .find((n) => !existingBefore.has(n.id))
-    if (newTerminal) {
-      await window.task.link(taskId, newTerminal.id, 'executing-in')
-      reloadDerivedState()
-    }
-  }, [meta, taskId, reloadDerivedState])
+    await runWithDepCheck('Spawn Terminal', async () => {
+      const store = (await import('../store/canvas-store')).useCanvasStore
+      const existingBefore = new Set(
+        store.getState().allNodes.filter((n) => n.type === 'terminal').map((n) => n.id)
+      )
+      store.getState().addTerminalAt(undefined, 640, 400, undefined, `Task: ${meta.label}`)
+      // Wait for ReactFlow to mount the new terminal tile + register its handles.
+      // 50ms wasn't enough — the terminal component measures CWD etc. async.
+      await new Promise((r) => setTimeout(r, 600))
+      const newTerminal = store
+        .getState()
+        .allNodes.filter((n) => n.type === 'terminal')
+        .find((n) => !existingBefore.has(n.id))
+      if (newTerminal) {
+        await window.task.link(taskId, newTerminal.id, 'executing-in')
+        reloadDerivedState()
+      }
+    })
+  }, [meta, taskId, reloadDerivedState, runWithDepCheck])
 
   const contextMenuItems: TileContextMenuItem[] = useMemo(() => {
     if (!meta) return []
@@ -461,6 +496,14 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
           y={contextMenu.y}
           items={contextMenuItems}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+      {depWarning && (
+        <DependencyWarningModal
+          actionLabel={depWarning.actionLabel}
+          unsatisfied={depWarning.unsatisfied}
+          onProceed={depWarning.proceed}
+          onCancel={() => setDepWarning(null)}
         />
       )}
     </div>
