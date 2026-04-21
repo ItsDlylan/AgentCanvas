@@ -401,6 +401,27 @@ Plus custom environment variables configured in Settings > Terminal.
 - **fix:** Allow backspace to work in note tiles
 - **fix:** Read fresh node state in linked-note click handler
 
+## Releasing
+
+The app checks GitHub Releases for updates and downloads new DMGs in-app. To cut a release:
+
+1. Bump `version` in `package.json`.
+2. Add the new entry at the top of the Changelog section above.
+3. Commit, tag, push:
+   ```bash
+   git commit -am "chore: release vX.Y.Z"
+   git tag vX.Y.Z
+   git push --follow-tags
+   ```
+4. Build and publish artifacts to GitHub Releases (creates a draft):
+   ```bash
+   GH_TOKEN=<your_personal_access_token> npm run release
+   ```
+   The token needs `repo` scope. electron-builder uploads `*.dmg`, `*.zip`, `*.blockmap`, and `latest-mac.yml` for both `arm64` and `x64`.
+5. Open the draft release on GitHub, paste the changelog into the body, and click **Publish**. The release body becomes the changelog the in-app updater displays — keep it markdown.
+
+Once the release is published, running app instances will detect it on their next check (on launch or every 4 hours) and surface an "Update available" banner.
+
 ## License
 
 MIT
