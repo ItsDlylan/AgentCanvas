@@ -11,11 +11,11 @@ import { navigateBrowser } from '@/hooks/useBrowserNavigation'
 // ── Helper functions ──────────────────────────────────────
 
 export function defaultTileWidth(type: string | undefined): number {
-  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'diffViewer' ? 700 : type === 'devTools' ? 900 : type === 'draw' ? 800 : type === 'image' ? 500 : 640
+  return type === 'browser' ? 800 : type === 'notes' ? 400 : type === 'task' ? 420 : type === 'diffViewer' ? 700 : type === 'devTools' ? 900 : type === 'draw' ? 800 : type === 'image' ? 500 : 640
 }
 
 export function defaultTileHeight(type: string | undefined): number {
-  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'diffViewer' ? 500 : type === 'devTools' ? 500 : type === 'draw' ? 600 : type === 'image' ? 400 : 400
+  return type === 'browser' ? 600 : type === 'notes' ? 400 : type === 'task' ? 440 : type === 'diffViewer' ? 500 : type === 'devTools' ? 500 : type === 'draw' ? 600 : type === 'image' ? 400 : 400
 }
 
 let tileCount = 0
@@ -174,7 +174,7 @@ export interface CanvasStore {
   tileWorkspaceMap: Map<string, string>
   activeWorkspaceId: string
   workspaces: Workspace[]
-  nodesLoadedFlags: { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean; plans: boolean }
+  nodesLoadedFlags: { notes: boolean; terminals: boolean; browsers: boolean; draws: boolean; plans: boolean; tasks: boolean }
 
   // ── Config (set by Canvas on mount) ──
   reactFlowInstance: ReactFlowInstance | null
@@ -285,7 +285,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
     tileWorkspaceMap: new Map(),
     activeWorkspaceId: 'default',
     workspaces: [DEFAULT_WORKSPACE],
-    nodesLoadedFlags: { notes: false, terminals: false, browsers: false, draws: false, plans: false },
+    nodesLoadedFlags: { notes: false, terminals: false, browsers: false, draws: false, plans: false, tasks: false },
     reactFlowInstance: null,
     tileGap: 40,
     viewportCache: new Map(),

@@ -937,6 +937,7 @@ function ProcessPanelComponent({
   const diffViewers = nodes.filter((n) => n.type === 'diffViewer')
   const draws = nodes.filter((n) => n.type === 'draw')
   const images = nodes.filter((n) => n.type === 'image')
+  const tasks = nodes.filter((n) => n.type === 'task')
   const browsers = allBrowsers.filter((n) => {
     const sid = (n.data as Record<string, unknown>).sessionId as string
     return tileWorkspaceMap.get(sid) === activeWorkspaceId
@@ -1158,6 +1159,45 @@ function ProcessPanelComponent({
                   onDeleteNote={onDeleteNote}
                 />
               ))}
+
+              {/* Tasks */}
+              {tasks.map((node) => {
+                const data = node.data as Record<string, unknown>
+                const sessionId = (data.sessionId as string) ?? node.id
+                const label = (data.label as string) || 'Task'
+                const classification = (data.classification as string) || 'QUICK'
+                const derivedState = (data.derivedState as string) || 'raw'
+                const isFocused = focusedId === sessionId
+                const accent =
+                  classification === 'QUICK' ? '#22c55e'
+                  : classification === 'NEEDS_RESEARCH' ? '#f59e0b'
+                  : classification === 'DEEP_FOCUS' ? '#a855f7'
+                  : '#3b82f6'
+                return (
+                  <button
+                    key={node.id}
+                    onClick={() => onFocus(sessionId)}
+                    className={`group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors ${
+                      isFocused ? 'bg-yellow-500/10 text-yellow-200' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span
+                      className="h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: accent }}
+                    />
+                    <div className="flex flex-1 min-w-0 items-center gap-1.5">
+                      <span className="truncate text-xs">{label}</span>
+                      <span className="shrink-0 text-[10px]" style={{ color: accent, opacity: 0.8 }}>
+                        {classification.replace('_', ' ')}
+                      </span>
+                      <span className="shrink-0 text-[10px] text-zinc-500">
+                        {derivedState}
+                      </span>
+                    </div>
+                    <JumpBadge hint={jumpHints.get(sessionId)} />
+                  </button>
+                )
+              })}
 
               {/* Ungrouped draws */}
               {grouping.ungroupedDraws.map((node) => {

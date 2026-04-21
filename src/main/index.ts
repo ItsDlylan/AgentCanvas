@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, shell, dialog, Menu, globalShortcut, proto
 import { join } from 'path'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
+import { randomUUID } from 'crypto'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 const execFileAsync = promisify(execFile)
@@ -44,9 +45,25 @@ import { saveAttachment, saveAttachmentFromPath, deleteAttachments, listAttachme
 import { ensureDrawDir, loadDraw, saveDraw, deleteDraw, listDraws } from './draw-store'
 import { loadImage, saveImage, deleteImage, listImages, storeImage } from './image-store'
 import { jsonToMarkdown } from './note-converter'
+import { markdownToTiptap } from './markdown-to-tiptap'
 import { loadSettings, saveSettings, DEFAULT_SETTINGS, type Settings } from './settings-store'
 import { loadTerminals, saveTerminals, type PersistedTerminal } from './terminal-store'
-import { loadEdges, saveEdges } from './edge-store'
+import { loadEdges, saveEdges, type EdgeKind, type PersistedEdge } from './edge-store'
+import {
+  ensureTaskDir,
+  loadTask,
+  saveTask,
+  deleteTask as deleteTaskFile,
+  listTasks,
+  filterTasks,
+  findTasksForSweep,
+  type TaskClassification,
+  type TaskMeta,
+  type TaskTimeline,
+  type TaskFile
+} from './task-store'
+import { classify as classifyTask } from './task-classifier'
+import { deriveTaskState } from './task-state-derive'
 import { loadPomodoro, savePomodoro } from './pomodoro-store'
 import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-store'
 import { DiffService } from './diff-service'
@@ -570,7 +587,11 @@ ipcMain.handle('browser-tiles:load', () => {
 // ── Edge Persistence ─────────────────────────────────────
 
 ipcMain.on('edges:save', (event, edges) => {
-  saveEdges({ version: 1, edges })
+  const normalized = edges.map((e: Record<string, unknown>) => ({
+    ...e,
+    kind: (e.kind as string | undefined) ?? 'legacy'
+  }))
+  saveEdges({ version: 2, edges: normalized })
   event.returnValue = true
 })
 
@@ -596,6 +617,213 @@ ipcMain.handle('note:delete', (_event, { noteId }) => {
 ipcMain.handle('note:list', () => {
   return listNotes()
 })
+
+// ── Task IPC Handlers ──────────────────────────────────
+
+ipcMain.handle('task:load', (_event, { taskId }: { taskId: string }) => {
+  return loadTask(taskId)
+})
+
+ipcMain.handle(
+  'task:save',
+  async (
+    _event,
+    {
+      taskId,
+      meta,
+      intent,
+      acceptanceCriteria
+    }: {
+      taskId: string
+      meta: Partial<TaskMeta>
+      intent?: string
+      acceptanceCriteria?: Record<string, unknown>
+    }
+  ) => {
+    await saveTask(taskId, meta, intent, acceptanceCriteria)
+    checkTaskStateChange(taskId)
+  }
+)
+
+ipcMain.handle('task:delete', (_event, { taskId }: { taskId: string }) => {
+  deleteTaskFile(taskId)
+  lastTaskState.delete(taskId)
+})
+
+ipcMain.handle('task:list', () => {
+  return listTasks()
+})
+
+ipcMain.handle('task:derive-state', (_event, { taskId }: { taskId: string }) => {
+  const t = loadTask(taskId)
+  if (!t) return null
+  return computeTaskState(t)
+})
+
+ipcMain.handle('task:classify', async (_event, { intent, acceptance }: { intent: string; acceptance?: string }) => {
+  try {
+    const result = await classifyTask(intent, acceptance ?? '')
+    return { ok: true, result }
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+})
+
+ipcMain.handle(
+  'task:link',
+  (
+    _event,
+    { sourceId, targetId, kind }: { sourceId: string; targetId: string; kind: EdgeKind }
+  ) => {
+    if (!VALID_EDGE_KINDS.includes(kind)) return { ok: false, error: 'Invalid edge kind' }
+    const data = loadEdges()
+    const newEdge: PersistedEdge = {
+      id: `e-${randomUUID()}`,
+      source: sourceId,
+      target: targetId,
+      kind
+    }
+    data.edges.push(newEdge)
+    saveEdges(data)
+    mainWindow?.webContents.send('canvas:task-link', newEdge)
+    return { ok: true, edge: newEdge }
+  }
+)
+
+ipcMain.handle(
+  'task:convert-from-note',
+  async (
+    _event,
+    {
+      noteId,
+      classification,
+      timelinePressure
+    }: { noteId: string; classification: TaskClassification; timelinePressure?: TaskTimeline }
+  ) => {
+    const note = loadNote(noteId)
+    if (!note) return { ok: false, error: 'Note not found' }
+    if (!VALID_CLASSIFICATIONS.includes(classification)) {
+      return { ok: false, error: 'Invalid classification' }
+    }
+    const taskId = randomUUID()
+    const markdownFromNote = jsonToMarkdown(note.content)
+    await saveTask(
+      taskId,
+      {
+        taskId,
+        label: note.meta.label,
+        workspaceId: note.meta.workspaceId,
+        classification,
+        timelinePressure: timelinePressure ?? 'whenever',
+        manualReviewDone: false,
+        position: note.meta.position,
+        width: note.meta.width,
+        height: note.meta.height,
+        isSoftDeleted: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      },
+      markdownFromNote,
+      note.content
+    )
+    await saveNote(noteId, { isSoftDeleted: true })
+    mainWindow?.webContents.send('canvas:task-open', { taskId })
+    mainWindow?.webContents.send('canvas:note-close', { noteId })
+    return { ok: true, taskId }
+  }
+)
+
+ipcMain.handle('task:review-all', async () => {
+  const notes = listNotes().filter((n) => !n.meta.isSoftDeleted)
+  const proposals: Array<{
+    noteId: string
+    label: string
+    proposedClassification: TaskClassification
+    confidence: string
+  }> = []
+  for (const n of notes) {
+    const md = jsonToMarkdown(n.content)
+    try {
+      const result = await classifyTask(md, '', { disableLlm: true })
+      proposals.push({
+        noteId: n.meta.noteId,
+        label: n.meta.label,
+        proposedClassification: result.classification,
+        confidence: result.confidence
+      })
+    } catch {
+      proposals.push({
+        noteId: n.meta.noteId,
+        label: n.meta.label,
+        proposedClassification: 'QUICK',
+        confidence: 'low'
+      })
+    }
+  }
+  return { ok: true, proposals }
+})
+
+ipcMain.handle(
+  'task:create',
+  async (
+    _event,
+    input: {
+      label?: string
+      intent?: string
+      acceptanceCriteria?: string
+      classification?: TaskClassification
+      timelinePressure?: TaskTimeline
+      workspaceId?: string
+      position?: { x: number; y: number }
+    }
+  ) => {
+    const taskId = randomUUID()
+    const intent = input.intent ?? ''
+    let acceptanceDoc: Record<string, unknown> = {}
+    if (input.acceptanceCriteria) {
+      try {
+        acceptanceDoc = markdownToTiptap(input.acceptanceCriteria)
+      } catch {
+        return { ok: false, error: 'Invalid acceptance markdown' }
+      }
+    }
+
+    let classification: TaskClassification
+    if (input.classification && VALID_CLASSIFICATIONS.includes(input.classification)) {
+      classification = input.classification
+    } else {
+      try {
+        const r = await classifyTask(intent, input.acceptanceCriteria ?? '')
+        classification = r.classification
+      } catch {
+        classification = 'QUICK'
+      }
+    }
+
+    const timelinePressure =
+      input.timelinePressure && VALID_TIMELINES.includes(input.timelinePressure)
+        ? input.timelinePressure
+        : 'whenever'
+
+    const meta: TaskMeta = {
+      taskId,
+      label: input.label ?? 'Task',
+      workspaceId: input.workspaceId ?? 'default',
+      classification,
+      timelinePressure,
+      manualReviewDone: false,
+      position: input.position ?? { x: 100, y: 100 },
+      width: 420,
+      height: 440,
+      isSoftDeleted: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
+    await saveTask(taskId, meta, intent, acceptanceDoc)
+    mainWindow?.webContents.send('canvas:task-open', { taskId, meta })
+    return { ok: true, taskId, classification }
+  }
+)
 
 // ── Plan IPC Handlers (renderer → main) ──
 
@@ -1390,6 +1618,413 @@ canvasApi.on('notes-list', (reply: (data: unknown) => void) => {
     }))
   reply({ ok: true, notes })
 })
+
+// ── Task handlers ──
+
+ensureTaskDir()
+
+const VALID_CLASSIFICATIONS: TaskClassification[] = ['QUICK', 'NEEDS_RESEARCH', 'DEEP_FOCUS', 'BENCHMARK']
+const VALID_TIMELINES: TaskTimeline[] = ['urgent', 'this-week', 'this-month', 'whenever']
+const VALID_EDGE_KINDS: EdgeKind[] = [
+  'has-plan',
+  'executing-in',
+  'research-output',
+  'linked-pr',
+  'depends-on',
+  'legacy'
+]
+
+function computeTaskState(task: TaskFile): { state: string; reason: string } {
+  const edges = loadEdges().edges
+  return deriveTaskState({
+    taskId: task.meta.taskId,
+    classification: task.meta.classification,
+    manualReviewDone: task.meta.manualReviewDone,
+    edges,
+    getPlanState: (planId) => storeLoadPlan(planId)?.meta.state,
+    getTerminalStatus: (terminalId) => {
+      const info = terminalManager.getStatus(terminalId)
+      if (!info) return undefined
+      return { running: info.status === 'running' || info.status === 'waiting' }
+    }
+  })
+}
+
+canvasApi.on(
+  'task-open',
+  async (
+    info: {
+      label?: string
+      intent?: string
+      acceptanceCriteria?: string | Record<string, unknown>
+      classification?: string
+      timelinePressure?: string
+      workspaceId?: string
+      linkedTerminalId?: string
+      parentTaskId?: string
+      position?: { x: number; y: number }
+      width?: number
+      height?: number
+      skipClassifier?: boolean
+    },
+    reply: (result: unknown) => void
+  ) => {
+    const taskId = randomUUID()
+    const intent = info.intent ?? ''
+    let acceptanceDoc: Record<string, unknown> = {}
+    if (info.acceptanceCriteria) {
+      try {
+        acceptanceDoc =
+          typeof info.acceptanceCriteria === 'string'
+            ? markdownToTiptap(info.acceptanceCriteria)
+            : info.acceptanceCriteria
+      } catch {
+        reply({ ok: false, error: 'Invalid acceptanceCriteria markdown' })
+        return
+      }
+    }
+
+    let classification: TaskClassification
+    let classifierResult: Awaited<ReturnType<typeof classifyTask>> | null = null
+    if (info.classification && VALID_CLASSIFICATIONS.includes(info.classification as TaskClassification)) {
+      classification = info.classification as TaskClassification
+    } else if (info.skipClassifier) {
+      classification = 'QUICK'
+    } else {
+      try {
+        classifierResult = await classifyTask(intent, info.acceptanceCriteria?.toString() ?? '')
+        classification = classifierResult.classification
+      } catch {
+        classification = 'QUICK'
+      }
+    }
+
+    const timelinePressure: TaskTimeline = VALID_TIMELINES.includes(
+      info.timelinePressure as TaskTimeline
+    )
+      ? (info.timelinePressure as TaskTimeline)
+      : 'whenever'
+
+    const meta: TaskMeta = {
+      taskId,
+      label: info.label || 'Task',
+      workspaceId: info.workspaceId || 'default',
+      classification,
+      timelinePressure,
+      manualReviewDone: false,
+      position: info.position || { x: 100, y: 100 },
+      width: info.width || 400,
+      height: info.height || 400,
+      isSoftDeleted: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }
+    await saveTask(taskId, meta, intent, acceptanceDoc)
+
+    mainWindow?.webContents.send('canvas:task-open', { taskId, meta })
+    reply({
+      ok: true,
+      taskId,
+      classification,
+      classifierResult,
+      needsConfirm: classifierResult?.source !== undefined && classifierResult.source !== 'heuristic'
+    })
+  }
+)
+
+canvasApi.on(
+  'task-read',
+  (info: { taskId: string }, reply: (result: unknown) => void) => {
+    const t = loadTask(info.taskId)
+    if (!t) {
+      reply({ ok: false, error: 'Task not found' })
+      return
+    }
+    const derived = computeTaskState(t)
+    reply({ ok: true, meta: t.meta, intent: t.intent, acceptanceCriteria: t.acceptanceCriteria, derivedState: derived })
+  }
+)
+
+canvasApi.on(
+  'task-update',
+  async (
+    info: {
+      taskId: string
+      label?: string
+      intent?: string
+      acceptanceCriteria?: string | Record<string, unknown>
+      timelinePressure?: string
+      classification?: string
+      manualReviewDone?: boolean
+    },
+    reply: (result: unknown) => void
+  ) => {
+    const existing = loadTask(info.taskId)
+    if (!existing) {
+      reply({ ok: false, error: 'Task not found' })
+      return
+    }
+    let acceptanceDoc: Record<string, unknown> | undefined
+    if (info.acceptanceCriteria !== undefined) {
+      try {
+        acceptanceDoc =
+          typeof info.acceptanceCriteria === 'string'
+            ? markdownToTiptap(info.acceptanceCriteria)
+            : info.acceptanceCriteria
+      } catch {
+        reply({ ok: false, error: 'Invalid acceptanceCriteria markdown' })
+        return
+      }
+    }
+    const patch: Partial<TaskMeta> = {}
+    if (info.label !== undefined) patch.label = info.label
+    if (
+      info.timelinePressure &&
+      VALID_TIMELINES.includes(info.timelinePressure as TaskTimeline)
+    ) {
+      patch.timelinePressure = info.timelinePressure as TaskTimeline
+    }
+    if (
+      info.classification &&
+      VALID_CLASSIFICATIONS.includes(info.classification as TaskClassification)
+    ) {
+      patch.classification = info.classification as TaskClassification
+    }
+    if (info.manualReviewDone !== undefined) patch.manualReviewDone = info.manualReviewDone
+
+    await saveTask(info.taskId, patch, info.intent, acceptanceDoc)
+    mainWindow?.webContents.send('canvas:task-update', { taskId: info.taskId })
+
+    const updated = loadTask(info.taskId)
+    const derived = updated ? computeTaskState(updated) : null
+    reply({ ok: true, taskId: info.taskId, derivedState: derived })
+  }
+)
+
+canvasApi.on(
+  'task-close',
+  async (info: { taskId: string }, reply: (result: unknown) => void) => {
+    await saveTask(info.taskId, { isSoftDeleted: true, softDeletedAt: Date.now() })
+    mainWindow?.webContents.send('canvas:task-close', { taskId: info.taskId })
+    reply({ ok: true })
+  }
+)
+
+canvasApi.on(
+  'task-delete',
+  (info: { taskId: string }, reply: (result: unknown) => void) => {
+    deleteTaskFile(info.taskId)
+    mainWindow?.webContents.send('canvas:task-delete', { taskId: info.taskId })
+    reply({ ok: true })
+  }
+)
+
+canvasApi.on(
+  'task-classify',
+  async (
+    info: { taskId?: string; intent?: string; acceptance?: string },
+    reply: (result: unknown) => void
+  ) => {
+    let intent = info.intent ?? ''
+    let acceptance = info.acceptance ?? ''
+    if (info.taskId) {
+      const t = loadTask(info.taskId)
+      if (t) {
+        intent = intent || t.intent
+      }
+    }
+    try {
+      const result = await classifyTask(intent, acceptance)
+      reply({ ok: true, result })
+    } catch (err) {
+      reply({ ok: false, error: String(err) })
+    }
+  }
+)
+
+canvasApi.on(
+  'task-link',
+  (
+    info: { sourceTaskId: string; targetId: string; kind: string },
+    reply: (result: unknown) => void
+  ) => {
+    if (!VALID_EDGE_KINDS.includes(info.kind as EdgeKind)) {
+      reply({ ok: false, error: `Invalid edge kind: ${info.kind}` })
+      return
+    }
+    const data = loadEdges()
+    const newEdge: PersistedEdge = {
+      id: `e-${randomUUID()}`,
+      source: info.sourceTaskId,
+      target: info.targetId,
+      kind: info.kind as EdgeKind
+    }
+    data.edges.push(newEdge)
+    saveEdges(data)
+    mainWindow?.webContents.send('canvas:task-link', newEdge)
+    reply({ ok: true, edge: newEdge })
+  }
+)
+
+canvasApi.on(
+  'task-state-derive',
+  (info: { taskId: string }, reply: (result: unknown) => void) => {
+    const t = loadTask(info.taskId)
+    if (!t) {
+      reply({ ok: false, error: 'Task not found' })
+      return
+    }
+    const derived = computeTaskState(t)
+    reply({ ok: true, taskId: info.taskId, ...derived })
+  }
+)
+
+canvasApi.on(
+  'task-convert-from-note',
+  async (
+    info: { noteId: string; classification: string; timelinePressure?: string },
+    reply: (result: unknown) => void
+  ) => {
+    const note = loadNote(info.noteId)
+    if (!note) {
+      reply({ ok: false, error: 'Note not found' })
+      return
+    }
+    if (!VALID_CLASSIFICATIONS.includes(info.classification as TaskClassification)) {
+      reply({ ok: false, error: 'Invalid classification' })
+      return
+    }
+    const taskId = randomUUID()
+    const timelinePressure: TaskTimeline = VALID_TIMELINES.includes(
+      info.timelinePressure as TaskTimeline
+    )
+      ? (info.timelinePressure as TaskTimeline)
+      : 'whenever'
+
+    const markdownFromNote = jsonToMarkdown(note.content)
+    await saveTask(
+      taskId,
+      {
+        taskId,
+        label: note.meta.label,
+        workspaceId: note.meta.workspaceId,
+        classification: info.classification as TaskClassification,
+        timelinePressure,
+        manualReviewDone: false,
+        position: note.meta.position,
+        width: note.meta.width,
+        height: note.meta.height,
+        isSoftDeleted: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      },
+      markdownFromNote,
+      note.content
+    )
+    // Soft-close the original note
+    await saveNote(info.noteId, { isSoftDeleted: true })
+    mainWindow?.webContents.send('canvas:task-open', { taskId })
+    mainWindow?.webContents.send('canvas:note-close', { noteId: info.noteId })
+    reply({ ok: true, taskId })
+  }
+)
+
+canvasApi.on(
+  'task-review-all',
+  async (reply: (result: unknown) => void) => {
+    const notes = listNotes().filter((n) => !n.meta.isSoftDeleted)
+    const proposals: Array<{
+      noteId: string
+      label: string
+      proposedClassification: TaskClassification
+      confidence: string
+    }> = []
+    for (const n of notes) {
+      const md = jsonToMarkdown(n.content)
+      try {
+        const result = await classifyTask(md, '', { disableLlm: true })
+        proposals.push({
+          noteId: n.meta.noteId,
+          label: n.meta.label,
+          proposedClassification: result.classification,
+          confidence: result.confidence
+        })
+      } catch {
+        proposals.push({
+          noteId: n.meta.noteId,
+          label: n.meta.label,
+          proposedClassification: 'QUICK',
+          confidence: 'low'
+        })
+      }
+    }
+    reply({ ok: true, proposals })
+  }
+)
+
+canvasApi.on(
+  'tasks-list',
+  (info: { filter?: Record<string, string> }, reply: (result: unknown) => void) => {
+    const all = listTasks()
+    const f = info.filter ?? {}
+    const filtered = filterTasks(all, {
+      classification: f.classification as TaskClassification | undefined,
+      workspaceId: f.workspaceId,
+      timeline: f.timeline as TaskTimeline | undefined,
+      includeSoftDeleted: f.includeDone === 'true'
+    })
+    const tasks = filtered.map((t) => ({
+      meta: t.meta,
+      derivedState: computeTaskState(t)
+    }))
+    if (f.state) {
+      reply({ ok: true, tasks: tasks.filter((t) => t.derivedState.state === f.state) })
+      return
+    }
+    reply({ ok: true, tasks })
+  }
+)
+
+// Soft-delete sweep: run on start and every 24h
+function sweepTasks(): void {
+  const candidates = findTasksForSweep(listTasks())
+  for (const taskId of candidates) {
+    deleteTaskFile(taskId)
+    mainWindow?.webContents.send('canvas:task-delete', { taskId })
+  }
+}
+sweepTasks()
+setInterval(sweepTasks, 24 * 60 * 60 * 1000)
+
+// Fire notify on →review transitions
+const lastTaskState = new Map<string, string>()
+function checkTaskStateChange(taskId: string): void {
+  const t = loadTask(taskId)
+  if (!t) return
+  const { state } = computeTaskState(t)
+  const prev = lastTaskState.get(taskId)
+  if (prev !== state) {
+    lastTaskState.set(taskId, state)
+    if (state === 'review' && prev !== undefined && prev !== 'review') {
+      mainWindow?.webContents.send('canvas:notify', {
+        id: randomUUID(),
+        title: 'Task ready for review',
+        body: t.meta.label,
+        level: 'success',
+        duration: 6000,
+        sound: false,
+        timestamp: Date.now()
+      })
+    }
+    mainWindow?.webContents.send('canvas:task-state-change', { taskId, state })
+  }
+}
+
+// Initial prime of lastTaskState
+for (const t of listTasks()) {
+  const { state } = computeTaskState(t)
+  lastTaskState.set(t.meta.taskId, state)
+}
 
 // ── Plan handlers ──
 

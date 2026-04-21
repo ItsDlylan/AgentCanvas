@@ -823,6 +823,232 @@ export class CanvasApi extends EventEmitter {
       return
     }
 
+    // ── Task endpoints ──
+
+    if (req.method === 'POST' && url === '/api/task/open') {
+      this.readBody(req).then((body) => {
+        const payload = body as {
+          label?: string
+          intent?: string
+          acceptanceCriteria?: string | Record<string, unknown>
+          classification?: string
+          timelinePressure?: string
+          workspaceId?: string
+          linkedTerminalId?: string
+          parentTaskId?: string
+          position?: { x: number; y: number }
+          width?: number
+          height?: number
+          skipClassifier?: boolean
+        }
+        this.emit('task-open', payload, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/read') {
+      this.readBody(req).then((body) => {
+        const { taskId } = body as { taskId?: string }
+        if (!taskId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'taskId is required' }))
+          return
+        }
+        this.emit('task-read', { taskId }, (result: unknown) => {
+          const r = result as { ok: boolean }
+          res.writeHead(r.ok ? 200 : 404)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/update') {
+      this.readBody(req).then((body) => {
+        const payload = body as {
+          taskId?: string
+          label?: string
+          intent?: string
+          acceptanceCriteria?: string | Record<string, unknown>
+          timelinePressure?: string
+          classification?: string
+          manualReviewDone?: boolean
+        }
+        if (!payload.taskId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'taskId is required' }))
+          return
+        }
+        this.emit('task-update', payload, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/close') {
+      this.readBody(req).then((body) => {
+        const { taskId } = body as { taskId?: string }
+        if (!taskId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'taskId is required' }))
+          return
+        }
+        this.emit('task-close', { taskId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/delete') {
+      this.readBody(req).then((body) => {
+        const { taskId } = body as { taskId?: string }
+        if (!taskId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'taskId is required' }))
+          return
+        }
+        this.emit('task-delete', { taskId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/classify') {
+      this.readBody(req).then((body) => {
+        const { taskId, intent, acceptance } = body as {
+          taskId?: string
+          intent?: string
+          acceptance?: string
+        }
+        this.emit('task-classify', { taskId, intent, acceptance }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/link') {
+      this.readBody(req).then((body) => {
+        const { sourceTaskId, targetId, kind } = body as {
+          sourceTaskId?: string
+          targetId?: string
+          kind?: string
+        }
+        if (!sourceTaskId || !targetId || !kind) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'sourceTaskId, targetId, kind are required' }))
+          return
+        }
+        this.emit('task-link', { sourceTaskId, targetId, kind }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/state-derive') {
+      this.readBody(req).then((body) => {
+        const { taskId } = body as { taskId?: string }
+        if (!taskId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'taskId is required' }))
+          return
+        }
+        this.emit('task-state-derive', { taskId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/convert-from-note') {
+      this.readBody(req).then((body) => {
+        const { noteId, classification, timelinePressure } = body as {
+          noteId?: string
+          classification?: string
+          timelinePressure?: string
+        }
+        if (!noteId || !classification) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'noteId and classification are required' }))
+          return
+        }
+        this.emit(
+          'task-convert-from-note',
+          { noteId, classification, timelinePressure },
+          (result: unknown) => {
+            res.writeHead(200)
+            res.end(JSON.stringify(result))
+          }
+        )
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/task/review-all') {
+      this.emit('task-review-all', (result: unknown) => {
+        res.writeHead(200)
+        res.end(JSON.stringify(result))
+      })
+      return
+    }
+
+    if (req.method === 'GET' && url.startsWith('/api/tasks')) {
+      const queryIndex = url.indexOf('?')
+      const queryString = queryIndex >= 0 ? url.slice(queryIndex + 1) : ''
+      const filter: Record<string, string> = {}
+      if (queryString) {
+        for (const pair of queryString.split('&')) {
+          const [k, v] = pair.split('=')
+          if (k && v !== undefined) filter[decodeURIComponent(k)] = decodeURIComponent(v)
+        }
+      }
+      this.emit('tasks-list', { filter }, (result: unknown) => {
+        res.writeHead(200)
+        res.end(JSON.stringify(result))
+      })
+      return
+    }
+
     res.writeHead(404)
     res.end(JSON.stringify({ error: 'Not found' }))
   }

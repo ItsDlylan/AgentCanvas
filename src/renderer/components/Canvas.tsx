@@ -23,6 +23,7 @@ import { TerminalTile } from './TerminalTile'
 import { BrowserTile } from './BrowserTile'
 import { NotesTile } from './NotesTile'
 import { PlanTile } from './PlanTile'
+import { TaskTile } from './TaskTile'
 import { DiffViewerTile } from './DiffViewerTile'
 import { DevToolsTile } from './DevToolsTile'
 import { DrawTile } from './draw/DrawTile'
@@ -60,12 +61,14 @@ import { useFlowMuteStore } from '@/store/flow-mute-store'
 import { useActivityTracker } from '@/hooks/useActivityTracker'
 import { CommandPalette } from './palette/CommandPalette'
 import { PALETTE_ACTION_EVENT, type PaletteUiAction } from '@/lib/palette-commands'
+import { TaskLens } from './TaskLens'
 
 const nodeTypes: NodeTypes = {
   terminal: TerminalTile as unknown as NodeTypes['terminal'],
   browser: BrowserTile as unknown as NodeTypes['browser'],
   notes: NotesTile as unknown as NodeTypes['notes'],
   plan: PlanTile as unknown as NodeTypes['plan'],
+  task: TaskTile as unknown as NodeTypes['task'],
   diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer'],
   devTools: DevToolsTile as unknown as NodeTypes['devTools'],
   draw: DrawTile as unknown as NodeTypes['draw'],
@@ -77,10 +80,28 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   browser:  '#3b82f6',
   notes:    '#f59e0b',
   plan:     '#14b8a6',
+  task:     '#eab308',
   diffViewer: '#a855f7',
   devTools:   '#f97316',
   draw:       '#ec4899',
   image:      '#06b6d4',
+}
+
+export function styleForEdgeKind(kind: string | undefined): React.CSSProperties {
+  switch (kind) {
+    case 'has-plan':
+      return { stroke: '#a855f7', strokeWidth: 2 }
+    case 'executing-in':
+      return { stroke: '#3b82f6', strokeWidth: 2 }
+    case 'research-output':
+      return { stroke: '#f59e0b', strokeWidth: 2, strokeDasharray: '4 3' }
+    case 'linked-pr':
+      return { stroke: '#22c55e', strokeWidth: 2 }
+    case 'depends-on':
+      return { stroke: '#ef4444', strokeWidth: 2 }
+    default:
+      return { stroke: '#737373', strokeWidth: 1 }
+  }
 }
 
 function minimapNodeColor(node: Node): string {
@@ -170,6 +191,7 @@ export default function Canvas() {
   const { settings, updateSettings } = useSettings()
   const { resolvedTemplates } = useResolvedTemplates(settings.templates)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [taskLensOpen, setTaskLensOpen] = useState(false)
   const pomodoro = usePomodoro()
   const [pomodoroExpanded, setPomodoroExpanded] = useState(false)
   const togglePomodoro = useCallback(() => setPomodoroExpanded((o) => !o), [])
@@ -431,6 +453,15 @@ export default function Canvas() {
                 const h = (n.style?.height as number) ?? 560
                 window.plan.move(sid, n.position)
                 window.plan.resize(sid, n.measured?.width ?? w, n.measured?.height ?? h)
+              } else if (n.type === 'task') {
+                const taskId = (n.data as Record<string, unknown>).taskId as string
+                const w = (n.style?.width as number) ?? 420
+                const h = (n.style?.height as number) ?? 440
+                window.task.save(taskId, {
+                  position: n.position,
+                  width: n.measured?.width ?? w,
+                  height: n.measured?.height ?? h
+                })
               }
             }
           }, 500)
@@ -717,6 +748,139 @@ export default function Canvas() {
       setNodesLoadedFlags((prev) => ({ ...prev, plans: true }))
     })
 
+    // ── Load persisted task tiles ──
+    window.task.list().then(async (tasks) => {
+      const taskNodes: Node[] = []
+      const wsMapEntries: Array<[string, string]> = []
+      for (const t of tasks) {
+        if (t.meta.isSoftDeleted) continue
+        const derived = await window.task.deriveState(t.meta.taskId)
+        taskNodes.push({
+          id: t.meta.taskId,
+          type: 'task',
+          position: t.meta.position,
+          style: { width: t.meta.width, height: t.meta.height },
+          data: {
+            sessionId: t.meta.taskId,
+            taskId: t.meta.taskId,
+            label: t.meta.label,
+            classification: t.meta.classification,
+            timelinePressure: t.meta.timelinePressure,
+            derivedState: derived?.state ?? 'raw'
+          }
+        })
+        wsMapEntries.push([t.meta.taskId, t.meta.workspaceId])
+      }
+      setAllNodes((nds) => {
+        const existing = new Set(nds.map((n) => n.id))
+        const toAdd = taskNodes.filter((n) => !existing.has(n.id))
+        return toAdd.length > 0 ? [...nds, ...toAdd] : nds
+      })
+      if (wsMapEntries.length > 0) {
+        setTileWorkspaceMap((prev) => {
+          const next = new Map(prev)
+          for (const [sid, wsId] of wsMapEntries) next.set(sid, wsId)
+          return next
+        })
+      }
+      setNodesLoadedFlags((prev) => ({ ...prev, tasks: true }))
+    }).catch(() => {
+      setNodesLoadedFlags((prev) => ({ ...prev, tasks: true }))
+    })
+
+    // Subscribe to task events
+    const offTaskOpen = window.task.onTaskOpen(async (info) => {
+      if (!info.taskId) return
+      const file = info.meta ? { meta: info.meta } : await window.task.load(info.taskId)
+      if (!file) return
+      const meta = file.meta
+      const derived = await window.task.deriveState(meta.taskId)
+      setAllNodes((nds) => {
+        if (nds.some((n) => n.id === meta.taskId)) return nds
+        return [
+          ...nds,
+          {
+            id: meta.taskId,
+            type: 'task',
+            position: meta.position,
+            style: { width: meta.width, height: meta.height },
+            data: {
+              sessionId: meta.taskId,
+              taskId: meta.taskId,
+              label: meta.label,
+              classification: meta.classification,
+              timelinePressure: meta.timelinePressure,
+              derivedState: derived?.state ?? 'raw'
+            }
+          }
+        ]
+      })
+      setTileWorkspaceMap((prev) => {
+        const next = new Map(prev)
+        next.set(meta.taskId, meta.workspaceId)
+        return next
+      })
+    })
+    const offTaskClose = window.task.onTaskClose(({ taskId }) => {
+      setAllNodes((nds) => nds.filter((n) => n.id !== taskId))
+    })
+    const offTaskDelete = window.task.onTaskDelete(({ taskId }) => {
+      setAllNodes((nds) => nds.filter((n) => n.id !== taskId))
+    })
+    const offTaskUpdate = window.task.onTaskUpdate(async ({ taskId: id }) => {
+      const file = await window.task.load(id)
+      const derived = await window.task.deriveState(id)
+      if (!file) return
+      setAllNodes((nds) =>
+        nds.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                data: {
+                  ...(n.data as Record<string, unknown>),
+                  label: file.meta.label,
+                  classification: file.meta.classification,
+                  timelinePressure: file.meta.timelinePressure,
+                  derivedState: derived?.state ?? 'raw'
+                }
+              }
+            : n
+        )
+      )
+    })
+    const offTaskStateChange = window.task.onTaskStateChange(({ taskId: id, state }) => {
+      setAllNodes((nds) =>
+        nds.map((n) =>
+          n.id === id
+            ? { ...n, data: { ...(n.data as Record<string, unknown>), derivedState: state } }
+            : n
+        )
+      )
+    })
+    const offTaskLink = window.task.onTaskLink((edge) => {
+      // Defer until after current reconcile so both endpoints are fully
+      // measured in ReactFlow's internal store before the edge is added;
+      // otherwise ReactFlow logs error 008 and can't resolve handles.
+      requestAnimationFrame(() => {
+        setAllEdges((eds) => {
+          if (eds.some((e) => e.id === edge.id)) return eds
+          return [
+            ...eds,
+            {
+              id: edge.id,
+              source: edge.source,
+              target: edge.target,
+              sourceHandle: null,
+              targetHandle: null,
+              animated: true,
+              style: styleForEdgeKind(edge.kind),
+              data: { kind: edge.kind }
+            }
+          ]
+        })
+      })
+    })
+
     // ── Subscribe to plan events to add/update/remove tiles live ──
     const offOpen = window.plan.onOpen((info) => {
       const meta = info.meta
@@ -809,6 +973,12 @@ export default function Canvas() {
       offOpen()
       offState()
       offDeleted()
+      offTaskOpen()
+      offTaskClose()
+      offTaskDelete()
+      offTaskLink()
+      offTaskUpdate()
+      offTaskStateChange()
     }
   }, [])
 
@@ -1043,7 +1213,7 @@ export default function Canvas() {
 
   // ── Load persisted edges once all nodes are ready ──
   useEffect(() => {
-    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals || !nodesLoadedFlags.browsers || !nodesLoadedFlags.draws || !nodesLoadedFlags.plans) return
+    if (!nodesLoadedFlags.notes || !nodesLoadedFlags.terminals || !nodesLoadedFlags.browsers || !nodesLoadedFlags.draws || !nodesLoadedFlags.plans || !nodesLoadedFlags.tasks) return
 
     window.edges.load().then((persistedEdges) => {
       if (!persistedEdges || persistedEdges.length === 0) return
@@ -1059,7 +1229,8 @@ export default function Canvas() {
           sourceHandle: e.sourceHandle ?? undefined,
           targetHandle: e.targetHandle ?? undefined,
           animated: e.animated ?? false,
-          style: e.style as React.CSSProperties | undefined
+          style: e.style as React.CSSProperties | undefined,
+          data: { ...(e.data ?? {}), kind: e.kind ?? 'legacy' }
         }))
 
       if (validEdges.length > 0) {
@@ -1108,15 +1279,26 @@ export default function Canvas() {
       window.browserTiles.saveLayout(browserLayout)
 
       // Save all edges
-      const edgesToSave = allEdgesRef.current.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        sourceHandle: e.sourceHandle,
-        targetHandle: e.targetHandle,
-        animated: e.animated,
-        style: e.style
-      }))
+      const edgesToSave = allEdgesRef.current.map((e) => {
+        const edgeData = (e.data ?? {}) as { kind?: string }
+        return {
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          kind: (edgeData.kind ?? 'legacy') as
+            | 'has-plan'
+            | 'executing-in'
+            | 'research-output'
+            | 'linked-pr'
+            | 'depends-on'
+            | 'legacy',
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+          animated: e.animated,
+          style: e.style,
+          data: e.data as Record<string, unknown> | undefined
+        }
+      })
       window.edges.save(edgesToSave)
     }
     window.addEventListener('beforeunload', handler)
@@ -1584,6 +1766,19 @@ export default function Canvas() {
   )
 
   useHotkeys(settings.hotkeys, hotkeyActions)
+
+  // Task Lens toggle: Cmd+Shift+T
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      const modifier = navigator.platform.includes('Mac') ? e.metaKey : e.ctrlKey
+      if (modifier && e.shiftKey && (e.key === 'T' || e.key === 't')) {
+        e.preventDefault()
+        setTaskLensOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
 
   // ── Palette-dispatched UI actions ──
   // Commands registry (`>` prefix) emits CustomEvents for toggles/actions that
@@ -2059,6 +2254,9 @@ export default function Canvas() {
 
           {/* Command palette */}
           <CommandPalette />
+
+          {/* Task Lens sidebar */}
+          {taskLensOpen && <TaskLens onClose={() => setTaskLensOpen(false)} />}
         </div>
       </div>
     </FocusedTerminalContext.Provider>

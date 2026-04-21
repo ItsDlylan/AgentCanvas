@@ -1,12 +1,19 @@
 import { Fzf, type FzfResultItem } from 'fzf'
-import type { PaletteTile } from './palette-corpus'
+import type { PaletteTile, PaletteTaskClassification, PaletteTaskState, PaletteTaskTimeline } from './palette-corpus'
 
 export type PalettePrefix = '>' | '?' | '#' | '@' | ':'
+
+export interface TaskFilters {
+  classification?: PaletteTaskClassification
+  state?: PaletteTaskState
+  timeline?: PaletteTaskTimeline
+}
 
 export interface ParsedQuery {
   prefix: PalettePrefix | null
   prefixArg?: string
   terms: string
+  taskFilters?: TaskFilters
 }
 
 export interface PaletteRankContext {
@@ -36,13 +43,57 @@ const METADATA_WEIGHT = 0.8
  *   '@acme >build'         → { prefix: '@', prefixArg: 'acme', terms: '>build' }
  *   'plain search'         → { prefix: null, terms: 'plain search' }
  */
+const TASK_CLASSIFICATIONS = new Set<PaletteTaskClassification>([
+  'QUICK',
+  'NEEDS_RESEARCH',
+  'DEEP_FOCUS',
+  'BENCHMARK'
+])
+const TASK_STATES = new Set<PaletteTaskState>([
+  'raw',
+  'researched',
+  'planned',
+  'executing',
+  'review',
+  'done'
+])
+const TASK_TIMELINES = new Set<PaletteTaskTimeline>([
+  'urgent',
+  'this-week',
+  'this-month',
+  'whenever'
+])
+
+function extractTaskFilters(input: string): { terms: string; taskFilters?: TaskFilters } {
+  const filters: TaskFilters = {}
+  const stripped = input.replace(/!(class|state|when):([A-Za-z_-]+)/g, (_full, key: string, val: string) => {
+    const v = val as PaletteTaskClassification | PaletteTaskState | PaletteTaskTimeline
+    if (key === 'class' && TASK_CLASSIFICATIONS.has(v as PaletteTaskClassification)) {
+      filters.classification = v as PaletteTaskClassification
+      return ''
+    }
+    if (key === 'state' && TASK_STATES.has(v as PaletteTaskState)) {
+      filters.state = v as PaletteTaskState
+      return ''
+    }
+    if (key === 'when' && TASK_TIMELINES.has(v as PaletteTaskTimeline)) {
+      filters.timeline = v as PaletteTaskTimeline
+      return ''
+    }
+    return _full
+  })
+  const hasAny = Object.keys(filters).length > 0
+  return { terms: stripped.trim().replace(/\s+/g, ' '), taskFilters: hasAny ? filters : undefined }
+}
+
 export function parseQuery(input: string): ParsedQuery {
   const trimmed = input.trimStart()
   if (trimmed.length === 0) return { prefix: null, terms: '' }
 
   const first = trimmed[0]
   if (!PREFIX_CHARS.has(first)) {
-    return { prefix: null, terms: input.trim() }
+    const { terms, taskFilters } = extractTaskFilters(input.trim())
+    return { prefix: null, terms, taskFilters }
   }
 
   const prefix = first as PalettePrefix
@@ -58,8 +109,8 @@ export function parseQuery(input: string): ParsedQuery {
   const match = rest.match(/^(\S+)(.*)$/)
   if (!match) return { prefix, terms: '' }
   const prefixArg = match[1]
-  const terms = match[2].trim()
-  return { prefix, prefixArg, terms }
+  const { terms, taskFilters } = extractTaskFilters(match[2].trim())
+  return { prefix, prefixArg, terms, taskFilters }
 }
 
 /**
@@ -70,16 +121,27 @@ export function filterCorpus(
   corpus: PaletteTile[],
   parsed: ParsedQuery
 ): PaletteTile[] {
-  if (!parsed.prefix || !parsed.prefixArg) return corpus
+  let filtered = corpus
+  if (parsed.taskFilters) {
+    const { classification, state, timeline } = parsed.taskFilters
+    filtered = filtered.filter((t) => {
+      if (t.type !== 'task') return false
+      if (classification && t.taskClassification !== classification) return false
+      if (state && t.taskState !== state) return false
+      if (timeline && t.taskTimeline !== timeline) return false
+      return true
+    })
+  }
+  if (!parsed.prefix || !parsed.prefixArg) return filtered
   const arg = parsed.prefixArg.toLowerCase()
 
   if (parsed.prefix === '@') {
-    return corpus.filter((t) => t.workspaceId.toLowerCase() === arg)
+    return filtered.filter((t) => t.workspaceId.toLowerCase() === arg)
   }
 
   if (parsed.prefix === '#') {
     // Match against any metadata field (team | role | agent).
-    return corpus.filter((t) => {
+    return filtered.filter((t) => {
       const md = t.metadata
       return (
         (md.team && md.team.toLowerCase() === arg) ||
@@ -91,10 +153,10 @@ export function filterCorpus(
 
   if (parsed.prefix === ':') {
     if (arg !== 'running' && arg !== 'waiting' && arg !== 'idle') return []
-    return corpus.filter((t) => t.type === 'terminal' && t.status === arg)
+    return filtered.filter((t) => t.type === 'terminal' && t.status === arg)
   }
 
-  return corpus
+  return filtered
 }
 
 function bestFzfResult<U>(
