@@ -216,6 +216,7 @@ export interface CanvasStore {
   closeNote: (sessionId: string) => void
   deleteNote: (sessionId: string) => void
   spawnLinkedNote: (sourceNoteId: string, taskId: string, taskText: string, onCreated: (newNoteId: string) => void) => void
+  spawnLinkedNoteFromTask: (sourceTaskId: string, taskItemId: string, taskText: string, onCreated: (newNoteId: string) => void) => void
   focusNoteOnCanvas: (noteId: string) => void
 
   // ── Image management ──
@@ -958,6 +959,59 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
         parentTaskInfo: { noteId: sourceNoteId, taskId },
         createdAt: Date.now(),
         updatedAt: Date.now()
+      })
+
+      onCreated(newNoteId)
+      centerOn(pos.x + 200, pos.y + 200)
+    },
+
+    spawnLinkedNoteFromTask: (sourceTaskId, taskItemId, taskText, onCreated) => {
+      tileCount++
+      const newNoteId = uuid()
+      const { allNodes, tileGap, activeWorkspaceId } = get()
+
+      const sourceNode = allNodes.find((n) => sid(n) === sourceTaskId)
+      const sourceWidth = sourceNode?.measured?.width ?? (sourceNode?.style?.width as number) ?? 420
+      const sourcePos = sourceNode?.position ?? { x: 100, y: 100 }
+
+      const targetPos = { x: sourcePos.x + sourceWidth + tileGap, y: sourcePos.y }
+      const pos = snapToGrid(targetPos, allNodes, 400, 400, tileGap)
+
+      const label = taskText.length > 30 ? taskText.slice(0, 30) + '...' : taskText
+      const wsId = activeWorkspaceId
+
+      const newNode: Node = {
+        id: newNoteId,
+        type: 'notes',
+        position: pos,
+        style: { width: 400, height: 400 },
+        data: { sessionId: newNoteId, label },
+        dragHandle: '.notes-tile-header'
+      }
+
+      set((s) => ({
+        allNodes: [...s.allNodes, newNode],
+        tileWorkspaceMap: new Map(s.tileWorkspaceMap).set(newNoteId, wsId),
+        focusedId: newNoteId
+      }))
+
+      window.note.save(newNoteId, {
+        noteId: newNoteId,
+        label,
+        workspaceId: wsId,
+        isSoftDeleted: false,
+        position: pos,
+        width: 400,
+        height: 400,
+        parentTaskInfo: { taskId: sourceTaskId, taskItemId },
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      })
+
+      // Persist a typed research-output edge; the Canvas onTaskLink subscriber
+      // will render it in the next frame.
+      window.task.link(sourceTaskId, newNoteId, 'research-output').catch((err) => {
+        console.warn('[canvas-store] task.link(research-output) failed:', err)
       })
 
       onCreated(newNoteId)

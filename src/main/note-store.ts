@@ -17,7 +17,7 @@ export interface NoteMeta {
   height: number
   linkedTerminalId?: string
   linkedNoteId?: string
-  parentTaskInfo?: { noteId: string; taskId: string }
+  parentTaskInfo?: { noteId?: string; taskId: string; taskItemId?: string }
   createdAt: number
   updatedAt: number
 }

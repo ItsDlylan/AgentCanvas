@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { NodeResizer, Handle, Position } from '@xyflow/react'
+import type { JSONContent } from '@tiptap/core'
 import type {
   DerivedTaskState,
   TaskClassification,
@@ -10,6 +11,7 @@ import type {
 import { useSemanticZoom } from '../hooks/useSemanticZoom'
 import { TileContextMenu, type TileContextMenuItem } from './TileContextMenu'
 import { DependencyWarningModal } from './DependencyWarningModal'
+import { TaskTileAcceptanceEditor } from './TaskTileAcceptanceEditor'
 import {
   unsatisfiedDependencies,
   type UnsatisfiedDep
@@ -56,7 +58,7 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
 
   const [meta, setMeta] = useState<TaskMeta | null>(null)
   const [intent, setIntent] = useState<string>('')
-  const [acceptanceMarkdown, setAcceptanceMarkdown] = useState<string>('')
+  const [acceptanceDoc, setAcceptanceDoc] = useState<Record<string, unknown> | null>(null)
   const [derivedState, setDerivedState] = useState<DerivedTaskState>('raw')
   const [editing, setEditing] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
@@ -81,7 +83,7 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
       if (cancelled || !file) return
       setMeta(file.meta)
       setIntent(file.intent)
-      setAcceptanceMarkdown(tiptapToMarkdownFallback(file.acceptanceCriteria))
+      setAcceptanceDoc(file.acceptanceCriteria ?? { type: 'doc', content: [] })
     })
     reloadDerivedState()
     return () => {
@@ -107,19 +109,29 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
   }, [taskId, reloadDerivedState])
 
   const saveSoon = useCallback(
-    (patch: { label?: string; intent?: string; acceptanceMarkdown?: string }) => {
+    (patch: { label?: string; intent?: string }) => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
       saveTimer.current = setTimeout(() => {
         const metaPatch: Partial<TaskMeta> = {}
         if (patch.label !== undefined) metaPatch.label = patch.label
-        const acceptanceDoc =
-          patch.acceptanceMarkdown !== undefined
-            ? markdownToSimpleTiptap(patch.acceptanceMarkdown)
-            : undefined
-        window.task.save(taskId, metaPatch, patch.intent, acceptanceDoc).catch((err) => {
+        window.task.save(taskId, metaPatch, patch.intent, undefined).catch((err) => {
           console.warn('[task-tile] save failed:', err)
         })
       }, 400)
+    },
+    [taskId]
+  )
+
+  // The TipTap editor persists its own debounced updates. We bypass saveSoon
+  // here to avoid double-debouncing the doc.
+  const saveAcceptanceDoc = useCallback(
+    (json: JSONContent) => {
+      setAcceptanceDoc(json as unknown as Record<string, unknown>)
+      window.task
+        .save(taskId, {}, undefined, json as unknown as Record<string, unknown>)
+        .catch((err) => {
+          console.warn('[task-tile] acceptance save failed:', err)
+        })
     },
     [taskId]
   )
@@ -154,6 +166,11 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
     await window.task.save(taskId, { manualReviewDone: false })
     reloadDerivedState()
   }, [taskId, reloadDerivedState])
+
+  const acceptanceMarkdown = useMemo(
+    () => tiptapDocToMarkdown(acceptanceDoc ?? { type: 'doc', content: [] }),
+    [acceptanceDoc]
+  )
 
   const reclassify = useCallback(async () => {
     setClassifyBusy(true)
@@ -476,17 +493,16 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
             style={textareaStyle}
           />
         </div>
-        <div>
-          <div style={sectionLabelStyle}>Acceptance criteria (markdown)</div>
-          <textarea
-            value={acceptanceMarkdown}
-            onChange={(e) => {
-              setAcceptanceMarkdown(e.target.value)
-              saveSoon({ acceptanceMarkdown: e.target.value })
-            }}
-            placeholder="- [ ] A measurable done condition"
-            style={{ ...textareaStyle, minHeight: 80, fontFamily: 'ui-monospace, monospace' }}
-          />
+        <div style={{ display: 'flex', flexDirection: 'column', minHeight: 120 }}>
+          <div style={sectionLabelStyle}>Acceptance criteria</div>
+          {acceptanceDoc && (
+            <TaskTileAcceptanceEditor
+              taskId={taskId}
+              initialContent={acceptanceDoc}
+              editable={true}
+              onChange={saveAcceptanceDoc}
+            />
+          )}
         </div>
       </div>
       <Handle type="source" position={Position.Bottom} className="!bg-zinc-600" />
@@ -647,86 +663,54 @@ function timelineLabel(v: TaskTimeline): string {
   return v === 'urgent' ? 'Urgent' : v === 'this-week' ? 'This week' : v === 'this-month' ? 'This month' : 'Whenever'
 }
 
-// Very rough TipTap -> markdown fallback for display.
-function tiptapToMarkdownFallback(doc: Record<string, unknown>): string {
+// Lossy one-way TipTap doc -> markdown, used only by the three consumers that
+// need a text payload (reclassify, spawn-plan, copy-prompt). Writes go through
+// the editor as TipTap JSON directly.
+function tiptapDocToMarkdown(doc: Record<string, unknown>): string {
   try {
     const content = (doc as { content?: Array<Record<string, unknown>> }).content ?? []
     const lines: string[] = []
+
+    const textOf = (n: Record<string, unknown>): string => {
+      const inner = (n as { content?: Array<Record<string, unknown>> }).content ?? []
+      return inner
+        .map((c) => {
+          const ct = (c as { type?: string }).type
+          if (ct === 'text') return (c as { text?: string }).text ?? ''
+          return textOf(c)
+        })
+        .join('')
+    }
+
     for (const node of content) {
       const t = (node as { type?: string }).type
-      const inner = (node as { content?: Array<Record<string, unknown>> }).content ?? []
-      const text = inner
-        .map((c) => (c as { text?: string }).text ?? '')
-        .join('')
-      if (t === 'heading') lines.push(`# ${text}`)
-      else if (t === 'bulletList' || t === 'taskList') {
-        for (const li of inner) {
-          const liInner = (li as { content?: Array<{ content?: Array<{ text?: string }> }> }).content ?? []
-          const liText = (liInner[0]?.content ?? []).map((c) => c.text ?? '').join('')
-          const checked = (li as { attrs?: { checked?: boolean } }).attrs?.checked
-          if (t === 'taskList') lines.push(`- [${checked ? 'x' : ' '}] ${liText}`)
-          else lines.push(`- ${liText}`)
+      if (t === 'heading') {
+        const level = ((node as { attrs?: { level?: number } }).attrs?.level ?? 1)
+        lines.push(`${'#'.repeat(Math.max(1, Math.min(6, level)))} ${textOf(node)}`)
+      } else if (t === 'codeBlock') {
+        lines.push('```', textOf(node), '```')
+      } else if (t === 'bulletList' || t === 'orderedList' || t === 'taskList') {
+        const items = (node as { content?: Array<Record<string, unknown>> }).content ?? []
+        let idx = 1
+        for (const li of items) {
+          const liText = textOf(li).trim()
+          if (t === 'taskList') {
+            const checked = (li as { attrs?: { checked?: boolean } }).attrs?.checked
+            lines.push(`- [${checked ? 'x' : ' '}] ${liText}`)
+          } else if (t === 'orderedList') {
+            lines.push(`${idx}. ${liText}`)
+            idx++
+          } else {
+            lines.push(`- ${liText}`)
+          }
         }
-      } else {
-        if (text) lines.push(text)
+      } else if (t === 'paragraph') {
+        const s = textOf(node)
+        if (s) lines.push(s)
       }
     }
     return lines.join('\n')
   } catch {
     return ''
   }
-}
-
-// Very basic markdown -> TipTap doc (simplified for checkboxes and paragraphs).
-// The server also accepts markdown via the /api/task/open route and converts via
-// markdownToTiptap; this fallback is for the IPC save path which expects JSON.
-function markdownToSimpleTiptap(md: string): Record<string, unknown> {
-  const lines = md.split('\n')
-  const content: Array<Record<string, unknown>> = []
-  const taskItems: Array<Record<string, unknown>> = []
-  const bulletItems: Array<Record<string, unknown>> = []
-
-  const flushTask = (): void => {
-    if (taskItems.length > 0) {
-      content.push({ type: 'taskList', content: [...taskItems] })
-      taskItems.length = 0
-    }
-  }
-  const flushBullet = (): void => {
-    if (bulletItems.length > 0) {
-      content.push({ type: 'bulletList', content: [...bulletItems] })
-      bulletItems.length = 0
-    }
-  }
-
-  for (const line of lines) {
-    const taskMatch = line.match(/^\s*-\s*\[([ xX])\]\s*(.*)$/)
-    const bulletMatch = line.match(/^\s*-\s*(.*)$/)
-    if (taskMatch) {
-      flushBullet()
-      taskItems.push({
-        type: 'taskItem',
-        attrs: { checked: taskMatch[1].toLowerCase() === 'x' },
-        content: [{ type: 'paragraph', content: [{ type: 'text', text: taskMatch[2] }] }]
-      })
-      continue
-    }
-    if (bulletMatch) {
-      flushTask()
-      bulletItems.push({
-        type: 'listItem',
-        content: [{ type: 'paragraph', content: [{ type: 'text', text: bulletMatch[1] }] }]
-      })
-      continue
-    }
-    flushTask()
-    flushBullet()
-    if (line.trim()) {
-      content.push({ type: 'paragraph', content: [{ type: 'text', text: line }] })
-    }
-  }
-  flushTask()
-  flushBullet()
-
-  return { type: 'doc', content }
 }
