@@ -11,6 +11,7 @@ import type {
 import { useSemanticZoom } from '../hooks/useSemanticZoom'
 import { TileContextMenu, type TileContextMenuItem } from './TileContextMenu'
 import { DependencyWarningModal } from './DependencyWarningModal'
+import { ReclassifyConfirmModal } from './ReclassifyConfirmModal'
 import { TaskTileAcceptanceEditor } from './TaskTileAcceptanceEditor'
 import {
   unsatisfiedDependencies,
@@ -68,6 +69,10 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
     actionLabel: string
     unsatisfied: UnsatisfiedDep[]
     proceed: () => void
+  } | null>(null)
+  const [reclassifyProposal, setReclassifyProposal] = useState<{
+    classification: TaskClassification
+    rationale?: string
   } | null>(null)
   const tier = useSemanticZoom()
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -177,20 +182,25 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
     try {
       const res = await window.task.classify(intent, acceptanceMarkdown)
       if (res.ok && res.result) {
-        const confirm = window.confirm(
-          `Reclassify as ${res.result.classification}?\n\n${res.result.rationale ?? ''}`
-        )
-        if (confirm) {
-          await window.task.save(taskId, { classification: res.result.classification })
-          const file = await window.task.load(taskId)
-          if (file) setMeta(file.meta)
-          reloadDerivedState()
-        }
+        setReclassifyProposal({
+          classification: res.result.classification,
+          rationale: res.result.rationale ?? undefined
+        })
       }
     } finally {
       setClassifyBusy(false)
     }
-  }, [taskId, intent, acceptanceMarkdown, reloadDerivedState])
+  }, [intent, acceptanceMarkdown])
+
+  const confirmReclassify = useCallback(async () => {
+    if (!reclassifyProposal) return
+    const next = reclassifyProposal.classification
+    setReclassifyProposal(null)
+    await window.task.save(taskId, { classification: next })
+    const file = await window.task.load(taskId)
+    if (file) setMeta(file.meta)
+    reloadDerivedState()
+  }, [taskId, reclassifyProposal, reloadDerivedState])
 
   const setClassification = useCallback(
     async (c: TaskClassification) => {
@@ -520,6 +530,14 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
           unsatisfied={depWarning.unsatisfied}
           onProceed={depWarning.proceed}
           onCancel={() => setDepWarning(null)}
+        />
+      )}
+      {reclassifyProposal && (
+        <ReclassifyConfirmModal
+          proposed={reclassifyProposal.classification}
+          rationale={reclassifyProposal.rationale}
+          onConfirm={confirmReclassify}
+          onCancel={() => setReclassifyProposal(null)}
         />
       )}
     </div>
