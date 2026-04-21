@@ -912,3 +912,15 @@
 .cache-warning-pulse {
   animation: cache-pulse 2s ease-in-out infinite;
 }
+
+/* Flow-mute: thin ring on the focused tile + its one-hop linked group while
+   flow mode is active. Applied via className on react-flow nodes. */
+.react-flow__node.flow-ring {
+  box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.7), 0 0 16px 2px rgba(168, 85, 247, 0.25);
+  border-radius: 8px;
+  transition: box-shadow 200ms ease-out;
+}
+
+.react-flow__node:not(.flow-ring) {
+  transition: box-shadow 200ms ease-in;
+}

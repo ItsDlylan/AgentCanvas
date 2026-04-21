@@ -814,6 +814,29 @@ const notifyAPI: NotifyAPI = {
 
 contextBridge.exposeInMainWorld('notify', notifyAPI)
 
+// ── Flow-mute state mirror ──────────────────────────────
+// Renderer pushes flow-mute state to main so native OS notifications
+// can be suppressed without a round-trip.
+
+export interface FlowMuteMirror {
+  enabled: boolean
+  active: boolean
+  suppressNative: boolean
+  flowGroupIds: string[]
+}
+
+export interface FlowMuteAPI {
+  updateMirror: (mirror: FlowMuteMirror) => void
+}
+
+const flowMuteAPI: FlowMuteAPI = {
+  updateMirror: (mirror) => {
+    ipcRenderer.send('flow-mute:mirror', mirror)
+  }
+}
+
+contextBridge.exposeInMainWorld('flowMute', flowMuteAPI)
+
 // ── Diff API ────────────────────────────────────────────
 
 export interface DiffAPI {
@@ -825,6 +848,35 @@ const diffAPI: DiffAPI = {
 }
 
 contextBridge.exposeInMainWorld('diff', diffAPI)
+
+// ── Search API ──────────────────────────────────────────
+
+export interface ScrollbackSearchResult {
+  terminalId: string
+  lineNo: number
+  snippet: string
+  ts: number
+}
+
+export interface ScrollbackSearchOpts {
+  terminalIds?: string[]
+  limit?: number
+}
+
+export interface SearchAPI {
+  scrollback: (query: string, opts?: ScrollbackSearchOpts) => Promise<ScrollbackSearchResult[]>
+}
+
+const searchAPI: SearchAPI = {
+  scrollback: (query, opts) =>
+    ipcRenderer.invoke('search:scrollback', {
+      query,
+      terminalIds: opts?.terminalIds,
+      limit: opts?.limit
+    })
+}
+
+contextBridge.exposeInMainWorld('search', searchAPI)
 
 // Voice API
 export interface VoiceModelStatus {

@@ -52,6 +52,7 @@ import { loadBrowsers, saveBrowsers, type PersistedBrowser } from './browser-sto
 import { DiffService } from './diff-service'
 import { loadExtensions, getLoadedExtensions, getExtensionsDir } from './extension-loader'
 import { TeamWatcher } from './team-watcher'
+import { getScrollbackIndex } from './scrollback-index'
 import { claudeUsageService } from './claude-usage-service'
 import type { ClaudeUsageSnapshot } from '../renderer/types/claude-usage'
 
@@ -69,7 +70,42 @@ const cdpProxy = new CdpProxy()
 const canvasApi = new CanvasApi()
 const diffService = new DiffService()
 const teamWatcher = new TeamWatcher()
+const scrollbackIndex = getScrollbackIndex()
 let mainWindow: BrowserWindow | null = null
+
+// ── Flow-mute mirror ───────────────────────────────────
+// Renderer pushes current flow-mute state here so native OS notifications
+// can be suppressed without IPC round-trip. See preload `flowMuteAPI`.
+interface FlowMuteMirror {
+  enabled: boolean
+  active: boolean
+  suppressNative: boolean
+  flowGroupIds: string[]
+}
+let flowMuteMirror: FlowMuteMirror = {
+  enabled: true,
+  active: false,
+  suppressNative: true,
+  flowGroupIds: []
+}
+
+ipcMain.on('flow-mute:mirror', (_event, mirror: FlowMuteMirror) => {
+  flowMuteMirror = mirror
+})
+
+function shouldSuppressNativeForFlow(payload: {
+  level: string
+  priority?: string
+  terminalId?: string
+}): boolean {
+  if (!flowMuteMirror.enabled) return false
+  if (!flowMuteMirror.active) return false
+  if (!flowMuteMirror.suppressNative) return false
+  if (payload.priority === 'critical') return false
+  if (payload.level === 'error') return false
+  if (payload.terminalId && flowMuteMirror.flowGroupIds.includes(payload.terminalId)) return false
+  return true
+}
 let canvasApiPort = 0
 
 function createWindow(): void {
@@ -804,6 +840,13 @@ ipcMain.handle('diff:compute', (_event, { cwd }: { cwd: string }) => {
   return diffService.computeDiff(cwd)
 })
 
+ipcMain.handle(
+  'search:scrollback',
+  (_event, args: { query: string; terminalIds?: string[]; limit?: number }) => {
+    return scrollbackIndex.searchScrollback(args)
+  }
+)
+
 // ── Performance Monitor IPC ──────────────────────────────
 ipcMain.handle('perf:toggle', () => {
   if (isPerfEnabled()) {
@@ -1036,6 +1079,9 @@ terminalManager.on('data', (id: string, data: string) => {
   }
   scrollbackBuffers.set(id, buf)
 
+  // Feed the FTS5 scrollback index (line-buffered, 500ms flush)
+  scrollbackIndex.appendPtyData(id, data)
+
   // Only buffer for IPC if not paused (paused during reconnect)
   if (pausedSessions.has(id)) return
   const existing = dataBuffers.get(id) || ''
@@ -1048,6 +1094,7 @@ terminalManager.on('exit', (id: string, exitCode: number) => {
   pausedSessions.delete(id)
   dataBuffers.delete(id)
   cdpProxy.detach(id)
+  scrollbackIndex.dropTerminal(id)
   mainWindow?.webContents.send('terminal:exit', { id, exitCode })
 })
 
@@ -1076,6 +1123,7 @@ terminalManager.on('cache-notify', (info: {
   mainWindow?.webContents.send('canvas:notify', payload)
 
   if (mainWindow && !mainWindow.isFocused() && (!notifySettings || notifySettings.nativeWhenUnfocused)) {
+    if (shouldSuppressNativeForFlow(payload)) return
     const { Notification: ElectronNotification } = require('electron')
     if (ElectronNotification.isSupported()) {
       new ElectronNotification({
@@ -1231,13 +1279,15 @@ canvasApi.on('notify', (info: {
 
   // Native OS notification when window is unfocused
   if (mainWindow && !mainWindow.isFocused() && (!notifySettings || notifySettings.nativeWhenUnfocused)) {
-    const { Notification: ElectronNotification } = require('electron')
-    if (ElectronNotification.isSupported()) {
-      new ElectronNotification({
-        title: info.title || 'Agent Canvas',
-        body: info.body,
-        silent: true
-      }).show()
+    if (!shouldSuppressNativeForFlow(info)) {
+      const { Notification: ElectronNotification } = require('electron')
+      if (ElectronNotification.isSupported()) {
+        new ElectronNotification({
+          title: info.title || 'Agent Canvas',
+          body: info.body,
+          silent: true
+        }).show()
+      }
     }
   }
 

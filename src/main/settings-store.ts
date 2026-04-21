@@ -108,6 +108,8 @@ export type HotkeyAction =
   | 'togglePomodoro'
   | 'toggleVoice'
   | 'zoomToFocused'
+  | 'toggleFlow'
+  | 'exitFlowReplay'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -115,6 +117,15 @@ export interface NotificationSettings {
   enabled: boolean
   soundEnabled: boolean
   nativeWhenUnfocused: boolean
+}
+
+export interface FlowMuteSettings {
+  enabled: boolean
+  idleTimeoutMs: number
+  entryThresholdMs: number
+  suppressNative: boolean
+  muteSounds: boolean
+  showRing: boolean
 }
 
 export interface PromptCacheSettings {
@@ -141,6 +152,7 @@ export interface Settings {
   notifications: NotificationSettings
   voice: VoiceSettings
   promptCache: PromptCacheSettings
+  flowMute: FlowMuteSettings
 }
 
 // ── Defaults ─────────────────────────────────────────────
@@ -193,7 +205,9 @@ export const DEFAULT_SETTINGS: Settings = {
     openInIde: 'Mod+Shift+O',
     togglePomodoro: 'Mod+P',
     toggleVoice: 'Mod+Shift+V',
-    zoomToFocused: 'Mod+0'
+    zoomToFocused: 'Mod+0',
+    toggleFlow: 'Mod+F',
+    exitFlowReplay: 'Mod+Shift+F'
   },
   templates: [
     {
@@ -260,6 +274,14 @@ export const DEFAULT_SETTINGS: Settings = {
     notifyOnExpiry: true,
     rankByUrgency: true,
     detectTtlFromLogs: true
+  },
+  flowMute: {
+    enabled: true,
+    idleTimeoutMs: 300_000,
+    entryThresholdMs: 180_000,
+    suppressNative: true,
+    muteSounds: true,
+    showRing: true
   }
 }
 

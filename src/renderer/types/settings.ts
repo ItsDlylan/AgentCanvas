@@ -106,6 +106,9 @@ export type HotkeyAction =
   | 'togglePomodoro'
   | 'toggleVoice'
   | 'zoomToFocused'
+  | 'toggleFlow'
+  | 'exitFlowReplay'
+  | 'openPalette'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -113,6 +116,15 @@ export interface NotificationSettings {
   enabled: boolean
   soundEnabled: boolean
   nativeWhenUnfocused: boolean
+}
+
+export interface FlowMuteSettings {
+  enabled: boolean
+  idleTimeoutMs: number
+  entryThresholdMs: number
+  suppressNative: boolean
+  muteSounds: boolean
+  showRing: boolean
 }
 
 export interface PromptCacheSettings {
@@ -143,4 +155,5 @@ export interface Settings {
   notifications: NotificationSettings
   voice: VoiceSettings
   promptCache: PromptCacheSettings
+  flowMute: FlowMuteSettings
 }
