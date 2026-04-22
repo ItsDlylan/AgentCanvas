@@ -1,6 +1,8 @@
-import { AbsoluteFill, interpolate, spring, useVideoConfig } from 'remotion'
+import { AbsoluteFill, interpolate, useVideoConfig } from 'remotion'
+import { useCurrentFrame } from 'remotion'
 import { fontStack, monoStack, theme } from '../theme'
 import { easeOutExpo, seeded } from '../math'
+import { scrambleText, springAt, wipeReveal } from '../kinetic'
 
 interface OutroProps {
   localFrame: number
@@ -8,16 +10,19 @@ interface OutroProps {
 }
 
 /**
- * Zoom-out constellation. The canvas we saw becomes a field of stars;
- * a central "?" keycap pulses with a concentric pulse ring; kinetic
- * typography assembles "Press ⌘⇧? anytime" from exploded positions.
+ * Final card. Text does NOT slide:
+ *  - "Press" arrives via character scramble + stagger fade.
+ *  - Each modifier key does a 3D `rotateX` press-in (keycap depressing)
+ *    with a shadow that deepens then settles.
+ *  - "anytime" reveals via mask-wipe with a chromatic fringe pass.
+ *  - Sub-line typewrites with cursor blink.
+ *  - Background is the constellation with a lingering pulse ring.
  */
 export const Outro: React.FC<OutroProps> = ({ localFrame, durationInFrames }) => {
   const { fps } = useVideoConfig()
   const W = 1280
   const H = 720
 
-  // Overall scene fade
   const sceneAlpha = interpolate(
     localFrame,
     [0, 8, durationInFrames - 14, durationInFrames],
@@ -25,12 +30,12 @@ export const Outro: React.FC<OutroProps> = ({ localFrame, durationInFrames }) =>
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   )
 
-  // Constellation stars — slow drift
+  // Starfield with drift
   const stars = Array.from({ length: 140 }, (_, i) => {
     const baseX = seeded(i + 1) * W
     const baseY = seeded(i + 9) * H
-    const driftX = Math.sin((localFrame + i * 5) / 60) * 6
-    const driftY = Math.cos((localFrame + i * 7) / 80) * 4
+    const driftX = Math.sin((localFrame + i * 5) / 60) * 5
+    const driftY = Math.cos((localFrame + i * 7) / 80) * 3
     const twinkle = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin((localFrame + i * 11) / 12))
     return {
       i,
@@ -41,76 +46,36 @@ export const Outro: React.FC<OutroProps> = ({ localFrame, durationInFrames }) =>
     }
   })
 
-  // Connecting lines between a few nearby stars — hints at "canvas"
-  const constellations: { a: number; b: number }[] = [
-    { a: 3, b: 18 },
-    { a: 22, b: 47 },
-    { a: 51, b: 64 },
-    { a: 71, b: 88 },
-    { a: 91, b: 110 }
-  ]
+  // Central pulse ring (fades in around frame 10)
+  const pulseT = ((localFrame - 12) % 38) / 38
+  const pulseRadius = 70 + easeOutExpo(pulseT) * 280
+  const pulseAlpha = localFrame < 12 ? 0 : 1 - pulseT
 
-  // Central keycap spring in
-  const capSpring = spring({
-    frame: Math.max(0, localFrame - 4),
-    fps,
-    config: { damping: 11, stiffness: 130 }
+  // Keycap for the central `?` — scale-in + breathing
+  const capSpring = springAt(localFrame, 2, fps, {
+    damping: 11,
+    stiffness: 130,
+    mass: 0.6
   })
-
-  // Keycap breathing scale
-  const breathing = 1 + Math.sin(localFrame / 8) * 0.015
-
-  // Pulse ring that emits from the cap (every ~45 frames)
-  const pulseT = ((localFrame - 20) % 45) / 45
-  const pulseRadius = 60 + easeOutExpo(pulseT) * 240
-  const pulseAlpha = localFrame < 20 ? 0 : 1 - pulseT
-
-  // Kinetic typography — "Press  ⌘ ⇧ ?  anytime"
-  const tokens = [
-    { t: 'Press', kind: 'word' },
-    { t: '⌘', kind: 'key' },
-    { t: '⇧', kind: 'key' },
-    { t: '?', kind: 'key' },
-    { t: 'anytime', kind: 'word' }
-  ] as const
+  const breathing = 1 + Math.sin(localFrame / 8) * 0.014
 
   return (
     <AbsoluteFill style={{ background: theme.bg, opacity: sceneAlpha, overflow: 'hidden' }}>
-      {/* Stars + constellation lines */}
+      {/* Stars */}
       <svg width={W} height={H} style={{ position: 'absolute', inset: 0 }}>
-        {constellations.map(({ a, b }, i) => {
-          const sa = stars[a % stars.length]
-          const sb = stars[b % stars.length]
-          if (!sa || !sb) return null
-          const alpha = interpolate(localFrame, [20, 45], [0, 0.18], {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp'
-          })
-          return (
-            <line
-              key={i}
-              x1={sa.x}
-              y1={sa.y}
-              x2={sb.x}
-              y2={sb.y}
-              stroke={theme.blue}
-              strokeWidth={1}
-              opacity={alpha}
-            />
-          )
-        })}
         {stars.map((s) => (
           <circle key={s.i} cx={s.x} cy={s.y} r={s.r} fill="#ffffff" opacity={s.a} />
         ))}
       </svg>
 
-      {/* Central pulse ring */}
+      {/* Pulse ring */}
       <div
         style={{
           position: 'absolute',
           top: '50%',
           left: '50%',
-          transform: `translate(-50%, -50%)`
+          transform: 'translate(-50%, -50%)',
+          pointerEvents: 'none'
         }}
       >
         <div
@@ -125,123 +90,212 @@ export const Outro: React.FC<OutroProps> = ({ localFrame, durationInFrames }) =>
         />
       </div>
 
-      {/* Central keycap */}
+      {/* Central ? keycap */}
       <div
         style={{
           position: 'absolute',
           top: '50%',
           left: '50%',
-          width: 140,
-          height: 140,
+          width: 150,
+          height: 150,
           transform: `translate(-50%, -50%) scale(${capSpring * breathing})`,
-          borderRadius: 28,
+          borderRadius: 30,
           background: `linear-gradient(135deg, ${theme.blue} 0%, #6366f1 100%)`,
-          boxShadow: '0 30px 80px rgba(59,130,246,0.55), inset 0 -6px 0 rgba(0,0,0,0.3), inset 0 2px 0 rgba(255,255,255,0.25)',
+          boxShadow:
+            '0 30px 80px rgba(59,130,246,0.55), inset 0 -6px 0 rgba(0,0,0,0.3), inset 0 2px 0 rgba(255,255,255,0.25)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           color: '#fff',
           fontFamily: fontStack,
-          fontSize: 90,
-          fontWeight: 700,
+          fontSize: 92,
+          fontWeight: 800,
           lineHeight: 1
         }}
       >
         ?
       </div>
 
-      {/* Kinetic typography row below keycap */}
+      {/* Kinetic text row below keycap: "Press ⌘ ⇧ ? anytime" */}
       <div
         style={{
           position: 'absolute',
           top: '50%',
           left: '50%',
-          transform: 'translate(-50%, 140px)',
+          transform: 'translate(-50%, 150px)',
           display: 'flex',
           alignItems: 'center',
-          gap: 16,
+          gap: 18,
           fontFamily: fontStack,
           color: theme.text
         }}
       >
-        {tokens.map((tok, i) => {
-          const startFrame = 24 + i * 4
-          const s = spring({
-            frame: Math.max(0, localFrame - startFrame),
-            fps,
-            config: { damping: 14, stiffness: 150, mass: 0.5 }
-          })
-          const angle = (seeded(i + 7) - 0.5) * 60
-          const radius = 300
-          const fromX = Math.cos((angle * Math.PI) / 180) * radius
-          const fromY = Math.sin((angle * Math.PI) / 180) * radius
-          const translateX = (1 - s) * fromX
-          const translateY = (1 - s) * fromY
-          const rotate = (1 - s) * (seeded(i + 11) - 0.5) * 90
-
-          if (tok.kind === 'key') {
-            return (
-              <span
-                key={i}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 52,
-                  height: 52,
-                  padding: '0 10px',
-                  borderRadius: 10,
-                  background: theme.panel,
-                  border: `1px solid ${theme.border}`,
-                  fontFamily: monoStack,
-                  fontSize: 26,
-                  color: theme.text,
-                  boxShadow: '0 6px 20px rgba(0,0,0,0.45), inset 0 -3px 0 rgba(0,0,0,0.4)',
-                  transform: `translate(${translateX}px, ${translateY}px) rotate(${rotate}deg) scale(${s})`,
-                  opacity: s
-                }}
-              >
-                {tok.t}
-              </span>
-            )
-          }
-          return (
-            <span
-              key={i}
-              style={{
-                fontSize: 36,
-                fontWeight: 600,
-                letterSpacing: -0.5,
-                transform: `translate(${translateX}px, ${translateY}px) rotate(${rotate}deg) scale(${s})`,
-                opacity: s
-              }}
-            >
-              {tok.t}
-            </span>
-          )
-        })}
+        <ScrambleStaggerWord text="Press" startFrame={22} fps={fps} />
+        <KeyPressCap symbol="⌘" startFrame={32} fps={fps} />
+        <KeyPressCap symbol="⇧" startFrame={38} fps={fps} />
+        <KeyPressCap symbol="?" startFrame={44} fps={fps} accent />
+        <WipeChromaticWord text="anytime" startFrame={52} />
       </div>
 
-      {/* Subtitle */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, 230px)',
-          fontFamily: monoStack,
-          fontSize: 16,
-          color: theme.textDim,
-          letterSpacing: 3,
-          textTransform: 'uppercase',
-          opacity: interpolate(localFrame, [56, 72], [0, 1], {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp'
-          })
-        }}
-      >
-        to open the tutorials library
-      </div>
+      {/* Subtitle (typewriter) */}
+      <SubtitleTypewriter />
     </AbsoluteFill>
+  )
+}
+
+// ── Word with per-char scramble + stagger ──
+const ScrambleStaggerWord: React.FC<{
+  text: string
+  startFrame: number
+  fps: number
+}> = ({ text, startFrame, fps }) => {
+  const localFrame = useCurrentFrame()
+  const chars = text.split('')
+  return (
+    <span
+      style={{ display: 'inline-flex', fontSize: 38, fontWeight: 700, letterSpacing: -0.5 }}
+    >
+      {chars.map((ch, i) => {
+        const perStart = startFrame + i * 1.6
+        const s = springAt(localFrame, perStart, fps, { damping: 16, stiffness: 160 })
+        const scrambleEnd = perStart + 12
+        const locked = localFrame >= scrambleEnd
+        const shown = locked
+          ? ch
+          : scrambleText(ch, localFrame, perStart, scrambleEnd, i + 101)
+        const translateY = (1 - s) * 8
+        return (
+          <span
+            key={i}
+            style={{
+              display: 'inline-block',
+              transform: `translateY(${translateY}px) scale(${0.85 + s * 0.15})`,
+              opacity: s,
+              color: theme.text
+            }}
+          >
+            {shown}
+          </span>
+        )
+      })}
+    </span>
+  )
+}
+
+// ── Keycap that press-down on entry ──
+const KeyPressCap: React.FC<{
+  symbol: string
+  startFrame: number
+  fps: number
+  accent?: boolean
+}> = ({ symbol, startFrame, fps, accent }) => {
+  const localFrame = useCurrentFrame()
+  const s = springAt(localFrame, startFrame, fps, {
+    damping: 10,
+    stiffness: 200,
+    mass: 0.5
+  })
+  // Press-down sequence: from rotateX -60 (tilted back) → +10 overshoot → 0
+  const rotX = interpolate(s, [0, 0.55, 1], [-60, 12, 0])
+  const translateY = interpolate(s, [0, 0.55, 1], [-14, 6, 0])
+  const scale = interpolate(s, [0, 0.55, 1], [1.25, 0.92, 1])
+  const shadowDepth = interpolate(s, [0, 0.55, 1], [2, 0, 6])
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 54,
+        height: 54,
+        padding: '0 10px',
+        borderRadius: 12,
+        background: accent
+          ? `linear-gradient(135deg, ${theme.blue} 0%, #6366f1 100%)`
+          : theme.panel,
+        border: `1px solid ${accent ? theme.blue : theme.border}`,
+        fontFamily: monoStack,
+        fontSize: 28,
+        color: accent ? '#fff' : theme.text,
+        transform: `perspective(400px) translateY(${translateY}px) rotateX(${rotX}deg) scale(${scale})`,
+        transformStyle: 'preserve-3d',
+        transformOrigin: 'center bottom',
+        boxShadow: `0 ${shadowDepth}px ${8 + shadowDepth}px rgba(0,0,0,0.5), inset 0 -3px 0 rgba(0,0,0,0.4)`,
+        opacity: s
+      }}
+    >
+      {symbol}
+    </span>
+  )
+}
+
+// ── Mask wipe with chromatic aberration pass ──
+const WipeChromaticWord: React.FC<{
+  text: string
+  startFrame: number
+}> = ({ text, startFrame }) => {
+  const localFrame = useCurrentFrame()
+  const clip = wipeReveal(localFrame, startFrame, 18, 'left')
+  const opacity = interpolate(localFrame, [startFrame, startFrame + 4], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+  // Chromatic fringe that rides the wipe edge
+  const t = interpolate(localFrame, [startFrame, startFrame + 18], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+  const chroma = (1 - t) * 10
+
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        clipPath: clip,
+        WebkitClipPath: clip,
+        opacity,
+        color: theme.text,
+        fontSize: 38,
+        fontWeight: 700,
+        letterSpacing: -0.5,
+        filter: `drop-shadow(${chroma}px 0 0 rgba(236,72,153,0.85)) drop-shadow(${-chroma}px 0 0 rgba(34,211,238,0.85))`,
+        textShadow: `0 0 18px ${theme.blue}66`
+      }}
+    >
+      {text}
+    </span>
+  )
+}
+
+// ── Subtitle typewriter ──
+const SubtitleTypewriter: React.FC = () => {
+  const localFrame = useCurrentFrame()
+  const fullLine = 'to open the tutorials library'
+  const startFrame = 66
+  const typedLen = Math.max(0, Math.min(fullLine.length, Math.floor((localFrame - startFrame) * 1.3)))
+  const cursorVisible = Math.floor(localFrame / 6) % 2 === 0
+  const opacity = interpolate(localFrame, [startFrame, startFrame + 4], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, 250px)',
+        fontFamily: monoStack,
+        fontSize: 15,
+        color: theme.textDim,
+        letterSpacing: 3,
+        textTransform: 'uppercase',
+        opacity
+      }}
+    >
+      {fullLine.toUpperCase().slice(0, typedLen)}
+      {typedLen < fullLine.length && cursorVisible ? '▎' : ''}
+    </div>
   )
 }

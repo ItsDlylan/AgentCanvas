@@ -53,7 +53,7 @@ export const TUTORIALS: Tutorial[] = [
       type: 'video',
       src: '/tutorials/welcome.mp4',
       posterSrc: '/tutorials/welcome.jpg',
-      durationSec: 12
+      durationSec: 20
     },
     tags: ['intro', 'tour', 'onboarding'],
     publishedAt: '2026-04-21',
