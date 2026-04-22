@@ -9,6 +9,7 @@ import type {
   BenchmarkStatus
 } from '../../preload/index'
 import { useSemanticZoom } from '../hooks/useSemanticZoom'
+import { TileContextMenu, type TileContextMenuItem } from './TileContextMenu'
 
 interface BenchmarkTileData {
   benchmarkId: string
@@ -32,6 +33,7 @@ export function BenchmarkTile({ data, selected }: NodeProps): JSX.Element {
   const [file, setFile] = useState<BenchmarkFile | null>(null)
   const [hintDraft, setHintDraft] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
 
   const reload = useCallback(async () => {
     const loaded = await window.benchmark.load(benchmarkId)
@@ -96,6 +98,48 @@ export function BenchmarkTile({ data, selected }: NodeProps): JSX.Element {
     }
   }, [benchmarkId, reload])
 
+  const launchRunner = useCallback(async () => {
+    setBusy('launch')
+    try {
+      await window.benchmark.launchRunner(benchmarkId)
+      await reload()
+    } finally {
+      setBusy(null)
+    }
+  }, [benchmarkId, reload])
+
+  const closeTile = useCallback(async () => {
+    await window.benchmark.close(benchmarkId)
+  }, [benchmarkId])
+
+  const deletePermanently = useCallback(async () => {
+    if (!window.confirm('Delete this benchmark tile and its .benchmark-tile/ state? This cannot be undone.')) return
+    await window.benchmark.delete(benchmarkId)
+  }, [benchmarkId])
+
+  const contextMenuItems: TileContextMenuItem[] = useMemo(() => {
+    const items: TileContextMenuItem[] = []
+    if (file?.runtime.status === 'running' || file?.runtime.status === 'paused') {
+      items.push({
+        label: file.runtime.status === 'running' ? 'Pause' : 'Resume',
+        onClick: () => runControl(file.runtime.status === 'running' ? 'pause' : 'resume')
+      })
+      items.push({ label: 'Stop', onClick: () => runControl('stop'), danger: true })
+    } else if (file?.runtime.status === 'unstarted' || file?.runtime.status === 'stopped' || file?.runtime.status === 'done') {
+      items.push({ label: 'Launch runner', onClick: launchRunner })
+    }
+    if (file?.runtime.frozen) {
+      items.push({ label: 'Unfreeze (human sign-off)', onClick: () => runControl('unfreeze') })
+    }
+    if (file?.runtime.iterationN && file.runtime.iterationN > 0) {
+      items.push({ label: 'Handoff → Plan Tile', onClick: handoff })
+    }
+    items.push({ label: '', separator: true, onClick: () => undefined })
+    items.push({ label: 'Close (soft delete)', onClick: closeTile })
+    items.push({ label: 'Delete permanently', onClick: deletePermanently, danger: true })
+    return items
+  }, [file, runControl, launchRunner, handoff, closeTile, deletePermanently])
+
   if (!file) {
     return (
       <div style={tileContainer(selected, '#6b7280')}>
@@ -141,19 +185,28 @@ export function BenchmarkTile({ data, selected }: NodeProps): JSX.Element {
   }
 
   return (
-    <div style={tileContainer(selected, borderColor)}>
-      <NodeResizer minWidth={360} minHeight={260} isVisible={selected} />
+    <div
+      style={tileContainer(selected, borderColor)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        setContextMenu({ x: e.clientX, y: e.clientY })
+      }}
+    >
+      <NodeResizer minWidth={380} minHeight={320} isVisible={selected} />
       <Handle type="target" position={Position.Top} className="!bg-zinc-600" />
       <AccentStripe color={ACCENT} />
 
-      <Header meta={meta} runtime={runtime} rows={rows} />
+      <Header meta={meta} runtime={runtime} rows={rows} onClose={closeTile} />
+      <GoalBlock meta={meta} runtime={runtime} />
+      <SparklineGraph meta={meta} rows={rows} />
       <Leaderboard rows={rows} />
       <Footer
         meta={meta}
         runtime={runtime}
         hintDraft={hintDraft}
         setHintDraft={setHintDraft}
-        onStart={() => runControl('start')}
+        onLaunch={launchRunner}
         onPause={() => runControl('pause')}
         onResume={() => runControl('resume')}
         onStop={() => runControl('stop')}
@@ -164,6 +217,14 @@ export function BenchmarkTile({ data, selected }: NodeProps): JSX.Element {
       />
 
       <Handle type="source" position={Position.Bottom} className="!bg-zinc-600" />
+      {contextMenu && (
+        <TileContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenuItems}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
@@ -173,11 +234,13 @@ export function BenchmarkTile({ data, selected }: NodeProps): JSX.Element {
 function Header({
   meta,
   runtime,
-  rows
+  rows,
+  onClose
 }: {
   meta: BenchmarkMeta
   runtime: BenchmarkRuntimeState
   rows: BenchmarkResultsRow[]
+  onClose: () => void
 }): JSX.Element {
   const iterPerHour = useMemo(() => {
     if (!runtime.startedAt || rows.length === 0) return 0
@@ -216,6 +279,27 @@ function Header({
         >
           {runtime.status}
         </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose()
+          }}
+          title="Close benchmark tile (soft delete)"
+          style={{
+            marginLeft: 4,
+            background: 'transparent',
+            border: 'none',
+            color: '#6b7280',
+            cursor: 'pointer',
+            padding: 2,
+            lineHeight: 1,
+            fontSize: 14
+          }}
+          onMouseEnter={(e) => ((e.target as HTMLButtonElement).style.color = '#e6e7ea')}
+          onMouseLeave={(e) => ((e.target as HTMLButtonElement).style.color = '#6b7280')}
+        >
+          ×
+        </button>
       </div>
       <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#9ca3af', flexWrap: 'wrap' }}>
         <Metric label="iters/hr" value={iterPerHour.toFixed(1)} />
@@ -263,6 +347,337 @@ function StatusDot({ status }: { status: BenchmarkStatus }): JSX.Element {
             : '0 0 0 1px rgba(0,0,0,0.4)'
       }}
     />
+  )
+}
+
+// ── Goal block ──
+
+function GoalBlock({
+  meta,
+  runtime
+}: {
+  meta: BenchmarkMeta
+  runtime: BenchmarkRuntimeState
+}): JSX.Element {
+  const higher = meta.higherIsBetter !== false
+  const target = useMemo(() => {
+    if (meta.scoreTarget !== undefined && Number.isFinite(meta.scoreTarget)) return meta.scoreTarget
+    if (
+      meta.improvementPct !== undefined &&
+      Number.isFinite(meta.improvementPct) &&
+      Number.isFinite(meta.baselineScore)
+    ) {
+      const f = meta.improvementPct / 100
+      return higher ? meta.baselineScore * (1 + f) : meta.baselineScore * (1 - f)
+    }
+    return null
+  }, [meta.scoreTarget, meta.improvementPct, meta.baselineScore, higher])
+
+  const goalMet =
+    runtime.bestScore !== null &&
+    target !== null &&
+    (higher ? runtime.bestScore >= target : runtime.bestScore <= target)
+
+  const progress = useMemo(() => {
+    if (runtime.bestScore === null || target === null) return 0
+    const range = target - meta.baselineScore
+    if (range === 0) return goalMet ? 1 : 0
+    const done = runtime.bestScore - meta.baselineScore
+    const pct = done / range
+    if (!Number.isFinite(pct)) return 0
+    return Math.max(0, Math.min(1, pct))
+  }, [runtime.bestScore, target, meta.baselineScore, goalMet])
+
+  return (
+    <div
+      style={{
+        padding: '8px 12px 10px 14px',
+        borderBottom: '1px solid #2a2b32',
+        background: '#141519',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9ca3af' }}>
+        <span>Goal</span>
+        {goalMet && (
+          <span style={{ fontSize: 9, color: '#22c55e', fontWeight: 700 }}>✓ reached</span>
+        )}
+      </div>
+      <div
+        title={meta.acceptanceCriteria}
+        style={{
+          fontSize: 12,
+          color: '#e6e7ea',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis'
+        }}
+      >
+        {meta.acceptanceCriteria || <span style={{ color: '#ef4444' }}>⚠ missing — bench cannot shut off on success</span>}
+      </div>
+      <div style={{ display: 'flex', gap: 12, fontSize: 11, color: '#9ca3af' }}>
+        <Metric label="baseline" value={fmtScore(meta.baselineScore)} />
+        <Metric label="target" value={target === null ? 'n/a' : fmtScore(target)} />
+        <Metric
+          label="direction"
+          value={higher ? '↑ higher better' : '↓ lower better'}
+        />
+        {meta.improvementPct !== undefined && (
+          <Metric label="improve" value={`${meta.improvementPct}%`} />
+        )}
+      </div>
+      {meta.worktreeBranch && (
+        <div
+          style={{ fontSize: 10, color: '#6b7280' }}
+          title={`worktree: ${meta.worktreePath}`}
+        >
+          branch: <span style={{ color: '#9ca3af' }}>{meta.worktreeBranch}</span>
+          {meta.autoCreatedWorktree ? ' (auto-worktree)' : ''}
+        </div>
+      )}
+      <div
+        style={{
+          height: 4,
+          borderRadius: 2,
+          background: '#2a2b32',
+          overflow: 'hidden'
+        }}
+      >
+        <div
+          style={{
+            width: `${progress * 100}%`,
+            height: '100%',
+            background: goalMet ? '#22c55e' : '#3b82f6',
+            transition: 'width 300ms ease'
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+// ── Sparkline graph ──
+//
+// Two layers:
+//   - grey dots for every iteration (accepted + rejected) plotted at their raw score
+//   - a green piecewise-linear "best-so-far" line through accepted iterations only
+//   - horizontal guides: baseline (grey dashed) + target (blue dashed)
+//
+// Hovering a dot shows a tooltip with iteration, score, Δ, and rationale — so
+// the user can read "what this iteration did that helped or hurt".
+
+function SparklineGraph({
+  meta,
+  rows
+}: {
+  meta: BenchmarkMeta
+  rows: BenchmarkResultsRow[]
+}): JSX.Element {
+  const higher = meta.higherIsBetter !== false
+  const target = useMemo(() => {
+    if (meta.scoreTarget !== undefined && Number.isFinite(meta.scoreTarget)) return meta.scoreTarget
+    if (
+      meta.improvementPct !== undefined &&
+      Number.isFinite(meta.improvementPct) &&
+      Number.isFinite(meta.baselineScore)
+    ) {
+      const f = meta.improvementPct / 100
+      return higher ? meta.baselineScore * (1 + f) : meta.baselineScore * (1 - f)
+    }
+    return null
+  }, [meta.scoreTarget, meta.improvementPct, meta.baselineScore, higher])
+
+  const [hover, setHover] = useState<{ x: number; y: number; row: BenchmarkResultsRow } | null>(null)
+
+  const width = 520
+  const height = 96
+  const padX = 28
+  const padY = 10
+
+  const { points, bestLine, yMin, yMax } = useMemo(() => {
+    if (rows.length === 0) {
+      const lo = Math.min(meta.baselineScore, target ?? meta.baselineScore)
+      const hi = Math.max(meta.baselineScore, target ?? meta.baselineScore)
+      return { points: [], bestLine: [], yMin: lo - 0.5, yMax: hi + 0.5 }
+    }
+    const scores = rows.map((r) => r.score)
+    const allY = [...scores, meta.baselineScore]
+    if (target !== null) allY.push(target)
+    const lo = Math.min(...allY)
+    const hi = Math.max(...allY)
+    const pad = (hi - lo) * 0.1 || Math.max(Math.abs(hi), 0.001)
+
+    // Compute best-so-far trajectory using accepted rows only (respecting direction).
+    const best: Array<{ iter: number; score: number }> = []
+    let current: number | null = null
+    for (const r of rows) {
+      if (!r.accepted) continue
+      if (current === null) current = r.score
+      else current = higher ? Math.max(current, r.score) : Math.min(current, r.score)
+      best.push({ iter: r.iter, score: current })
+    }
+    return { points: rows, bestLine: best, yMin: lo - pad, yMax: hi + pad }
+  }, [rows, meta.baselineScore, target, higher])
+
+  const xForIter = useCallback(
+    (iter: number) => {
+      const maxIter = Math.max(rows.length, 1)
+      return padX + ((iter - 1) / Math.max(maxIter - 1, 1)) * (width - padX - 6)
+    },
+    [rows.length]
+  )
+  const yForScore = useCallback(
+    (score: number) => {
+      if (yMax === yMin) return height / 2
+      // When lower is better, invert so "good" sits at the top of the chart.
+      const t = higher ? (score - yMin) / (yMax - yMin) : 1 - (score - yMin) / (yMax - yMin)
+      return height - padY - t * (height - 2 * padY)
+    },
+    [yMin, yMax, higher]
+  )
+
+  const baselineY = yForScore(meta.baselineScore)
+  const targetY = target === null ? null : yForScore(target)
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        borderBottom: '1px solid #2a2b32',
+        padding: '6px 8px',
+        background: '#0f0f12'
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          textTransform: 'uppercase',
+          letterSpacing: 0.5,
+          color: '#6b7280',
+          marginBottom: 2,
+          display: 'flex',
+          justifyContent: 'space-between'
+        }}
+      >
+        <span>Score over iterations</span>
+        <span>{rows.length === 0 ? 'no data yet' : `${rows.length} iter · ${rows.filter((r) => r.accepted).length} kept`}</span>
+      </div>
+      <svg
+        width="100%"
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        style={{ display: 'block', width: '100%' }}
+      >
+        {/* Baseline guide */}
+        <line
+          x1={padX}
+          x2={width - 6}
+          y1={baselineY}
+          y2={baselineY}
+          stroke="#6b7280"
+          strokeDasharray="3 3"
+          strokeWidth={1}
+        />
+        <text x={2} y={baselineY + 3} fontSize="9" fill="#6b7280">
+          base
+        </text>
+
+        {/* Target guide */}
+        {targetY !== null && (
+          <>
+            <line
+              x1={padX}
+              x2={width - 6}
+              y1={targetY}
+              y2={targetY}
+              stroke="#3b82f6"
+              strokeDasharray="4 3"
+              strokeWidth={1}
+            />
+            <text x={2} y={targetY + 3} fontSize="9" fill="#3b82f6">
+              goal
+            </text>
+          </>
+        )}
+
+        {/* Best-so-far line (only through accepted iterations) */}
+        {bestLine.length > 1 && (
+          <polyline
+            fill="none"
+            stroke="#22c55e"
+            strokeWidth={1.5}
+            points={bestLine.map((p) => `${xForIter(p.iter)},${yForScore(p.score)}`).join(' ')}
+          />
+        )}
+
+        {/* All iteration dots */}
+        {points.map((r) => {
+          const cx = xForIter(r.iter)
+          const cy = yForScore(r.score)
+          const color = r.accepted
+            ? r.delta === null
+              ? '#6b7280'
+              : (higher ? r.delta > 0 : r.delta < 0)
+              ? '#22c55e'
+              : '#eab308'
+            : '#ef4444'
+          return (
+            <circle
+              key={r.iter}
+              cx={cx}
+              cy={cy}
+              r={r.accepted ? 3 : 2.2}
+              fill={color}
+              stroke={r.accepted ? '#0f0f12' : 'none'}
+              strokeWidth={1}
+              style={{ cursor: 'pointer' }}
+              onMouseEnter={(e) =>
+                setHover({ x: (e as unknown as MouseEvent).clientX, y: (e as unknown as MouseEvent).clientY, row: r })
+              }
+              onMouseLeave={() => setHover(null)}
+            />
+          )
+        })}
+      </svg>
+
+      {hover && (
+        <div
+          style={{
+            position: 'fixed',
+            left: hover.x + 12,
+            top: hover.y + 12,
+            background: '#18191d',
+            border: '1px solid #3a3b42',
+            borderRadius: 4,
+            padding: '6px 8px',
+            fontSize: 11,
+            color: '#e6e7ea',
+            pointerEvents: 'none',
+            zIndex: 1000,
+            maxWidth: 320,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.6)'
+          }}
+        >
+          <div style={{ fontWeight: 600 }}>
+            iter {hover.row.iter}{' '}
+            <span style={{ color: hover.row.accepted ? '#22c55e' : '#ef4444', fontSize: 10 }}>
+              {hover.row.accepted ? 'KEPT' : 'REV'}
+            </span>
+          </div>
+          <div style={{ color: '#9ca3af', fontSize: 10 }}>
+            score={fmtScore(hover.row.score)} · Δ={hover.row.delta === null ? '—' : fmtDelta(hover.row.delta)} · temp={hover.row.temp.toFixed(2)}
+          </div>
+          <div style={{ marginTop: 4, color: '#e6e7ea', lineHeight: 1.3 }}>
+            {hover.row.accepted
+              ? hover.row.rationale || '(no rationale)'
+              : hover.row.rejectionReason || hover.row.rationale || '(no detail)'}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -350,7 +765,7 @@ function Footer(props: {
   runtime: BenchmarkRuntimeState
   hintDraft: string
   setHintDraft: (s: string) => void
-  onStart: () => void
+  onLaunch: () => void
   onPause: () => void
   onResume: () => void
   onStop: () => void
@@ -363,7 +778,7 @@ function Footer(props: {
     runtime,
     hintDraft,
     setHintDraft,
-    onStart,
+    onLaunch,
     onPause,
     onResume,
     onStop,
@@ -384,11 +799,18 @@ function Footer(props: {
       }}
     >
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {runtime.status === 'unstarted' && (
-          <Button onClick={onStart} disabled={!!busy} accent="#22c55e">Start</Button>
+        {(runtime.status === 'unstarted' || stopped) && (
+          <Button onClick={onLaunch} disabled={!!busy} accent="#22c55e">
+            ▶ Launch runner
+          </Button>
         )}
         {runtime.status === 'running' && (
-          <Button onClick={onPause} disabled={!!busy} accent="#eab308">Pause</Button>
+          <>
+            <Button onClick={onPause} disabled={!!busy} accent="#eab308">Pause</Button>
+            <Button onClick={onLaunch} disabled={!!busy} accent="#3b82f6">
+              ↻ Relaunch runner terminal
+            </Button>
+          </>
         )}
         {runtime.status === 'paused' && (
           <Button onClick={onResume} disabled={!!busy} accent="#22c55e">Resume</Button>
@@ -396,7 +818,7 @@ function Footer(props: {
         {runtime.frozen && (
           <Button onClick={onUnfreeze} disabled={!!busy} accent="#f97316">Unfreeze (human sign-off)</Button>
         )}
-        {!stopped && !runtime.frozen && (
+        {!stopped && !runtime.frozen && runtime.status !== 'unstarted' && (
           <Button onClick={onStop} disabled={!!busy} accent="#ef4444">Stop</Button>
         )}
         <Button onClick={onHandoff} disabled={!!busy || runtime.iterationN === 0} accent="#14b8a6">

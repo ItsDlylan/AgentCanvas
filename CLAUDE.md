@@ -237,6 +237,9 @@ HTTP API (all POST unless noted; returns `{ ok, ... }`):
 
 ```bash
 # Create directly (rare — usually convert from a BENCHMARK task)
+# REQUIRED: acceptanceCriteria (plain language), baselineScore (measured),
+# and ONE of { scoreTarget, improvementPct }. A benchmark without these is
+# a loop with no shutoff and is rejected at creation.
 curl -s -X POST $AGENT_CANVAS_API/api/benchmark/open \
   -H 'Content-Type: application/json' \
   -d "{
@@ -245,15 +248,24 @@ curl -s -X POST $AGENT_CANVAS_API/api/benchmark/open \
     \"evaluatorPath\": \"benchmark/evaluator.sh\",
     \"targetFiles\": [\"src/api/search.py\"],
     \"noiseClass\": \"medium\",
+    \"acceptanceCriteria\": \"Reduce p95 search latency by 30% without regressing accuracy\",
+    \"baselineScore\": 212.4,
+    \"improvementPct\": 30,
+    \"higherIsBetter\": false,
     \"stopConditions\": { \"wallClockMs\": 28800000, \"stagnationN\": 30 },
     \"heldOutMetric\": { \"evaluatorPath\": \"benchmark/evaluator_heldout.sh\", \"regressionThreshold\": 0.05 }
   }"
 # Returns: { ok: true, benchmarkId: "<uuid>", meta: {...} }
+#
+# Alternatively, pass an absolute scoreTarget instead of improvementPct:
+#   "scoreTarget": 148.7    // "stop when bestScore ≤ 148.7" (since higherIsBetter=false)
 
-# Harness an existing BENCHMARK task (task must already be BENCHMARK-classified)
+# Harness an existing BENCHMARK task (task must already be BENCHMARK-classified).
+# acceptanceCriteria is inherited from the task's acceptanceCriteria if present;
+# baselineScore and one of { scoreTarget, improvementPct } are still required.
 curl -s -X POST $AGENT_CANVAS_API/api/benchmark/convert-from-task \
   -H 'Content-Type: application/json' \
-  -d '{"taskId":"<uuid>","worktreePath":"/abs/path","evaluatorPath":"benchmark/evaluator.sh","noiseClass":"low"}'
+  -d '{"taskId":"<uuid>","worktreePath":"/abs/path","evaluatorPath":"benchmark/evaluator.sh","noiseClass":"low","baselineScore":0.72,"improvementPct":10}'
 
 # Read full state (meta + runtime + rows + brief)
 curl -s -X POST $AGENT_CANVAS_API/api/benchmark/read \

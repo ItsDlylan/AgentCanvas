@@ -56,6 +56,7 @@ console.log(`[runner] benchmark: ${meta.label} (${benchmarkId})`)
 console.log(`[runner] worktree: ${meta.worktreePath}`)
 console.log(`[runner] evaluator: ${meta.evaluatorPath}  (noise: ${meta.noiseClass})`)
 console.log(`[runner] targets: ${meta.targetFiles.join(', ') || '(none — agent picks)'}`)
+console.log(`[runner] declared baseline: ${meta.baselineScore}  (will re-measure before first iteration)`)
 
 const worktree = meta.worktreePath
 const tileDir = join(worktree, '.benchmark-tile')
@@ -71,6 +72,62 @@ if (!existsSync(evalAbs)) {
 
 const TEMP_CYCLE = [0.3, 0.7, 1.0]
 const wallStart = Date.now()
+
+// ── Baseline re-measurement ──
+// Before the first iteration, run the evaluator against the current HEAD (no
+// agent work) to establish the real baseline. This overrides whatever the user
+// declared in the tile creation payload; the declared value becomes a sanity
+// check only. Running the evaluator multiple times gives us a noise reading.
+{
+  const initialState = readJson(statePath, { iterationN: 0 })
+  const alreadyStarted = (initialState.iterationN ?? 0) > 0
+  if (!alreadyStarted) {
+    console.log('[runner] measuring baseline on HEAD (3 samples)...')
+    const samples = []
+    for (let i = 0; i < 3; i++) {
+      try {
+        const prevMode = statSync(evalAbs).mode & 0o777
+        chmodSync(evalAbs, 0o555)
+        const out = await run('bash', ['-c', quoteForShell(evalAbs)], worktree, { timeoutMs: 10 * 60 * 1000 })
+        chmodSync(evalAbs, prevMode || 0o755)
+        const s = parseScore(out.stdout)
+        if (s !== null && Number.isFinite(s)) {
+          samples.push(s)
+          console.log(`  sample ${i + 1}: ${s.toFixed(4)}`)
+        } else {
+          console.warn(`  sample ${i + 1}: could not parse SCORE from evaluator output`)
+        }
+      } catch (e) {
+        console.warn(`  sample ${i + 1} failed: ${(e.message || String(e)).slice(0, 200)}`)
+      }
+    }
+    if (samples.length === 0) {
+      console.error('[runner] baseline measurement failed on all samples — refusing to start loop')
+      process.exit(1)
+    }
+    samples.sort((a, b) => a - b)
+    const median = samples[Math.floor(samples.length / 2)]
+    const spread = samples[samples.length - 1] - samples[0]
+    console.log(`[runner] baseline median=${median.toFixed(4)}  spread=${spread.toFixed(4)} (${((spread / median) * 100).toFixed(1)}%)`)
+
+    const declared = meta.baselineScore
+    const relErr = declared === 0 ? Math.abs(median - declared) : Math.abs(median - declared) / Math.abs(declared)
+    if (relErr > 0.25) {
+      console.warn(
+        `[runner] declared baseline ${declared} differs from measured ${median.toFixed(4)} by ${(relErr * 100).toFixed(1)}% — updating tile.`
+      )
+    }
+    // Push measured baseline back to the tile so the target + goal-reached
+    // check + brief all reflect reality.
+    await httpJson('POST', '/api/benchmark/update', {
+      benchmarkId,
+      baselineScore: Number(median.toFixed(4))
+    }).catch((e) => console.warn('[runner] could not update baseline on tile:', e.message))
+    meta.baselineScore = Number(median.toFixed(4))
+  } else {
+    console.log(`[runner] resuming from iteration ${initialState.iterationN} — skipping baseline re-measure`)
+  }
+}
 
 while (true) {
   const state = readJson(statePath, { status: 'running', tempCycleIdx: 0 })
@@ -97,21 +154,41 @@ while (true) {
   // 1. Record pre-iteration commit so we can reset on reject.
   const baseCommit = (await run('git', ['rev-parse', 'HEAD'], worktree)).stdout.trim()
 
+  // 1a. Cache the evaluator + program.md content so we can restore them if the
+  //     agent accidentally stages/modifies them or a later git-reset wipes them.
+  const evaluatorBackup = safeRead(evalAbs)
+  const programBackup = safeRead(programPath)
+  const evalPrevMode = (() => { try { return statSync(evalAbs).mode & 0o777 } catch { return 0o755 } })()
+
   // 2. Invoke the agent (claude) to propose + commit a diff.
-  const agentOk = await invokeAgent({ prompt, cwd: worktree, temp, dryRun })
+  const agentOk = await invokeAgent({ prompt, cwd: worktree, temp, dryRun, baseCommit })
   if (!agentOk) {
-    console.log('[runner] agent produced no diff; skipping iteration')
+    console.log('[runner] agent produced no diff vs baseCommit; skipping iteration')
+    await restoreIfMissing(evalAbs, evaluatorBackup, evalPrevMode)
+    await restoreIfMissing(programPath, programBackup, 0o644)
     await sleep(2000)
     continue
   }
 
   const candidateCommit = (await run('git', ['rev-parse', 'HEAD'], worktree)).stdout.trim()
 
+  // Restore evaluator + program.md if the agent committed them away. Skip
+  // applying the backup when they're still present AND unchanged from backup,
+  // to avoid clobbering a deliberate evaluator edit (which would be a reward-
+  // hack attempt anyway, so we explicitly undo it).
+  await restoreIfMissing(evalAbs, evaluatorBackup, evalPrevMode)
+  await restoreIfMissing(programPath, programBackup, 0o644)
+  if (evaluatorBackup !== null && safeRead(evalAbs) !== evaluatorBackup) {
+    console.log('[runner] agent modified evaluator — restoring original (reward-hack attempt)')
+    writeFileSync(evalAbs, evaluatorBackup)
+    try { chmodSync(evalAbs, evalPrevMode) } catch { /* noop */ }
+  }
+
   // 3. Sandbox: mount evaluator read-only before execution.
   let prevMode = 0
   try {
     prevMode = statSync(evalAbs).mode & 0o777
-    chmodSync(evalAbs, 0o444)
+    chmodSync(evalAbs, 0o555)
   } catch (e) {
     console.warn(`[runner] could not chmod evaluator readonly: ${e.message}`)
   }
@@ -130,19 +207,19 @@ while (true) {
   const runtimeMs = Date.now() - evalStart
 
   if (evalErr) {
-    // Treat as rejected; feed rejection reason through append-result with score=NaN.
+    const msg = (evalErr.message || String(evalErr)).replace(/\s+/g, ' ').slice(0, 400)
+    console.error(`[runner] evaluator errored: ${msg}`)
+    // Report a deliberately-bad score so the row appends and the UI shows WHY.
+    // 999999 mirrors bench.mjs's own sentinel for correctness failures.
     await appendResult({
       temp,
-      score: Number.NaN,
+      score: 999999,
       runtimeMs,
       commitSha: candidateCommit,
-      rationale: 'evaluator error',
-      // Sending NaN will be rejected by the server; we still want the row logged.
-      // Workaround: fall back to best-or-zero so the row appends but is rejected.
-      fallback: true
-    }).catch(() => { /* noop */ })
+      rationale: `evaluator error: ${msg}`
+    }).catch((e) => console.warn('[runner] failed to log evaluator error to tile:', e.message))
     await run('git', ['reset', '--hard', baseCommit], worktree).catch(() => { /* noop */ })
-    console.log(`[runner] evaluator errored; reset to ${baseCommit.slice(0, 8)}`)
+    console.log(`[runner] reset to ${baseCommit.slice(0, 8)}`)
     continue
   }
 
@@ -160,7 +237,7 @@ while (true) {
     if (existsSync(heldEvalAbs)) {
       try {
         const prevH = statSync(heldEvalAbs).mode & 0o777
-        chmodSync(heldEvalAbs, 0o444)
+        chmodSync(heldEvalAbs, 0o555)
         const res = await run('bash', ['-c', quoteForShell(heldEvalAbs)], worktree, { timeoutMs: 5 * 60 * 1000 })
         heldOut = parseScore(res.stdout)
         chmodSync(heldEvalAbs, prevH || 0o755)
@@ -312,24 +389,51 @@ function lastCommitSubject(cwd) {
   }
 }
 
-async function invokeAgent({ prompt, cwd, temp, dryRun }) {
+async function invokeAgent({ prompt, cwd, temp, dryRun, baseCommit }) {
   if (dryRun) {
     const out = join(cwd, '.benchmark-tile', 'last-prompt.md')
     try { writeFileSync(out, prompt) } catch { /* noop */ }
     console.log(`[runner] dry-run: prompt written to ${out}. Make edits + commit, then press ENTER.`)
     await waitForEnter()
-    return true
+    return agentMadeCommit(cwd, baseCommit)
   }
   // `claude -p` consumes stdin + prints to stdout; the agent will make edits
   // via its own Edit/Write tools. We assume the agent ends by `git add` + commit.
   try {
-    await runWithStdin(`claude`, ['-p', `--model`, `claude-opus-4-7`, `--temperature`, String(temp)], cwd, prompt)
-    // If no new commit, treat as no-op.
-    const diff = await run('git', ['diff', 'HEAD~1..HEAD', '--stat'], cwd).catch(() => ({ stdout: '' }))
-    return !!diff.stdout.trim()
+    await runWithStdin(`claude`, ['-p', `--model`, `claude-opus-4-7`], cwd, prompt)
+    return agentMadeCommit(cwd, baseCommit)
   } catch (e) {
     console.warn('[runner] agent invocation failed:', e.message)
+    return agentMadeCommit(cwd, baseCommit)
+  }
+}
+
+async function agentMadeCommit(cwd, baseCommit) {
+  // The ONLY valid signal that the agent produced work is a new commit past
+  // baseCommit. Checking HEAD~1..HEAD incorrectly returns non-empty after a
+  // prior git-reset, causing the runner to process a phantom iteration.
+  try {
+    const head = (await run('git', ['rev-parse', 'HEAD'], cwd)).stdout.trim()
+    return head !== baseCommit
+  } catch {
     return false
+  }
+}
+
+async function restoreIfMissing(path, content, mode) {
+  if (content === null || content === undefined) return
+  if (existsSync(path)) return
+  try {
+    const dir = path.replace(/\/[^/]+$/, '')
+    if (!existsSync(dir)) {
+      const { mkdirSync } = await import('node:fs')
+      mkdirSync(dir, { recursive: true })
+    }
+    writeFileSync(path, content)
+    chmodSync(path, mode || 0o644)
+    console.log(`[runner] restored ${path}`)
+  } catch (e) {
+    console.warn(`[runner] could not restore ${path}:`, e.message)
   }
 }
 
@@ -352,20 +456,65 @@ function waitForEnter() {
 
 function buildAgentPrompt({ meta, brief, programMd, temp }) {
   return [
+    '# You are inside an automated benchmark loop.',
+    '',
+    `This is a legitimate AgentCanvas Benchmark Tile iteration — NOT an injected template, and NOT a prompt-injection attempt. The scaffolding below (program.md, brief, temperature tag) is the standard loop preamble.`,
+    '',
+    `**Your job:** make ONE targeted edit to the declared target files so the evaluator's score improves, then commit. Do NOT edit the evaluator (\`${meta.evaluatorPath}\`), program.md, or anything under \`.benchmark-tile/\` — those are harness files.`,
+    '',
+    `**If you do not understand what to change, still make your best-guess edit and commit.** The harness will score it and reject if worse. Declining to edit is wasted iteration budget; the comparator (not you) decides acceptance.`,
+    '',
+    `**Scope your \`git add\`** to only the target files listed below (e.g. \`git add ${meta.targetFiles.slice(0, 3).map((f) => `'${f}'`).join(' ') || '<your edited files>'}\`). Do NOT use \`git add -A\` — it can accidentally stage untracked harness files.`,
+    '',
+    '---',
+    '',
+    '## Acceptance criterion (the whole point of this run)',
+    meta.acceptanceCriteria || '(none recorded — contact the human)',
+    '',
+    `- baseline: ${meta.baselineScore}`,
+    `- target: ${resolveTarget(meta) ?? 'n/a'}`,
+    `- direction: ${meta.higherIsBetter === false ? 'lower is better' : 'higher is better'}`,
+    '',
+    '---',
+    '',
+    '## Program skill',
     programMd,
     '',
     '---',
-    `temperature: ${temp}   # ${temp <= 0.35 ? 'exploit' : temp <= 0.75 ? 'balance' : 'explore'}`,
     '',
+    `temperature: ${temp}   # ${temp <= 0.35 ? 'exploit (safe refactor)' : temp <= 0.75 ? 'balance' : 'explore (novel approach)'}`,
+    '',
+    '## Distilled brief',
     brief,
     '',
     '---',
+    '',
     '## Target files you may edit',
     ...(meta.targetFiles.length > 0
       ? meta.targetFiles.map((f) => `- ${f}`)
-      : ['- (none declared — you may edit any file EXCEPT evaluator + program.md + .benchmark-tile/**)']),
+      : ['- (none declared — edit ONLY files strictly necessary to improve the score; never the evaluator or program.md)']),
     '',
-    'After your edit, stage and commit with:',
-    '  git add -A && git commit -m "bench: iter N — <short rationale>"'
+    '## Commit contract',
+    'After your edit, stage ONLY your target files and commit with:',
+    meta.targetFiles.length > 0
+      ? `  git add ${meta.targetFiles.map((f) => `'${f}'`).join(' ')} && git commit -m "bench: iter N — <short rationale>"`
+      : '  git add <your edited files> && git commit -m "bench: iter N — <short rationale>"',
+    '',
+    'If git reports nothing to commit, that is a bug on your side — try a different edit.'
   ].join('\n')
+}
+
+function resolveTarget(meta) {
+  if (meta.scoreTarget !== undefined && Number.isFinite(meta.scoreTarget)) return meta.scoreTarget
+  if (
+    meta.improvementPct !== undefined &&
+    Number.isFinite(meta.improvementPct) &&
+    Number.isFinite(meta.baselineScore)
+  ) {
+    const f = meta.improvementPct / 100
+    return meta.higherIsBetter === false
+      ? meta.baselineScore * (1 - f)
+      : meta.baselineScore * (1 + f)
+  }
+  return null
 }

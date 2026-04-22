@@ -29,6 +29,17 @@ export interface DistillInput {
    * leaderboard section. Keep undefined for single-lineage runs.
    */
   crossLineageAccepted?: Array<{ lineage: string; iter: number; score: number; rationale: string }>
+  /**
+   * Acceptance contract surfaced at the TOP of the brief so the agent knows
+   * what it's optimizing toward on every iteration.
+   */
+  goal?: {
+    acceptanceCriteria: string
+    baselineScore: number
+    target: number | null
+    higherIsBetter: boolean
+    improvementPct?: number
+  }
 }
 
 export function distillBrief(input: DistillInput): string {
@@ -41,6 +52,24 @@ export function distillBrief(input: DistillInput): string {
   const lines: string[] = []
   lines.push(`# Benchmark Brief v${state.iterationN}`)
   lines.push('')
+
+  if (input.goal) {
+    const g = input.goal
+    lines.push('## Goal')
+    lines.push(sanitizeForBrief(g.acceptanceCriteria) || '(no acceptance criterion recorded)')
+    lines.push('')
+    lines.push(`- baseline: ${g.baselineScore}`)
+    lines.push(
+      `- target: ${g.target ?? 'n/a'}${
+        g.improvementPct !== undefined
+          ? ` (baseline ${g.higherIsBetter ? '+' : '−'}${g.improvementPct}%)`
+          : ''
+      }`
+    )
+    lines.push(`- direction: ${g.higherIsBetter ? 'higher is better' : 'lower is better'}`)
+    lines.push('')
+  }
+
   lines.push('## Current state')
   lines.push(`- best_score: ${state.bestScore === null ? 'n/a' : formatScore(state.bestScore)}`)
   lines.push(`- stagnation_counter: ${state.stagnationCounter}`)

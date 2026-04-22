@@ -52,7 +52,14 @@ export interface BenchmarkMeta {
   benchmarkId: string
   label: string
   workspaceId: string
+  /** Source repository — where the benchmark branches off. Typically main repo root. */
+  sourceRepoPath?: string
+  /** Absolute path to the isolated worktree the agent edits. Auto-created from sourceRepoPath by default. */
   worktreePath: string
+  /** Branch name inside the auto-created worktree (e.g. bench/markdown-<short-id>). */
+  worktreeBranch?: string
+  /** True when AgentCanvas created the worktree itself and owns its lifecycle. */
+  autoCreatedWorktree?: boolean
   evaluatorPath: string
   targetFiles: string[]
   programPath: string
@@ -69,6 +76,30 @@ export interface BenchmarkMeta {
   height: number
   createdAt: number
   updatedAt: number
+
+  // Acceptance contract — required. The whole point of a Benchmark Tile is
+  // to drive toward a quantifiable success condition; without these three
+  // fields there is no shutoff and the run never terminates meaningfully.
+  /** Human-readable success criterion, e.g. "reduce p95 latency by 30%". Markdown allowed. */
+  acceptanceCriteria: string
+  /** Current score against the same evaluator before any optimization. Required. */
+  baselineScore: number
+  /**
+   * If set, success = bestScore >= baselineScore + (baselineScore * improvementPct / 100).
+   * Equivalent to expressing the goal as "improve baseline by N%". Optional — scoreTarget
+   * may be used instead, but one of {scoreTarget, improvementPct} must be provided.
+   */
+  improvementPct?: number
+  /**
+   * If set, success = bestScore >= scoreTarget. Takes precedence over improvementPct
+   * when both are set.
+   */
+  scoreTarget?: number
+  /**
+   * If `higher_is_better === false`, the comparator inverts: lower score wins.
+   * Defaults to true. Set to false for latency, bundle-size, loss, etc.
+   */
+  higherIsBetter?: boolean
 }
 
 export interface BenchmarkFile {
@@ -189,7 +220,15 @@ export async function saveBenchmark(id: string, meta: Partial<BenchmarkMeta>): P
       width: meta.width ?? existing?.meta.width ?? 560,
       height: meta.height ?? existing?.meta.height ?? 460,
       createdAt: existing?.meta.createdAt ?? now,
-      updatedAt: now
+      updatedAt: now,
+      acceptanceCriteria: meta.acceptanceCriteria ?? existing?.meta.acceptanceCriteria ?? '',
+      baselineScore: meta.baselineScore ?? existing?.meta.baselineScore ?? 0,
+      improvementPct: meta.improvementPct ?? existing?.meta.improvementPct,
+      scoreTarget: meta.scoreTarget ?? existing?.meta.scoreTarget,
+      higherIsBetter: meta.higherIsBetter ?? existing?.meta.higherIsBetter ?? true,
+      sourceRepoPath: meta.sourceRepoPath ?? existing?.meta.sourceRepoPath,
+      worktreeBranch: meta.worktreeBranch ?? existing?.meta.worktreeBranch,
+      autoCreatedWorktree: meta.autoCreatedWorktree ?? existing?.meta.autoCreatedWorktree ?? false
     }
 
     const file: BenchmarkFile = { meta: merged }
@@ -394,6 +433,41 @@ function parseResultsLine(line: string): ResultsRow | null {
     rationale,
     rejectionReason
   }
+}
+
+// ── Acceptance-criterion resolution ──────────────────────────
+
+/**
+ * Resolve the effective success target.
+ *   - scoreTarget wins if set (absolute threshold).
+ *   - improvementPct + baseline computes a relative target.
+ *   - For higher-is-better metrics:   target = baseline * (1 + pct/100)
+ *   - For lower-is-better metrics:    target = baseline * (1 - pct/100)
+ * Returns null if neither is configured.
+ */
+export function effectiveScoreTarget(meta: BenchmarkMeta): number | null {
+  if (meta.scoreTarget !== undefined && Number.isFinite(meta.scoreTarget)) {
+    return meta.scoreTarget
+  }
+  if (
+    meta.improvementPct !== undefined &&
+    Number.isFinite(meta.improvementPct) &&
+    Number.isFinite(meta.baselineScore)
+  ) {
+    const factor = meta.improvementPct / 100
+    return meta.higherIsBetter === false
+      ? meta.baselineScore * (1 - factor)
+      : meta.baselineScore * (1 + factor)
+  }
+  return null
+}
+
+/** Does `score` satisfy the declared acceptance criterion (target)? */
+export function goalReached(meta: BenchmarkMeta, score: number | null): boolean {
+  if (score === null || !Number.isFinite(score)) return false
+  const target = effectiveScoreTarget(meta)
+  if (target === null) return false
+  return meta.higherIsBetter === false ? score <= target : score >= target
 }
 
 // ── Utility: guard that worktreePath is sane ────────────────

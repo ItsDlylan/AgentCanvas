@@ -498,7 +498,10 @@ export interface BenchmarkMeta {
   benchmarkId: string
   label: string
   workspaceId: string
+  sourceRepoPath?: string
   worktreePath: string
+  worktreeBranch?: string
+  autoCreatedWorktree?: boolean
   evaluatorPath: string
   targetFiles: string[]
   programPath: string
@@ -515,6 +518,11 @@ export interface BenchmarkMeta {
   height: number
   createdAt: number
   updatedAt: number
+  acceptanceCriteria: string
+  baselineScore: number
+  improvementPct?: number
+  scoreTarget?: number
+  higherIsBetter?: boolean
 }
 
 export interface BenchmarkRuntimeState {
@@ -576,6 +584,9 @@ export interface BenchmarkAPI {
     benchmarkId: string,
     stopReason?: BenchmarkStopReason
   ) => Promise<{ ok: boolean; planId?: string; winningIter?: number; bestScore?: number | null; error?: string }>
+  launchRunner: (
+    benchmarkId: string
+  ) => Promise<{ ok: boolean; terminalId?: string; command?: string; error?: string }>
   onBenchmarkOpen: (cb: (info: { benchmarkId: string; meta: BenchmarkMeta }) => void) => () => void
   onBenchmarkUpdate: (cb: (info: { benchmarkId: string }) => void) => () => void
   onBenchmarkStateChange: (cb: (info: { benchmarkId: string }) => void) => () => void
@@ -594,6 +605,8 @@ const benchmarkAPI: BenchmarkAPI = {
   delete: (benchmarkId) => ipcRenderer.invoke('benchmark:delete', { benchmarkId }),
   handoffPlan: (benchmarkId, stopReason) =>
     ipcRenderer.invoke('benchmark:handoff-plan', { benchmarkId, stopReason }),
+  launchRunner: (benchmarkId) =>
+    ipcRenderer.invoke('benchmark:launch-runner', { benchmarkId }),
   onBenchmarkOpen: (callback) => {
     const handler = (
       _e: Electron.IpcRendererEvent,

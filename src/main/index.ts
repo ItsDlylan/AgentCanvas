@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell, dialog, Menu, globalShortcut, protocol, net } from 'electron'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { execFile, spawn } from 'child_process'
 import { promisify } from 'util'
 import { randomUUID } from 'crypto'
@@ -78,6 +78,8 @@ import {
   loadRuntimeState,
   saveRuntimeState,
   validateWorktreePath,
+  effectiveScoreTarget,
+  goalReached,
   type BenchmarkMeta,
   type BenchmarkStatus,
   type BenchmarkStopReason,
@@ -955,7 +957,9 @@ ipcMain.handle('benchmark:close', async (_event, { benchmarkId }: { benchmarkId:
   return { ok: true }
 })
 
-ipcMain.handle('benchmark:delete', (_event, { benchmarkId }: { benchmarkId: string }) => {
+ipcMain.handle('benchmark:delete', async (_event, { benchmarkId }: { benchmarkId: string }) => {
+  const b = loadBenchmark(benchmarkId)
+  if (b) await removeBenchmarkWorktree(b.meta)
   deleteBenchmark(benchmarkId)
   stopWatchingBenchmarkResults(benchmarkId)
   mainWindow?.webContents.send('canvas:benchmark-delete', { benchmarkId })
@@ -973,6 +977,65 @@ ipcMain.handle(
     })
   }
 )
+
+ipcMain.handle(
+  'benchmark:launch-runner',
+  async (_event, { benchmarkId }: { benchmarkId: string }) => {
+    const b = loadBenchmark(benchmarkId)
+    if (!b) return { ok: false, error: 'Benchmark not found' }
+    // Arm the run (status → running) before spawning so the runner sees a live tile.
+    const state = loadRuntimeState(b.meta)
+    state.status = 'running'
+    state.startedAt = state.startedAt ?? Date.now()
+    saveRuntimeState(b.meta, state)
+    await saveBenchmark(benchmarkId, { status: 'running' })
+
+    // Prefer the app's shipped runner script (works in dev AND packaged build).
+    // Fall back to <worktree>/scripts/benchmark-runner.mjs if the AgentCanvas
+    // checkout happens to be the same repo.
+    const shippedRunner = join(app.getAppPath(), 'scripts', 'benchmark-runner.mjs')
+    const fallbackRunner = join(b.meta.worktreePath, 'scripts', 'benchmark-runner.mjs')
+    const runnerPath = existsSync(shippedRunner) ? shippedRunner : fallbackRunner
+    const command = `node ${quoteShell(runnerPath)} --benchmark-id ${benchmarkId}\n`
+
+    const terminalId = randomUUID()
+    mainWindow?.webContents.send('canvas:terminal-spawn', {
+      terminalId,
+      label: `Runner: ${b.meta.label}`,
+      cwd: b.meta.worktreePath,
+      command,
+      linkedTerminalId: undefined,
+      width: 720,
+      height: 420,
+      metadata: { benchmarkId, role: 'benchmark-runner' }
+    })
+
+    // Link benchmark → runner-terminal via executing-in edge.
+    const edges = loadEdges()
+    const benchTermEdge: PersistedEdge = {
+      id: `e-${randomUUID()}`,
+      source: benchmarkId,
+      target: terminalId,
+      kind: 'executing-in'
+    }
+    edges.edges.push(benchTermEdge)
+    saveEdges(edges)
+
+    // Defer the edge broadcast slightly so the renderer has time to mount the
+    // spawned terminal tile before ReactFlow tries to resolve handles.
+    setTimeout(() => {
+      mainWindow?.webContents.send('canvas:task-link', benchTermEdge)
+    }, 700)
+
+    mainWindow?.webContents.send('canvas:benchmark-state-change', { benchmarkId })
+    return { ok: true, terminalId, command }
+  }
+)
+
+function quoteShell(s: string): string {
+  if (!/[\s'"\\$`!]/.test(s)) return s
+  return `'${s.replace(/'/g, `'\\''`)}'`
+}
 
 // ── Task Lens IPC ──────────────────────────────────────────
 ipcMain.handle('tasklens:load', () => loadTaskLensConfig())
@@ -2195,6 +2258,99 @@ const VALID_NOISE_CLASSES: NoiseClass[] = ['low', 'medium', 'high']
 const VALID_BENCHMARK_STATUSES: BenchmarkStatus[] = [
   'unstarted', 'running', 'paused', 'frozen', 'stopped', 'done'
 ]
+
+/**
+ * Auto-create an isolated git worktree for a benchmark run. Pattern matches
+ * the project convention: worktrees live at `<repo-parent>/AgentCanvas-worktrees/bench-<short-id>`
+ * on a fresh branch `bench/<slug>-<short-id>` branched from the source repo's
+ * current HEAD. Returns the worktree path + branch name.
+ *
+ * If the source path isn't a git repo, throws. If the worktree directory
+ * already exists, we fail fast rather than risk stepping on prior work.
+ */
+async function createBenchmarkWorktree(input: {
+  sourceRepoPath: string
+  benchmarkId: string
+  label: string
+}): Promise<{ worktreePath: string; branchName: string }> {
+  const { stdout: topLevel } = await execFileAsync('git', ['-C', input.sourceRepoPath, 'rev-parse', '--show-toplevel'])
+  const repoRoot = topLevel.trim()
+  if (!repoRoot) throw new Error(`${input.sourceRepoPath} is not a git repository`)
+  const parent = dirname(repoRoot)
+  const basename = parent.split('/').pop() ?? 'repo'
+  const worktreesDir = join(parent, `${basename}-worktrees`)
+  if (!existsSync(worktreesDir)) fsMkdirSync(worktreesDir, { recursive: true })
+
+  const slug = slugForBranch(input.label)
+  const shortId = input.benchmarkId.slice(0, 8)
+  const worktreePath = join(worktreesDir, `bench-${shortId}`)
+  const branchName = `bench/${slug}-${shortId}`
+
+  if (existsSync(worktreePath)) {
+    throw new Error(`worktree target already exists: ${worktreePath}`)
+  }
+  await execFileAsync('git', ['-C', repoRoot, 'worktree', 'add', worktreePath, '-b', branchName])
+  return { worktreePath, branchName }
+}
+
+function slugForBranch(s: string): string {
+  return (s || 'run')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32) || 'run'
+}
+
+/**
+ * Remove the worktree we created, if any. Called from hard-delete.
+ * Best-effort — failures are logged and ignored so delete never blocks.
+ */
+async function removeBenchmarkWorktree(meta: BenchmarkMeta): Promise<void> {
+  if (!meta.autoCreatedWorktree || !meta.worktreePath || !meta.sourceRepoPath) return
+  try {
+    await execFileAsync('git', ['-C', meta.sourceRepoPath, 'worktree', 'remove', '--force', meta.worktreePath])
+    console.log(`[benchmark] removed worktree ${meta.worktreePath}`)
+  } catch (err) {
+    console.warn(`[benchmark] worktree removal failed for ${meta.worktreePath}:`, (err as Error).message)
+  }
+  if (meta.worktreeBranch) {
+    try {
+      await execFileAsync('git', ['-C', meta.sourceRepoPath, 'branch', '-D', meta.worktreeBranch])
+    } catch {
+      // branch may already be gone — non-fatal
+    }
+  }
+}
+
+/**
+ * Enforce the required acceptance contract at creation time. A benchmark
+ * without a human-readable goal AND a quantifiable target is a loop with
+ * no shutoff — the whole point of the primitive is to drive toward a
+ * measurable success condition.
+ */
+function validateAcceptanceContract(info: {
+  acceptanceCriteria?: string
+  baselineScore?: number
+  improvementPct?: number
+  scoreTarget?: number
+}): string | null {
+  const ac = (info.acceptanceCriteria ?? '').trim()
+  if (ac.length === 0) {
+    return 'acceptanceCriteria is required — state the success condition in plain language, e.g. "reduce p95 latency by 30%"'
+  }
+  if (info.baselineScore === undefined || !Number.isFinite(info.baselineScore)) {
+    return 'baselineScore is required — measure the evaluator against HEAD once and pass that number'
+  }
+  const hasTarget = info.scoreTarget !== undefined && Number.isFinite(info.scoreTarget)
+  const hasPct = info.improvementPct !== undefined && Number.isFinite(info.improvementPct)
+  if (!hasTarget && !hasPct) {
+    return 'one of { scoreTarget, improvementPct } is required — the run needs a quantifiable target to shut off on'
+  }
+  if (hasPct && (info.improvementPct! <= 0)) {
+    return 'improvementPct must be positive (interpretation: % improvement over baseline)'
+  }
+  return null
+}
 const resultsWatchers = new Map<string, FSWatcher>()
 
 function watchBenchmarkResults(meta: BenchmarkMeta): void {
@@ -2236,7 +2392,12 @@ canvasApi.on(
     info: {
       label?: string
       workspaceId?: string
+      /** Source repo to branch off. If present without worktreePath, we auto-create a worktree. */
+      sourceRepoPath?: string
+      /** Explicit worktree path. If set, auto-worktree is skipped and this path is used directly. */
       worktreePath?: string
+      /** Force skip auto-worktree creation (default: auto-create if only sourceRepoPath is given). */
+      autoWorktree?: boolean
       evaluatorPath?: string
       targetFiles?: string[]
       programPath?: string
@@ -2247,16 +2408,17 @@ canvasApi.on(
       position?: { x: number; y: number }
       width?: number
       height?: number
+      acceptanceCriteria?: string
+      baselineScore?: number
+      improvementPct?: number
+      scoreTarget?: number
+      higherIsBetter?: boolean
     },
     reply: (result: unknown) => void
   ) => {
-    if (!info.worktreePath) {
-      reply({ ok: false, error: 'worktreePath is required' })
-      return
-    }
-    const pathErr = validateWorktreePath(info.worktreePath)
-    if (pathErr) {
-      reply({ ok: false, error: pathErr })
+    const contractErr = validateAcceptanceContract(info)
+    if (contractErr) {
+      reply({ ok: false, error: contractErr })
       return
     }
     const noiseClass: NoiseClass = VALID_NOISE_CLASSES.includes(info.noiseClass as NoiseClass)
@@ -2264,11 +2426,51 @@ canvasApi.on(
       : 'medium'
 
     const benchmarkId = randomUUID()
+
+    // Resolve the worktree. Default behavior: if the caller supplied sourceRepoPath
+    // (or only worktreePath that happens to be a repo root) and didn't opt out via
+    // autoWorktree:false, we create an isolated worktree so the run never mutates main.
+    let worktreePath = info.worktreePath
+    let sourceRepoPath = info.sourceRepoPath ?? info.worktreePath
+    let worktreeBranch: string | undefined
+    let autoCreatedWorktree = false
+    const shouldAuto = info.autoWorktree !== false && (info.sourceRepoPath !== undefined || !info.worktreePath)
+
+    if (!worktreePath && !sourceRepoPath) {
+      reply({ ok: false, error: 'sourceRepoPath (or worktreePath) is required' })
+      return
+    }
+
+    if (shouldAuto && sourceRepoPath) {
+      try {
+        const created = await createBenchmarkWorktree({
+          sourceRepoPath,
+          benchmarkId,
+          label: info.label || 'Benchmark'
+        })
+        worktreePath = created.worktreePath
+        worktreeBranch = created.branchName
+        autoCreatedWorktree = true
+      } catch (err) {
+        reply({ ok: false, error: `worktree creation failed: ${(err as Error).message}` })
+        return
+      }
+    }
+
+    const pathErr = validateWorktreePath(worktreePath!)
+    if (pathErr) {
+      reply({ ok: false, error: pathErr })
+      return
+    }
+
     const meta: BenchmarkMeta = {
       benchmarkId,
       label: info.label || 'Benchmark',
       workspaceId: info.workspaceId || 'default',
-      worktreePath: info.worktreePath,
+      sourceRepoPath,
+      worktreePath: worktreePath!,
+      worktreeBranch,
+      autoCreatedWorktree,
       evaluatorPath: info.evaluatorPath || 'benchmark/evaluator.sh',
       targetFiles: info.targetFiles ?? [],
       programPath: info.programPath || 'benchmark/program.md',
@@ -2282,7 +2484,12 @@ canvasApi.on(
       width: info.width || 560,
       height: info.height || 460,
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      acceptanceCriteria: (info.acceptanceCriteria ?? '').trim(),
+      baselineScore: info.baselineScore!,
+      improvementPct: info.improvementPct,
+      scoreTarget: info.scoreTarget,
+      higherIsBetter: info.higherIsBetter ?? true
     }
     await saveBenchmark(benchmarkId, meta)
     try {
@@ -2439,7 +2646,14 @@ canvasApi.on(
     const brief = distillBrief({
       state: nextState,
       rows: refreshedRows,
-      userHint: state.pendingHint
+      userHint: state.pendingHint,
+      goal: {
+        acceptanceCriteria: b.meta.acceptanceCriteria,
+        baselineScore: b.meta.baselineScore,
+        target: effectiveScoreTarget(b.meta),
+        higherIsBetter: b.meta.higherIsBetter !== false,
+        improvementPct: b.meta.improvementPct
+      }
     })
     writeBrief(b.meta, brief)
 
@@ -2483,10 +2697,10 @@ function evaluateStopConditions(
   now: number
 ): BenchmarkStopReason | null {
   if (state.frozen) return 'frozen'
-  const { scoreTarget, stagnationN, wallClockMs } = meta.stopConditions
-  if (scoreTarget !== undefined && state.bestScore !== null && state.bestScore >= scoreTarget) {
-    return 'target'
-  }
+  // Declared acceptance target (scoreTarget or baseline + improvementPct) takes
+  // precedence over any legacy stopConditions.scoreTarget.
+  if (goalReached(meta, state.bestScore)) return 'target'
+  const { stagnationN, wallClockMs } = meta.stopConditions
   if (stagnationN !== undefined && state.stagnationCounter >= stagnationN) {
     return 'stagnation'
   }
@@ -2572,13 +2786,20 @@ canvasApi.on(
   async (
     info: {
       taskId: string
-      worktreePath: string
+      sourceRepoPath?: string
+      worktreePath?: string
+      autoWorktree?: boolean
       evaluatorPath?: string
       targetFiles?: string[]
       noiseClass?: string
       stopConditions?: { scoreTarget?: number; stagnationN?: number; wallClockMs?: number }
       heldOutMetric?: { evaluatorPath: string; baselineScore?: number; regressionThreshold: number }
       position?: { x: number; y: number }
+      acceptanceCriteria?: string
+      baselineScore?: number
+      improvementPct?: number
+      scoreTarget?: number
+      higherIsBetter?: boolean
     },
     reply: (result: unknown) => void
   ) => {
@@ -2591,21 +2812,62 @@ canvasApi.on(
       reply({ ok: false, error: 'Only BENCHMARK-classified tasks can be harnessed' })
       return
     }
-    const pathErr = validateWorktreePath(info.worktreePath)
+    const sourceRepoPath = info.sourceRepoPath ?? info.worktreePath
+    let worktreePath = info.worktreePath
+    let worktreeBranch: string | undefined
+    let autoCreatedWorktree = false
+    const benchmarkIdPre = randomUUID()
+    const shouldAuto = info.autoWorktree !== false && (info.sourceRepoPath !== undefined || !info.worktreePath)
+    if (shouldAuto && sourceRepoPath) {
+      try {
+        const created = await createBenchmarkWorktree({
+          sourceRepoPath,
+          benchmarkId: benchmarkIdPre,
+          label: t.meta.label
+        })
+        worktreePath = created.worktreePath
+        worktreeBranch = created.branchName
+        autoCreatedWorktree = true
+      } catch (err) {
+        reply({ ok: false, error: `worktree creation failed: ${(err as Error).message}` })
+        return
+      }
+    }
+    if (!worktreePath) {
+      reply({ ok: false, error: 'sourceRepoPath (or worktreePath) is required' })
+      return
+    }
+    const pathErr = validateWorktreePath(worktreePath)
     if (pathErr) {
       reply({ ok: false, error: pathErr })
+      return
+    }
+    // Inherit human-readable acceptance from the parent task's acceptanceCriteria
+    // (TipTap JSON → markdown) if the caller didn't override.
+    const inheritedAcceptance = info.acceptanceCriteria ?? jsonToMarkdown(t.acceptanceCriteria)
+    const contractErr = validateAcceptanceContract({
+      acceptanceCriteria: inheritedAcceptance,
+      baselineScore: info.baselineScore,
+      improvementPct: info.improvementPct,
+      scoreTarget: info.scoreTarget
+    })
+    if (contractErr) {
+      reply({ ok: false, error: contractErr })
       return
     }
     const noiseClass: NoiseClass = VALID_NOISE_CLASSES.includes(info.noiseClass as NoiseClass)
       ? (info.noiseClass as NoiseClass)
       : 'medium'
 
-    const benchmarkId = randomUUID()
+    const benchmarkId = benchmarkIdPre
     const meta: BenchmarkMeta = {
       benchmarkId,
       label: t.meta.label,
       workspaceId: t.meta.workspaceId,
-      worktreePath: info.worktreePath,
+      sourceRepoPath,
+      worktreePath,
+      worktreeBranch,
+      autoCreatedWorktree,
       evaluatorPath: info.evaluatorPath || 'benchmark/evaluator.sh',
       targetFiles: info.targetFiles ?? [],
       programPath: 'benchmark/program.md',
@@ -2619,7 +2881,12 @@ canvasApi.on(
       width: 560,
       height: 460,
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      acceptanceCriteria: inheritedAcceptance.trim(),
+      baselineScore: info.baselineScore!,
+      improvementPct: info.improvementPct,
+      scoreTarget: info.scoreTarget,
+      higherIsBetter: info.higherIsBetter ?? true
     }
     await saveBenchmark(benchmarkId, meta)
     try {
@@ -2631,16 +2898,20 @@ canvasApi.on(
 
     // Link task → benchmark via executing-in edge (task's terminal-like executor)
     const edges = loadEdges()
-    edges.edges.push({
+    const taskBenchEdge: PersistedEdge = {
       id: `e-${randomUUID()}`,
       source: info.taskId,
       target: benchmarkId,
       kind: 'executing-in'
-    })
+    }
+    edges.edges.push(taskBenchEdge)
     saveEdges(edges)
 
     watchBenchmarkResults(meta)
     mainWindow?.webContents.send('canvas:benchmark-open', { benchmarkId, meta })
+    // Re-use the canvas:task-link channel — it's the generic "an edge was added
+    // at runtime" event the renderer already listens to for live rendering.
+    mainWindow?.webContents.send('canvas:task-link', taskBenchEdge)
     reply({ ok: true, benchmarkId, meta })
   }
 )
@@ -2673,13 +2944,17 @@ canvasApi.on(
 
     // Link benchmark → plan via has-plan edge
     const edges = loadEdges()
-    edges.edges.push({
+    const benchPlanEdge: PersistedEdge = {
       id: `e-${randomUUID()}`,
       source: info.benchmarkId,
       target: doc.meta.planId,
       kind: 'has-plan'
-    })
+    }
+    edges.edges.push(benchPlanEdge)
     saveEdges(edges)
+    setTimeout(() => {
+      mainWindow?.webContents.send('canvas:task-link', benchPlanEdge)
+    }, 500)
 
     // Mark benchmark as done
     await saveBenchmark(info.benchmarkId, {
@@ -2712,12 +2987,21 @@ function buildPlanHandoffMarkdown(
 ): string {
   const accepted = rows.filter((r) => r.accepted)
   const ratio = rows.length === 0 ? 0 : accepted.length / rows.length
+  const target = effectiveScoreTarget(meta)
+  const goalMet = goalReached(meta, state.bestScore)
   const lines: string[] = []
   lines.push(`# Benchmark winning plan — ${meta.label}`)
   lines.push('')
+  lines.push(`## Goal`)
+  lines.push(meta.acceptanceCriteria || '(no human-readable acceptance criterion recorded)')
+  lines.push('')
+  lines.push(`- baseline: ${meta.baselineScore}`)
+  lines.push(`- target: ${target ?? 'n/a'}${meta.improvementPct !== undefined ? ` (baseline ${meta.higherIsBetter === false ? '−' : '+'}${meta.improvementPct}%)` : ''}`)
+  lines.push(`- direction: ${meta.higherIsBetter === false ? 'lower is better' : 'higher is better'}`)
+  lines.push('')
   lines.push(`## Summary`)
   lines.push(`- iterations: ${state.iterationN}`)
-  lines.push(`- best_score: ${state.bestScore ?? 'n/a'}`)
+  lines.push(`- best_score: ${state.bestScore ?? 'n/a'}  ${goalMet ? '✅ goal reached' : '⚠ goal NOT reached'}`)
   lines.push(`- stop_reason: ${state.stopReason ?? 'n/a'}`)
   lines.push(`- acceptance_rate: ${(ratio * 100).toFixed(1)}% (${accepted.length}/${rows.length})`)
   lines.push(`- noise_class: ${meta.noiseClass}`)
@@ -2725,7 +3009,7 @@ function buildPlanHandoffMarkdown(
   lines.push(`- held_out_divergence: ${state.heldOutDivergence ? 'yes' : 'no'}`)
   lines.push('')
   lines.push(`## Acceptance criteria`)
-  lines.push(`- [x] Best score ${state.bestScore ?? 'n/a'} satisfies the recorded run`)
+  lines.push(`- [${goalMet ? 'x' : ' '}] bestScore (${state.bestScore ?? 'n/a'}) ${meta.higherIsBetter === false ? '≤' : '≥'} target (${target ?? 'n/a'})`)
   lines.push(`- [ ] Reviewer has inspected the winning diff on disk`)
   lines.push(`- [ ] Reward-hack audit findings (see .benchmark-tile/audit_findings.md) are addressed`)
   lines.push('')
@@ -2768,7 +3052,9 @@ canvasApi.on(
 
 canvasApi.on(
   'benchmark-delete',
-  (info: { benchmarkId: string }, reply: (result: unknown) => void) => {
+  async (info: { benchmarkId: string }, reply: (result: unknown) => void) => {
+    const b = loadBenchmark(info.benchmarkId)
+    if (b) await removeBenchmarkWorktree(b.meta)
     deleteBenchmark(info.benchmarkId)
     stopWatchingBenchmarkResults(info.benchmarkId)
     mainWindow?.webContents.send('canvas:benchmark-delete', { benchmarkId: info.benchmarkId })
