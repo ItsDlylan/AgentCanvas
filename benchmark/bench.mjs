@@ -79,7 +79,17 @@ if (typeof markdownToTiptap !== 'function') {
 
 const corpus = readFileSync(corpusPath, 'utf-8')
 
+// Generate a FRESH input on every call. Per-call unique suffix means any
+// input-keyed cache has 0% hit rate — matches real usage (users never parse
+// the same note twice in a tight loop). The suffix is tiny vs the base corpus
+// so measured cost is dominated by parsing the base, not the suffix itself.
+function makeInput(i) {
+  return corpus + `\n\n## variant ${i}\n\nUnique perturbation token ${i}-${(i * 0x9e3779b1) >>> 0}.\n`
+}
+
 // --- Correctness check ------------------------------------------------------
+// We hash ONLY the base corpus's output (not the perturbed pool) so the golden
+// snapshot stays stable across bench edits. The pool is purely for throughput.
 let result
 try {
   result = markdownToTiptap(corpus)
@@ -116,32 +126,35 @@ if (golden.hash !== actualHash) {
 }
 
 // --- Throughput measurement -------------------------------------------------
-// Warmup: run 0.5s so JIT tiers settle.
+// Warmup: 0.5s with per-call unique inputs so JIT sees varied token streams.
 const warmupDeadline = performance.now() + 500
 let _warmupSink = 0
+let warmupI = 0
 while (performance.now() < warmupDeadline) {
-  const r = markdownToTiptap(corpus)
+  const r = markdownToTiptap(makeInput(warmupI++))
   _warmupSink += r.content?.length ?? 0
 }
 if (_warmupSink < 0) throw new Error('unreachable')
 
-// Measure: run until 2s of wall-clock elapsed; report mean ns/char.
+// Measure: 2s wall-clock with fresh input each call — no cache can hit.
 const corpusBytes = Buffer.byteLength(corpus, 'utf-8')
 const measureDeadline = performance.now() + 2000
 let iters = 0
+let totalChars = 0
 const start = performance.now()
 while (performance.now() < measureDeadline) {
-  markdownToTiptap(corpus)
+  const inp = makeInput(warmupI + iters) // offset so we don't reuse warmup keys
+  totalChars += inp.length
+  markdownToTiptap(inp)
   iters++
 }
 const elapsedMs = performance.now() - start
 
-const totalChars = iters * corpus.length
 const nsPerChar = (elapsedMs * 1_000_000) / totalChars
 const msPerCall = elapsedMs / iters
 const charsPerSec = (totalChars / (elapsedMs / 1000)) | 0
 
-console.log(`iters=${iters} elapsed=${elapsedMs.toFixed(1)}ms corpus=${corpus.length}ch (${corpusBytes}B)`)
+console.log(`iters=${iters} elapsed=${elapsedMs.toFixed(1)}ms corpus=${corpus.length}ch (${corpusBytes}B) fresh-per-call`)
 console.log(`mean ${msPerCall.toFixed(3)}ms/call  ${charsPerSec.toLocaleString()} ch/s`)
 console.log(`SCORE=${nsPerChar.toFixed(2)}`)
 
