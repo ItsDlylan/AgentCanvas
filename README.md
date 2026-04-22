@@ -328,6 +328,18 @@ Plus custom environment variables configured in Settings > Terminal.
 
 ## Changelog
 
+### 2026-04-21
+
+- **feat:** Task Tile — first-class "thing to do" containers with a required classification (`QUICK`, `NEEDS_RESEARCH`, `DEEP_FOCUS`, `BENCHMARK`), optional timeline pressure (`urgent`/`this-week`/`this-month`/`whenever`), and state derived automatically from linked artifacts (`raw` → `researched` → `planned` → `executing` → `review` → `done`). Ships with a full `/api/task/*` CRUD API, ⌘K palette tokens (`!class:`, `!state:`, `!when:`), a Task Lens sidebar (`Cmd+Shift+T`) with 4 built-in views, note-to-task conversion, bulk classify, and `depends-on` subtasks
+- **feat:** Plan Tile — structured, versioned, independently-critiqued, executable plans captured from Claude Code's `ExitPlanMode`. Plans are first-class canvas artifacts with a state machine (`draft` → `under_critique` → `verified`/`needs_revision` → `approved` → `executing` → `done`). A fresh-context verifier agent spawns to critique the plan in isolation; an approved plan is handed to an executor agent as a contract with live per-step progress, deviation halts, resume-after-crash, and auto-`done` on linked PR merge
+- **feat:** In-app updater — polls GitHub Releases on launch and every 4 hours, surfaces an "Update available" banner with a changelog modal and download progress, verifies downloads against `latest-mac.yml` SHA512, and reveals the DMG in Finder for drag-install. New Settings → Updates section with version display, "Check now", and toggles for launch/periodic checks; adds `npm run release` for one-command electron-builder publishing
+- **feat:** User-saveable Task Lens views — save any combination of classification/state/timeline filters as a named custom lens alongside the 4 built-in views
+- **feat:** TipTap-powered task acceptance criteria — rich checklist editing inside the task tile instead of plain markdown
+- **feat:** In-app React reclassify modal — replaces the native system dialog when changing a task's classification
+- **feat:** Soft-block warning for unresolved task dependencies — a task with `depends-on` edges pointing at non-`done` work now surfaces a visible block indicator instead of silently executing
+- **fix:** Stabilize Claude Code prompt-cache TTL detection on busy TTYs — the JSONL tailer now reliably picks up `cache_creation.ephemeral_*` tokens even while the log file is churning
+- **fix:** Task IPC save now emits `task-close` and `task-update` events so the canvas updates in real time instead of waiting for a manual refresh
+
 ### 2026-04-19
 
 - **feat:** ⌘K tile palette — fuzzy-jump to any tile by label and search through terminal scrollback in a single command bar; pick a result to focus the tile and jump to the match
