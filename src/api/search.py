@@ -37,8 +37,10 @@ def score(query: str, doc: str) -> float:
             tf_sum += (k1 + 1.0) * count / (k1 + count)
     if matched == 0:
         return 0.0
+    # Super-linear coverage: partial-match docs lose more ground to
+    # all-terms-match docs, which dominate relevance judgments.
     coverage = matched / len(q_unique)
-    return tf_sum * length_norm * coverage
+    return tf_sum * length_norm * coverage * coverage
 
 
 def search(query: str, docs: Iterable[str], k: int | None = None) -> list[tuple[int, float]]:
