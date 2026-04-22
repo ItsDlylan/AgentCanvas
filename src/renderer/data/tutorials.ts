@@ -51,8 +51,10 @@ export const TUTORIALS: Tutorial[] = [
       'A quick tour of the infinite canvas, tiles, and the workflow AgentCanvas is built around.',
     media: {
       type: 'video',
-      src: '/tutorials/welcome.mp4',
-      posterSrc: '/tutorials/welcome.jpg',
+      // Query param busts Electron/Chromium's aggressive mp4 URL cache —
+      // bump when re-rendering welcome.mp4.
+      src: '/tutorials/welcome.mp4?v=5',
+      posterSrc: '/tutorials/welcome.jpg?v=5',
       durationSec: 22
     },
     tags: ['intro', 'tour', 'onboarding'],
