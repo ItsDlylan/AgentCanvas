@@ -979,6 +979,15 @@ ipcMain.handle(
 )
 
 ipcMain.handle(
+  'benchmark:convert-from-task',
+  async (_event, input: Record<string, unknown>) => {
+    return new Promise((resolve) => {
+      canvasApi.emit('benchmark-convert-from-task', input, resolve)
+    })
+  }
+)
+
+ipcMain.handle(
   'benchmark:launch-runner',
   async (_event, { benchmarkId }: { benchmarkId: string }) => {
     const b = loadBenchmark(benchmarkId)

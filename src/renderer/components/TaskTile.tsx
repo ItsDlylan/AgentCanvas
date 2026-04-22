@@ -13,6 +13,7 @@ import { TileContextMenu, type TileContextMenuItem } from './TileContextMenu'
 import { DependencyWarningModal } from './DependencyWarningModal'
 import { ReclassifyConfirmModal } from './ReclassifyConfirmModal'
 import { TaskTileAcceptanceEditor } from './TaskTileAcceptanceEditor'
+import { HarnessBenchmarkModal } from './HarnessBenchmarkModal'
 import {
   unsatisfiedDependencies,
   type UnsatisfiedDep
@@ -76,6 +77,7 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
   } | null>(null)
   const tier = useSemanticZoom()
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [harnessOpen, setHarnessOpen] = useState(false)
 
   const reloadDerivedState = useCallback(async () => {
     const d = await window.task.deriveState(taskId)
@@ -309,6 +311,12 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
         disabled: meta.timelinePressure === t
       })
     }
+    if (meta.classification === 'BENCHMARK') {
+      items.push({
+        label: 'Harness as Benchmark…',
+        onClick: () => setHarnessOpen(true)
+      })
+    }
     items.push({ label: '', separator: true, onClick: () => undefined })
     if (meta.manualReviewDone) {
       items.push({ label: 'Unmark reviewed', onClick: unmarkReviewed })
@@ -477,6 +485,11 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
               ▸ Spawn Terminal
             </ActionButton>
           )}
+          {meta.classification === 'BENCHMARK' && (
+            <ActionButton accent="#3b82f6" onClick={() => setHarnessOpen(true)}>
+              ▸ Harness as Benchmark
+            </ActionButton>
+          )}
           {(meta.classification === 'DEEP_FOCUS' || meta.classification === 'NEEDS_RESEARCH') && (
             <ActionButton accent={accent} onClick={spawnLinkedPlan}>
               ▸ Spawn Plan
@@ -530,6 +543,19 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
           unsatisfied={depWarning.unsatisfied}
           onProceed={depWarning.proceed}
           onCancel={() => setDepWarning(null)}
+        />
+      )}
+      {harnessOpen && meta && (
+        <HarnessBenchmarkModal
+          taskId={taskId}
+          taskLabel={meta.label}
+          inheritedAcceptance={acceptanceMarkdown}
+          onClose={() => setHarnessOpen(false)}
+          onCreated={() => {
+            // onCreated: the benchmark tile auto-appears via canvas:benchmark-open.
+            // No further work from this tile; an executing-in edge is drawn.
+            reloadDerivedState()
+          }}
         />
       )}
       {reclassifyProposal && (

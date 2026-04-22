@@ -587,6 +587,23 @@ export interface BenchmarkAPI {
   launchRunner: (
     benchmarkId: string
   ) => Promise<{ ok: boolean; terminalId?: string; command?: string; error?: string }>
+  convertFromTask: (input: {
+    taskId: string
+    sourceRepoPath?: string
+    worktreePath?: string
+    autoWorktree?: boolean
+    evaluatorPath?: string
+    targetFiles?: string[]
+    noiseClass?: NoiseClass
+    stopConditions?: BenchmarkStopConditions
+    heldOutMetric?: HeldOutMetric
+    position?: { x: number; y: number }
+    acceptanceCriteria?: string
+    baselineScore?: number
+    improvementPct?: number
+    scoreTarget?: number
+    higherIsBetter?: boolean
+  }) => Promise<{ ok: boolean; benchmarkId?: string; meta?: BenchmarkMeta; error?: string }>
   onBenchmarkOpen: (cb: (info: { benchmarkId: string; meta: BenchmarkMeta }) => void) => () => void
   onBenchmarkUpdate: (cb: (info: { benchmarkId: string }) => void) => () => void
   onBenchmarkStateChange: (cb: (info: { benchmarkId: string }) => void) => () => void
@@ -607,6 +624,7 @@ const benchmarkAPI: BenchmarkAPI = {
     ipcRenderer.invoke('benchmark:handoff-plan', { benchmarkId, stopReason }),
   launchRunner: (benchmarkId) =>
     ipcRenderer.invoke('benchmark:launch-runner', { benchmarkId }),
+  convertFromTask: (input) => ipcRenderer.invoke('benchmark:convert-from-task', input),
   onBenchmarkOpen: (callback) => {
     const handler = (
       _e: Electron.IpcRendererEvent,
