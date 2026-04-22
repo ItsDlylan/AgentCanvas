@@ -110,6 +110,7 @@ export type HotkeyAction =
   | 'zoomToFocused'
   | 'toggleFlow'
   | 'exitFlowReplay'
+  | 'openTutorials'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -147,6 +148,11 @@ export interface UpdateSettings {
   checkIntervalHours: number
 }
 
+export interface TutorialsSettings {
+  seenIds: string[]
+  seenWelcomeAt: string | null
+}
+
 export interface Settings {
   general: GeneralSettings
   appearance: AppearanceSettings
@@ -160,6 +166,7 @@ export interface Settings {
   promptCache: PromptCacheSettings
   updates: UpdateSettings
   flowMute: FlowMuteSettings
+  tutorials: TutorialsSettings
 }
 
 // ── Defaults ─────────────────────────────────────────────
@@ -214,7 +221,8 @@ export const DEFAULT_SETTINGS: Settings = {
     toggleVoice: 'Mod+Shift+V',
     zoomToFocused: 'Mod+0',
     toggleFlow: 'Mod+F',
-    exitFlowReplay: 'Mod+Shift+F'
+    exitFlowReplay: 'Mod+Shift+F',
+    openTutorials: 'Mod+Shift+/'
   },
   templates: [
     {
@@ -294,6 +302,10 @@ export const DEFAULT_SETTINGS: Settings = {
     suppressNative: true,
     muteSounds: true,
     showRing: true
+  },
+  tutorials: {
+    seenIds: [],
+    seenWelcomeAt: null
   }
 }
 

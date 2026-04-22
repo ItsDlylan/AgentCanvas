@@ -31,7 +31,8 @@ const FALLBACK: Settings = {
     killFocused: 'Mod+D',
     openInIde: 'Mod+Shift+O',
     toggleVoice: 'Mod+Shift+V',
-    zoomToFocused: 'Mod+0'
+    zoomToFocused: 'Mod+0',
+    openTutorials: 'Mod+Shift+/'
   },
   templates: [],
   notifications: { enabled: true, soundEnabled: true, nativeWhenUnfocused: true },
@@ -73,6 +74,10 @@ const FALLBACK: Settings = {
     suppressNative: true,
     muteSounds: true,
     showRing: true
+  },
+  tutorials: {
+    seenIds: [],
+    seenWelcomeAt: null
   }
 }
 
