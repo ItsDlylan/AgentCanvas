@@ -10,6 +10,12 @@ export interface HarnessBenchmarkModalProps {
   taskLabel: string
   /** Prefilled acceptance text from the task's acceptanceCriteria (markdown). */
   inheritedAcceptance: string
+  /**
+   * If the task already has a harness-design worktree, pass its path here.
+   * The modal uses this worktree directly (autoWorktree:false) so a second
+   * nested worktree isn't created.
+   */
+  prefilledWorktreePath?: string
   onClose: () => void
   onCreated: (benchmarkId: string) => void
 }
@@ -18,10 +24,12 @@ export function HarnessBenchmarkModal({
   taskId,
   taskLabel,
   inheritedAcceptance,
+  prefilledWorktreePath,
   onClose,
   onCreated
 }: HarnessBenchmarkModalProps): JSX.Element {
-  const [sourceRepoPath, setSourceRepoPath] = useState('')
+  const [sourceRepoPath, setSourceRepoPath] = useState(prefilledWorktreePath ?? '')
+  const usePreharnessedWorktree = !!prefilledWorktreePath
   const [evaluatorPath, setEvaluatorPath] = useState('benchmark/evaluator.sh')
   const [targetFilesCsv, setTargetFilesCsv] = useState('')
   const [noiseClass, setNoiseClass] = useState<'low' | 'medium' | 'high'>('medium')
@@ -85,19 +93,37 @@ export function HarnessBenchmarkModal({
 
     setBusy(true)
     try {
-      const res = await window.benchmark.convertFromTask({
-        taskId,
-        sourceRepoPath: sourceRepoPath.trim(),
-        evaluatorPath: evaluatorPath.trim(),
-        targetFiles,
-        noiseClass,
-        higherIsBetter,
-        acceptanceCriteria: acceptance.trim(),
-        baselineScore: baselineNum,
-        improvementPct: targetMode === 'pct' ? Number(improvementPct) : undefined,
-        scoreTarget: targetMode === 'absolute' ? Number(scoreTarget) : undefined,
-        stopConditions
-      })
+      // When the task already has a harness-design worktree, target THAT
+      // directly (autoWorktree:false) so we don't nest a second worktree.
+      const payload = usePreharnessedWorktree
+        ? {
+            taskId,
+            worktreePath: sourceRepoPath.trim(),
+            autoWorktree: false,
+            evaluatorPath: evaluatorPath.trim(),
+            targetFiles,
+            noiseClass,
+            higherIsBetter,
+            acceptanceCriteria: acceptance.trim(),
+            baselineScore: baselineNum,
+            improvementPct: targetMode === 'pct' ? Number(improvementPct) : undefined,
+            scoreTarget: targetMode === 'absolute' ? Number(scoreTarget) : undefined,
+            stopConditions
+          }
+        : {
+            taskId,
+            sourceRepoPath: sourceRepoPath.trim(),
+            evaluatorPath: evaluatorPath.trim(),
+            targetFiles,
+            noiseClass,
+            higherIsBetter,
+            acceptanceCriteria: acceptance.trim(),
+            baselineScore: baselineNum,
+            improvementPct: targetMode === 'pct' ? Number(improvementPct) : undefined,
+            scoreTarget: targetMode === 'absolute' ? Number(scoreTarget) : undefined,
+            stopConditions
+          }
+      const res = await window.benchmark.convertFromTask(payload)
       if (!res.ok) {
         setError(res.error || 'Conversion failed (unknown reason).')
         setBusy(false)
@@ -153,15 +179,25 @@ export function HarnessBenchmarkModal({
         </header>
 
         <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14, overflowY: 'auto', maxHeight: '65vh' }}>
-          <Field label="Source repo path" hint="The folder containing .git. A worktree will be auto-created next to it at ../<repo>-worktrees/bench-<id>.">
+          <Field
+            label={usePreharnessedWorktree ? 'Harness worktree (from Design Harness)' : 'Source repo path'}
+            hint={
+              usePreharnessedWorktree
+                ? 'Reusing the worktree the harness-design agent wrote into. No second worktree will be created.'
+                : 'The folder containing .git. A worktree will be auto-created next to it at ../<repo>-worktrees/bench-<id>.'
+            }
+          >
             <div style={{ display: 'flex', gap: 6 }}>
               <input
                 style={inputStyle}
                 value={sourceRepoPath}
                 onChange={(e) => setSourceRepoPath(e.target.value)}
                 placeholder="/Users/you/dev/my-repo"
+                disabled={usePreharnessedWorktree}
               />
-              <button style={buttonStyle('#3b82f6')} onClick={pickFolder} type="button">Pick…</button>
+              {!usePreharnessedWorktree && (
+                <button style={buttonStyle('#3b82f6')} onClick={pickFolder} type="button">Pick…</button>
+              )}
             </div>
           </Field>
 

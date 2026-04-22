@@ -88,6 +88,7 @@ import {
 } from './benchmark-store'
 import { compareScores, heldOutDiverged, acceptedScoresFromRows } from './benchmark-compare'
 import { distillBrief, sanitizeForBrief } from './benchmark-brief'
+import { buildHarnessDesignPrompt } from './benchmark-harness-prompt'
 import { readFileSync as fsReadFileSync, writeFileSync as fsWriteFileSync, mkdirSync as fsMkdirSync, watch as fsWatch, type FSWatcher } from 'fs'
 import { loadPomodoro, savePomodoro } from './pomodoro-store'
 import {
@@ -984,6 +985,107 @@ ipcMain.handle(
     return new Promise((resolve) => {
       canvasApi.emit('benchmark-convert-from-task', input, resolve)
     })
+  }
+)
+
+ipcMain.handle(
+  'benchmark:design-harness',
+  async (
+    _event,
+    input: {
+      taskId: string
+      sourceRepoPath: string
+      targetFiles?: string[]
+      acceptanceCriteria: string
+      noiseClass?: 'low' | 'medium' | 'high'
+      higherIsBetter?: boolean
+    }
+  ) => {
+    const task = loadTask(input.taskId)
+    if (!task) return { ok: false, error: 'Task not found' }
+    if (task.meta.classification !== 'BENCHMARK') {
+      return { ok: false, error: 'Only BENCHMARK-classified tasks can have a harness designed' }
+    }
+    if (!input.sourceRepoPath) return { ok: false, error: 'sourceRepoPath is required' }
+    if (!input.acceptanceCriteria || !input.acceptanceCriteria.trim()) {
+      return { ok: false, error: 'acceptanceCriteria is required' }
+    }
+
+    // Auto-create an isolated worktree. Reuse the same helper as the real run
+    // so layout is consistent; the branch name prefix makes intent visible in git.
+    let worktreePath: string
+    let branchName: string
+    try {
+      const created = await createBenchmarkWorktree({
+        sourceRepoPath: input.sourceRepoPath,
+        benchmarkId: input.taskId, // reuse task id for stable branch slug
+        label: `harness-${task.meta.label}`
+      })
+      worktreePath = created.worktreePath
+      branchName = created.branchName
+    } catch (err) {
+      return { ok: false, error: `worktree creation failed: ${(err as Error).message}` }
+    }
+
+    // Persist the worktree on the task so the Harness modal can auto-pick it.
+    await saveTask(input.taskId, {
+      harnessWorktreePath: worktreePath,
+      harnessBranch: branchName
+    })
+
+    // Build the harness-design prompt and stuff it into the terminal's stdin via
+    // a heredoc-style command. Using /tmp avoids quoting pain.
+    const prompt = buildHarnessDesignPrompt({
+      taskLabel: task.meta.label,
+      acceptanceCriteria: input.acceptanceCriteria,
+      targetFiles: input.targetFiles ?? [],
+      noiseClass: input.noiseClass ?? 'medium',
+      higherIsBetter: input.higherIsBetter ?? true
+    })
+    const promptFile = join(app.getPath('userData'), 'agentcanvas', `harness-prompt-${input.taskId}.md`)
+    try {
+      fsMkdirSync(dirname(promptFile), { recursive: true })
+      fsWriteFileSync(promptFile, prompt)
+    } catch (err) {
+      return { ok: false, error: `writing prompt failed: ${(err as Error).message}` }
+    }
+    const command = `cat ${quoteShell(promptFile)} | claude -p --model claude-opus-4-7\n`
+
+    const terminalId = randomUUID()
+    mainWindow?.webContents.send('canvas:terminal-spawn', {
+      terminalId,
+      label: `Harness design: ${task.meta.label}`,
+      cwd: worktreePath,
+      command,
+      linkedTerminalId: undefined,
+      width: 720,
+      height: 420,
+      metadata: { taskId: input.taskId, role: 'harness-design' }
+    })
+
+    // Edge: task → harness-design terminal (executing-in), deferred so ReactFlow
+    // measures the spawned terminal before the edge resolves.
+    const edges = loadEdges()
+    const taskTermEdge: PersistedEdge = {
+      id: `e-${randomUUID()}`,
+      source: input.taskId,
+      target: terminalId,
+      kind: 'executing-in'
+    }
+    edges.edges.push(taskTermEdge)
+    saveEdges(edges)
+    setTimeout(() => {
+      mainWindow?.webContents.send('canvas:task-link', taskTermEdge)
+    }, 700)
+
+    mainWindow?.webContents.send('canvas:task-update', { taskId: input.taskId })
+    return {
+      ok: true,
+      terminalId,
+      worktreePath,
+      branchName,
+      promptFile
+    }
   }
 )
 

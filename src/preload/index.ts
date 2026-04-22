@@ -332,6 +332,8 @@ export interface TaskMeta {
   softDeletedAt?: number
   createdAt: number
   updatedAt: number
+  harnessWorktreePath?: string
+  harnessBranch?: string
 }
 
 export interface TaskFile {
@@ -587,6 +589,21 @@ export interface BenchmarkAPI {
   launchRunner: (
     benchmarkId: string
   ) => Promise<{ ok: boolean; terminalId?: string; command?: string; error?: string }>
+  designHarness: (input: {
+    taskId: string
+    sourceRepoPath: string
+    targetFiles?: string[]
+    acceptanceCriteria: string
+    noiseClass?: NoiseClass
+    higherIsBetter?: boolean
+  }) => Promise<{
+    ok: boolean
+    terminalId?: string
+    worktreePath?: string
+    branchName?: string
+    promptFile?: string
+    error?: string
+  }>
   convertFromTask: (input: {
     taskId: string
     sourceRepoPath?: string
@@ -624,6 +641,7 @@ const benchmarkAPI: BenchmarkAPI = {
     ipcRenderer.invoke('benchmark:handoff-plan', { benchmarkId, stopReason }),
   launchRunner: (benchmarkId) =>
     ipcRenderer.invoke('benchmark:launch-runner', { benchmarkId }),
+  designHarness: (input) => ipcRenderer.invoke('benchmark:design-harness', input),
   convertFromTask: (input) => ipcRenderer.invoke('benchmark:convert-from-task', input),
   onBenchmarkOpen: (callback) => {
     const handler = (
