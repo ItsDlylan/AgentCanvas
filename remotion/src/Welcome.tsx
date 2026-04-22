@@ -7,12 +7,12 @@ import { Outro } from './scenes/Outro'
 import { theme } from './theme'
 
 export const WELCOME_FPS = 30
-// 20 seconds — Ignition removed; Wordmark opens cold.
-export const WELCOME_DURATION_FRAMES = 20 * WELCOME_FPS // 600
+// ~21.67 seconds — Ignition removed; Wordmark opens cold.
+export const WELCOME_DURATION_FRAMES = 650
 
 const WORDMARK_FRAMES = 110 // 3.67s (cold-open zoom + scramble + 1s hang)
 const STARFIELD_FRAMES = 200 // 6.67s (hyperspace → orbit glide → enter Frontend)
-const CANVAS_FRAMES = 100 // 3.33s
+const CANVAS_FRAMES = 150 // 5.00s
 const WORKFLOWGLOBE_FRAMES = 130 // 4.33s (globe + tagline simultaneous)
 const OUTRO_FRAMES = 90 // 3s
 const OVERLAP = 10
