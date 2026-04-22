@@ -109,6 +109,7 @@ export type HotkeyAction =
   | 'toggleFlow'
   | 'exitFlowReplay'
   | 'openPalette'
+  | 'openTutorials'
 
 export type HotkeySettings = Record<HotkeyAction, string>
 
@@ -150,6 +151,11 @@ export interface UpdateSettings {
   checkIntervalHours: number
 }
 
+export interface TutorialsSettings {
+  seenIds: string[]
+  seenWelcomeAt: string | null
+}
+
 export interface Settings {
   general: GeneralSettings
   appearance: AppearanceSettings
@@ -163,4 +169,5 @@ export interface Settings {
   promptCache: PromptCacheSettings
   updates: UpdateSettings
   flowMute: FlowMuteSettings
+  tutorials: TutorialsSettings
 }

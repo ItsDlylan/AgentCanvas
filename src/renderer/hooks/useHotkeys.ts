@@ -123,7 +123,8 @@ export const DEFAULT_HOTKEYS: HotkeySettings = {
   zoomToFocused: 'Mod+0',
   toggleFlow: 'Mod+F',
   exitFlowReplay: 'Mod+Shift+F',
-  openPalette: 'Mod+K'
+  openPalette: 'Mod+K',
+  openTutorials: 'Mod+Shift+/'
 }
 
 // ── Hook ────────────────────────────────────────────────
