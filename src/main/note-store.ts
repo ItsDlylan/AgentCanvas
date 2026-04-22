@@ -78,6 +78,40 @@ export async function saveNote(
     }
 
     const now = Date.now()
+    // Guard: refuse to clobber non-empty stored content with an empty TipTap
+    // doc. TipTap emits this shape during HMR / load races, and there is no
+    // legitimate reason to overwrite real content with an empty doc through
+    // the save path (clearing a note happens via delete, not an empty save).
+    const incomingIsEmpty =
+      content !== undefined &&
+      content !== null &&
+      typeof content === 'object' &&
+      (Object.keys(content).length === 0 ||
+        ((content as { type?: unknown }).type === 'doc' &&
+          Array.isArray((content as { content?: unknown[] }).content) &&
+          ((content as { content: unknown[] }).content as unknown[]).length === 0))
+    const existingContent = existing?.content
+    const existingIsNonEmpty =
+      existingContent &&
+      typeof existingContent === 'object' &&
+      Object.keys(existingContent).length > 0 &&
+      !(
+        (existingContent as { type?: unknown }).type === 'doc' &&
+        Array.isArray((existingContent as { content?: unknown[] }).content) &&
+        ((existingContent as { content: unknown[] }).content as unknown[]).length === 0
+      )
+    const safeContent =
+      content === undefined
+        ? existingContent ?? {}
+        : incomingIsEmpty && existingIsNonEmpty
+          ? existingContent!
+          : content
+    if (content !== undefined && incomingIsEmpty && existingIsNonEmpty) {
+      console.warn(
+        `[note-store] refused to overwrite non-empty note ${noteId} with empty content — likely an HMR / load race`
+      )
+    }
+
     const file: NoteFile = {
       meta: {
         noteId,
@@ -93,7 +127,7 @@ export async function saveNote(
         createdAt: existing?.meta?.createdAt ?? now,
         updatedAt: now
       },
-      content: content ?? existing?.content ?? {}
+      content: safeContent
     }
 
     await fsp.writeFile(filePath, JSON.stringify(file, null, 2))
