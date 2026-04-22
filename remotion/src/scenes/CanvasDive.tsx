@@ -1,6 +1,7 @@
 import { AbsoluteFill, interpolate, useVideoConfig } from 'remotion'
 import { fontStack, monoStack, theme } from '../theme'
 import { easeInOut, easeOutExpo, seeded } from '../math'
+import { MatrixRain } from './MatrixRain'
 
 interface CanvasDiveProps {
   localFrame: number
@@ -52,8 +53,8 @@ export const CanvasDive: React.FC<CanvasDiveProps> = ({ localFrame, durationInFr
   const fastness = Math.max(0, 1 - Math.abs(localFrame - 16) / 16)
   const motionBlur = fastness * 5
 
-  // Dot grid fades in as camera reaches wide-view
-  const dotReveal = interpolate(localFrame, [22, 45], [0, 1], {
+  // Matrix rain fades in as the camera reaches wide-view (replaces dot grid)
+  const matrixReveal = interpolate(localFrame, [22, 55], [0, 1], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   })
@@ -68,6 +69,16 @@ export const CanvasDive: React.FC<CanvasDiveProps> = ({ localFrame, durationInFr
 
   return (
     <AbsoluteFill style={{ background: theme.bg, opacity: sceneAlpha }}>
+      {/* Matrix rain backdrop — screen-space, sits behind the camera-
+          transformed world so it reads as environment, not world content. */}
+      <MatrixRain
+        width={1280}
+        height={720}
+        localFrame={localFrame}
+        fps={fps}
+        opacity={matrixReveal * 0.9}
+      />
+
       {/* Camera container — we build the world at 2560x1440 and scale/pan it. */}
       <div
         style={{
@@ -81,8 +92,6 @@ export const CanvasDive: React.FC<CanvasDiveProps> = ({ localFrame, durationInFr
           filter: `blur(${motionBlur}px)`
         }}
       >
-        {/* Infinite-canvas dot grid */}
-        <DotGrid alpha={dotReveal} />
 
         {/* Tiles — positioned relative to the 2560×1440 world */}
         <Tile
@@ -147,39 +156,6 @@ export const CanvasDive: React.FC<CanvasDiveProps> = ({ localFrame, durationInFr
       {/* Caption (appears briefly mid-scene) */}
       <Caption localFrame={localFrame} durationInFrames={durationInFrames} />
     </AbsoluteFill>
-  )
-}
-
-// ── Dot grid — waves in ──
-const DotGrid: React.FC<{ alpha: number }> = ({ alpha }) => {
-  if (alpha <= 0) return null
-  const cols = 40
-  const rows = 24
-  const spacing = 64
-  const offsetX = (2560 - cols * spacing) / 2
-  const offsetY = (1440 - rows * spacing) / 2
-  const dots: React.ReactNode[] = []
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      dots.push(
-        <circle
-          key={`${x}-${y}`}
-          cx={offsetX + x * spacing}
-          cy={offsetY + y * spacing}
-          r={1.6}
-          fill="#27272a"
-        />
-      )
-    }
-  }
-  return (
-    <svg
-      width={2560}
-      height={1440}
-      style={{ position: 'absolute', inset: 0, opacity: alpha }}
-    >
-      {dots}
-    </svg>
   )
 }
 
