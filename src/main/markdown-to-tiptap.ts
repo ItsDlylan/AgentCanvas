@@ -8,82 +8,93 @@
 
 import { marked, type Token, type Tokens } from 'marked'
 
+interface TipTapMark {
+  type: string
+  attrs?: Record<string, unknown>
+}
+
 interface TipTapNode {
   type: string
   content?: TipTapNode[]
   text?: string
   attrs?: Record<string, unknown>
-  marks?: { type: string; attrs?: Record<string, unknown> }[]
+  marks?: TipTapMark[]
 }
+
+// Hoisted mark singletons — these are immutable by contract, so every text
+// node with the same mark set can share the same object references.
+const BOLD: TipTapMark = { type: 'bold' }
+const ITALIC: TipTapMark = { type: 'italic' }
+const STRIKE: TipTapMark = { type: 'strike' }
+const CODE: TipTapMark = { type: 'code' }
 
 // ── Inline token → TipTap text nodes ──
 
 function buildInline(tokens: Token[] | undefined): TipTapNode[] {
   if (!tokens || tokens.length === 0) return []
   const out: TipTapNode[] = []
+  const marks: TipTapMark[] = []
 
-  const pushText = (text: string, marks?: TipTapNode['marks']) => {
+  const pushText = (text: string) => {
     if (!text) return
-    out.push(marks && marks.length ? { type: 'text', text, marks } : { type: 'text', text })
+    out.push(marks.length ? { type: 'text', text, marks: marks.slice() } : { type: 'text', text })
   }
 
-  const walk = (toks: Token[], marks: NonNullable<TipTapNode['marks']>) => {
+  const walk = (toks: Token[]) => {
     for (const tok of toks) {
       switch (tok.type) {
         case 'text': {
           const t = tok as Tokens.Text
-          if (t.tokens && t.tokens.length) walk(t.tokens, marks)
-          else pushText(t.text, marks)
+          if (t.tokens && t.tokens.length) walk(t.tokens)
+          else pushText(t.text)
           break
         }
         case 'strong': {
-          const t = tok as Tokens.Strong
-          walk(t.tokens, [...marks, { type: 'bold' }])
+          marks.push(BOLD)
+          walk((tok as Tokens.Strong).tokens)
+          marks.pop()
           break
         }
         case 'em': {
-          const t = tok as Tokens.Em
-          walk(t.tokens, [...marks, { type: 'italic' }])
+          marks.push(ITALIC)
+          walk((tok as Tokens.Em).tokens)
+          marks.pop()
           break
         }
         case 'del': {
-          const t = tok as Tokens.Del
-          walk(t.tokens, [...marks, { type: 'strike' }])
+          marks.push(STRIKE)
+          walk((tok as Tokens.Del).tokens)
+          marks.pop()
           break
         }
         case 'codespan': {
-          const t = tok as Tokens.Codespan
-          pushText(t.text, [...marks, { type: 'code' }])
+          marks.push(CODE)
+          pushText((tok as Tokens.Codespan).text)
+          marks.pop()
           break
         }
         case 'br':
           out.push({ type: 'hardBreak' })
           break
-        case 'link': {
-          const t = tok as Tokens.Link
-          walk(t.tokens, marks)
+        case 'link':
+          walk((tok as Tokens.Link).tokens)
           break
-        }
-        case 'escape': {
-          const t = tok as Tokens.Escape
-          pushText(t.text, marks)
+        case 'escape':
+          pushText((tok as Tokens.Escape).text)
           break
-        }
-        case 'html': {
-          const t = tok as Tokens.Tag
-          pushText(t.raw, marks)
+        case 'html':
+          pushText((tok as Tokens.Tag).raw)
           break
-        }
         default: {
           const anyTok = tok as { text?: string; tokens?: Token[] }
-          if (anyTok.tokens) walk(anyTok.tokens, marks)
-          else if (anyTok.text) pushText(anyTok.text, marks)
+          if (anyTok.tokens) walk(anyTok.tokens)
+          else if (anyTok.text) pushText(anyTok.text)
         }
       }
     }
   }
 
-  walk(tokens, [])
+  walk(tokens)
   return out
 }
 
@@ -116,7 +127,7 @@ function mapListItem(item: Tokens.ListItem, taskList: boolean): TipTapNode {
     }
     flushInline()
     const mapped = mapBlockToken(tok)
-    if (mapped) content.push(...(Array.isArray(mapped) ? mapped : [mapped]))
+    if (mapped) content.push(mapped)
   }
   flushInline()
 
@@ -134,7 +145,7 @@ function mapListItem(item: Tokens.ListItem, taskList: boolean): TipTapNode {
 
 // ── Block token → TipTap ──
 
-function mapBlockToken(tok: Token): TipTapNode | TipTapNode[] | null {
+function mapBlockToken(tok: Token): TipTapNode | null {
   switch (tok.type) {
     case 'heading': {
       const t = tok as Tokens.Heading
@@ -164,7 +175,7 @@ function mapBlockToken(tok: Token): TipTapNode | TipTapNode[] | null {
       const inner: TipTapNode[] = []
       for (const child of t.tokens ?? []) {
         const mapped = mapBlockToken(child)
-        if (mapped) inner.push(...(Array.isArray(mapped) ? mapped : [mapped]))
+        if (mapped) inner.push(mapped)
       }
       return { type: 'blockquote', content: inner.length ? inner : [{ type: 'paragraph' }] }
     }
@@ -228,7 +239,7 @@ export function markdownToTiptap(markdown: string): Record<string, unknown> {
     const content: TipTapNode[] = []
     for (const tok of tokens) {
       const mapped = mapBlockToken(tok)
-      if (mapped) content.push(...(Array.isArray(mapped) ? mapped : [mapped]))
+      if (mapped) content.push(mapped)
     }
     if (content.length === 0) content.push({ type: 'paragraph' })
     return { type: 'doc', content }
