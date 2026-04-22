@@ -34,10 +34,20 @@ function buildInline(tokens: Token[] | undefined): TipTapNode[] {
   if (!tokens || tokens.length === 0) return []
   const out: TipTapNode[] = []
   const marks: TipTapMark[] = []
+  // Cache the most recent slice() of `marks` so consecutive text nodes within
+  // the same mark scope share one frozen array. Invalidated whenever the
+  // mark stack changes (push/pop). Safe because the output JSON is read-only
+  // downstream — only the bench's JSON.stringify ever touches it.
+  let frozenMarks: TipTapMark[] | null = null
 
   const pushText = (text: string) => {
     if (!text) return
-    out.push(marks.length ? { type: 'text', text, marks: marks.slice() } : { type: 'text', text })
+    if (marks.length === 0) {
+      out.push({ type: 'text', text })
+      return
+    }
+    if (frozenMarks === null) frozenMarks = marks.slice()
+    out.push({ type: 'text', text, marks: frozenMarks })
   }
 
   const walk = (toks: Token[]) => {
@@ -50,27 +60,27 @@ function buildInline(tokens: Token[] | undefined): TipTapNode[] {
           break
         }
         case 'strong': {
-          marks.push(BOLD)
+          marks.push(BOLD); frozenMarks = null
           walk((tok as Tokens.Strong).tokens)
-          marks.pop()
+          marks.pop(); frozenMarks = null
           break
         }
         case 'em': {
-          marks.push(ITALIC)
+          marks.push(ITALIC); frozenMarks = null
           walk((tok as Tokens.Em).tokens)
-          marks.pop()
+          marks.pop(); frozenMarks = null
           break
         }
         case 'del': {
-          marks.push(STRIKE)
+          marks.push(STRIKE); frozenMarks = null
           walk((tok as Tokens.Del).tokens)
-          marks.pop()
+          marks.pop(); frozenMarks = null
           break
         }
         case 'codespan': {
-          marks.push(CODE)
+          marks.push(CODE); frozenMarks = null
           pushText((tok as Tokens.Codespan).text)
-          marks.pop()
+          marks.pop(); frozenMarks = null
           break
         }
         case 'br':
