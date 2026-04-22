@@ -462,6 +462,182 @@ const taskAPI: TaskAPI = {
 
 contextBridge.exposeInMainWorld('task', taskAPI)
 
+// ── Benchmark API ────────────────────────────────────────
+
+export type NoiseClass = 'low' | 'medium' | 'high'
+
+export type BenchmarkStatus =
+  | 'unstarted'
+  | 'running'
+  | 'paused'
+  | 'frozen'
+  | 'stopped'
+  | 'done'
+
+export type BenchmarkStopReason =
+  | 'target'
+  | 'stagnation'
+  | 'wallclock'
+  | 'user'
+  | 'frozen'
+  | 'heldout-divergence'
+
+export interface BenchmarkStopConditions {
+  scoreTarget?: number
+  stagnationN?: number
+  wallClockMs?: number
+}
+
+export interface HeldOutMetric {
+  evaluatorPath: string
+  baselineScore?: number
+  regressionThreshold: number
+}
+
+export interface BenchmarkMeta {
+  benchmarkId: string
+  label: string
+  workspaceId: string
+  worktreePath: string
+  evaluatorPath: string
+  targetFiles: string[]
+  programPath: string
+  noiseClass: NoiseClass
+  stopConditions: BenchmarkStopConditions
+  heldOutMetric?: HeldOutMetric
+  status: BenchmarkStatus
+  stopReason?: BenchmarkStopReason
+  linkedTaskId?: string
+  isSoftDeleted: boolean
+  softDeletedAt?: number
+  position: { x: number; y: number }
+  width: number
+  height: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface BenchmarkRuntimeState {
+  iterationN: number
+  tempCycleIdx: number
+  bestScore: number | null
+  stagnationCounter: number
+  frozen: boolean
+  frozenReason?: string
+  status: BenchmarkStatus
+  stopReason?: BenchmarkStopReason
+  startedAt: number | null
+  lastIterationAt: number | null
+  keptCount: number
+  revertedCount: number
+  heldOutBaseline?: number
+  heldOutLatest?: number
+  heldOutDivergence?: boolean
+  pendingHint?: string
+  scoreSamples: number[]
+  scoreStddev?: number
+}
+
+export interface BenchmarkResultsRow {
+  iter: number
+  tsMs: number
+  temp: number
+  score: number
+  delta: number | null
+  accepted: boolean
+  runtimeMs: number
+  heldOutScore: number | null
+  commitSha: string | null
+  rationale: string
+  rejectionReason: string
+}
+
+export interface BenchmarkFile {
+  meta: BenchmarkMeta
+  runtime: BenchmarkRuntimeState
+  rows: BenchmarkResultsRow[]
+  brief: string
+}
+
+export interface BenchmarkAPI {
+  load: (benchmarkId: string) => Promise<BenchmarkFile | null>
+  list: () => Promise<BenchmarkMeta[]>
+  update: (
+    input: Partial<BenchmarkMeta> & { benchmarkId: string }
+  ) => Promise<{ ok: boolean; error?: string }>
+  setHint: (benchmarkId: string, hint: string) => Promise<{ ok: boolean; error?: string }>
+  control: (
+    benchmarkId: string,
+    action: 'start' | 'pause' | 'resume' | 'stop' | 'unfreeze'
+  ) => Promise<{ ok: boolean; error?: string; state?: BenchmarkRuntimeState }>
+  close: (benchmarkId: string) => Promise<{ ok: boolean }>
+  delete: (benchmarkId: string) => Promise<{ ok: boolean }>
+  handoffPlan: (
+    benchmarkId: string,
+    stopReason?: BenchmarkStopReason
+  ) => Promise<{ ok: boolean; planId?: string; winningIter?: number; bestScore?: number | null; error?: string }>
+  onBenchmarkOpen: (cb: (info: { benchmarkId: string; meta: BenchmarkMeta }) => void) => () => void
+  onBenchmarkUpdate: (cb: (info: { benchmarkId: string }) => void) => () => void
+  onBenchmarkStateChange: (cb: (info: { benchmarkId: string }) => void) => () => void
+  onBenchmarkClose: (cb: (info: { benchmarkId: string }) => void) => () => void
+  onBenchmarkDelete: (cb: (info: { benchmarkId: string }) => void) => () => void
+}
+
+const benchmarkAPI: BenchmarkAPI = {
+  load: (benchmarkId) => ipcRenderer.invoke('benchmark:load', { benchmarkId }),
+  list: () => ipcRenderer.invoke('benchmark:list'),
+  update: (input) => ipcRenderer.invoke('benchmark:update', input),
+  setHint: (benchmarkId, hint) => ipcRenderer.invoke('benchmark:hint', { benchmarkId, hint }),
+  control: (benchmarkId, action) =>
+    ipcRenderer.invoke('benchmark:control', { benchmarkId, action }),
+  close: (benchmarkId) => ipcRenderer.invoke('benchmark:close', { benchmarkId }),
+  delete: (benchmarkId) => ipcRenderer.invoke('benchmark:delete', { benchmarkId }),
+  handoffPlan: (benchmarkId, stopReason) =>
+    ipcRenderer.invoke('benchmark:handoff-plan', { benchmarkId, stopReason }),
+  onBenchmarkOpen: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { benchmarkId: string; meta: BenchmarkMeta }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:benchmark-open', handler)
+    return () => ipcRenderer.removeListener('canvas:benchmark-open', handler)
+  },
+  onBenchmarkUpdate: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { benchmarkId: string }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:benchmark-update', handler)
+    return () => ipcRenderer.removeListener('canvas:benchmark-update', handler)
+  },
+  onBenchmarkStateChange: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { benchmarkId: string }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:benchmark-state-change', handler)
+    return () => ipcRenderer.removeListener('canvas:benchmark-state-change', handler)
+  },
+  onBenchmarkClose: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { benchmarkId: string }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:benchmark-close', handler)
+    return () => ipcRenderer.removeListener('canvas:benchmark-close', handler)
+  },
+  onBenchmarkDelete: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { benchmarkId: string }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:benchmark-delete', handler)
+    return () => ipcRenderer.removeListener('canvas:benchmark-delete', handler)
+  }
+}
+
+contextBridge.exposeInMainWorld('benchmark', benchmarkAPI)
+
 // ── Task Lens API ────────────────────────────────────────
 
 export interface TaskLensView {

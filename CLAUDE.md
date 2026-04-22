@@ -204,3 +204,109 @@ In the command palette, task tiles can be filtered inline:
 - `!when:urgent` / `!when:this-week` / `!when:this-month` / `!when:whenever`
 
 Tokens can be combined with workspace (`@workspace`) or plain text search. The Task Lens sidebar (`Cmd+Shift+T`) exposes 4 built-in views: Morning Quick Burst, This Week Deep Focus, Needs-Research Inbox, In Flight.
+
+### Benchmark tiles
+
+Benchmark Tiles (inspired by `karpathy/autoresearch`) are first-class tiles that iterate
+an agent over a numeric `score()` function until a stop condition fires. They are the
+"harnessed" form of a `BENCHMARK`-classified Task Tile — the lifecycle is:
+
+1. User creates a `BENCHMARK` task (or reclassifies one).
+2. Agent drafts `<worktree>/benchmark/evaluator.{py,sh,ts}`.
+3. A **separate audit agent** reviews the evaluator for reward-hack vectors and writes
+   findings to `.benchmark-tile/audit_findings.md`.
+4. Human reviews evaluator + audit findings, then calls `/api/benchmark/convert-from-task`.
+5. `scripts/benchmark-runner.mjs` drives the loop (manual launch in a terminal tile).
+6. On termination, `/api/benchmark/handoff-plan` produces a winning Plan Tile.
+
+On-disk layout:
+
+```
+<worktree>/
+  benchmark/
+    evaluator.{py,sh,ts}   # read-only during iterations (chmod 0444)
+    program.md             # agent skill (default template seeded on create)
+  .benchmark-tile/
+    results.tsv            # append-only per-iteration score log
+    brief.md               # distilled view — the ONLY history the agent sees
+    state.json             # iteration counter, temp cycle, best, frozen, hint
+    audit_findings.md      # evaluator adversarial audit (setup-time)
+```
+
+HTTP API (all POST unless noted; returns `{ ok, ... }`):
+
+```bash
+# Create directly (rare — usually convert from a BENCHMARK task)
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/open \
+  -H 'Content-Type: application/json' \
+  -d "{
+    \"label\": \"Reduce search latency\",
+    \"worktreePath\": \"$PWD\",
+    \"evaluatorPath\": \"benchmark/evaluator.sh\",
+    \"targetFiles\": [\"src/api/search.py\"],
+    \"noiseClass\": \"medium\",
+    \"stopConditions\": { \"wallClockMs\": 28800000, \"stagnationN\": 30 },
+    \"heldOutMetric\": { \"evaluatorPath\": \"benchmark/evaluator_heldout.sh\", \"regressionThreshold\": 0.05 }
+  }"
+# Returns: { ok: true, benchmarkId: "<uuid>", meta: {...} }
+
+# Harness an existing BENCHMARK task (task must already be BENCHMARK-classified)
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/convert-from-task \
+  -H 'Content-Type: application/json' \
+  -d '{"taskId":"<uuid>","worktreePath":"/abs/path","evaluatorPath":"benchmark/evaluator.sh","noiseClass":"low"}'
+
+# Read full state (meta + runtime + rows + brief)
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/read \
+  -H 'Content-Type: application/json' -d '{"benchmarkId":"<id>"}'
+
+# Append an iteration result (runner calls this; comparator decides accept/reject,
+# applies 3σ auto-freeze and held-out divergence detection, updates brief).
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/append-result \
+  -H 'Content-Type: application/json' \
+  -d '{"benchmarkId":"<id>","temp":0.3,"score":0.847,"runtimeMs":48200,"heldOutScore":0.81,"commitSha":"deadbeef","rationale":"memoize inner join"}'
+
+# Control state machine
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/control \
+  -H 'Content-Type: application/json' \
+  -d '{"benchmarkId":"<id>","action":"start"}'   # start | pause | resume | stop | unfreeze
+
+# Human interrupt — queued on next iteration's brief as `user_hint:`
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/hint \
+  -H 'Content-Type: application/json' \
+  -d '{"benchmarkId":"<id>","hint":"try memoizing the join before the filter"}'
+
+# Terminate and auto-produce a Plan Tile with the winning diff + audit
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/handoff-plan \
+  -H 'Content-Type: application/json' -d '{"benchmarkId":"<id>"}'
+
+# Soft-close / hard-delete / list
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/close -H 'Content-Type: application/json' -d '{"benchmarkId":"<id>"}'
+curl -s -X POST $AGENT_CANVAS_API/api/benchmark/delete -H 'Content-Type: application/json' -d '{"benchmarkId":"<id>"}'
+curl -s $AGENT_CANVAS_API/api/benchmarks
+```
+
+**Evaluator contract:** the evaluator prints a final line `SCORE=<number>` (or a bare number
+on its own final line). The runner reads stdout and forwards the number to `/append-result`.
+
+**Noise class & acceptance:**
+- `low` (deterministic, fixed dataset, single-pass — Karpathy canonical): strict `>`.
+- `medium` / `high`: delta must exceed observed stddev of accepted history. Callers may pass
+  `candidateReplicates`/`baselineReplicates` for best-of-3 paired median comparison.
+
+**Reward-hack defense (three layers, enabled by default):**
+1. `>3σ` auto-freeze: once ≥10 accepted iterations exist, any score jump exceeding 3× the
+   historical per-step stddev freezes the lineage and requires `/control action:unfreeze`.
+2. Evaluator is `chmod 0444` before each invocation; the agent cannot edit it.
+3. If `heldOutMetric` is configured, the tile flags red when primary improves but held-out
+   regresses by more than `regressionThreshold`.
+
+**Distilled brief:** the agent sees `brief.md` (bounded) instead of raw `results.tsv` +
+`git log`. This caps context growth and mitigates self-conditioning-on-errors.
+Rationales are stripped of injection-shaped tokens (`<system>`, `<|im_start|>`,
+`Ignore previous instructions`, etc.) before being embedded.
+
+**Running the loop:** after setup, a Claude instance inside a terminal tile runs
+`node scripts/benchmark-runner.mjs --benchmark-id <uuid>`. The runner is explicitly
+manual-launch — the UI won't auto-start it. Use `--dry-run=1` to have the runner write
+each iteration's prompt to `.benchmark-tile/last-prompt.md` and wait for you to make the
+edit + commit by hand.

@@ -24,6 +24,7 @@ import { BrowserTile } from './BrowserTile'
 import { NotesTile } from './NotesTile'
 import { PlanTile } from './PlanTile'
 import { TaskTile } from './TaskTile'
+import { BenchmarkTile } from './BenchmarkTile'
 import { DiffViewerTile } from './DiffViewerTile'
 import { DevToolsTile } from './DevToolsTile'
 import { DrawTile } from './draw/DrawTile'
@@ -70,6 +71,7 @@ const nodeTypes: NodeTypes = {
   notes: NotesTile as unknown as NodeTypes['notes'],
   plan: PlanTile as unknown as NodeTypes['plan'],
   task: TaskTile as unknown as NodeTypes['task'],
+  benchmark: BenchmarkTile as unknown as NodeTypes['benchmark'],
   diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer'],
   devTools: DevToolsTile as unknown as NodeTypes['devTools'],
   draw: DrawTile as unknown as NodeTypes['draw'],
@@ -82,6 +84,7 @@ const MINIMAP_NODE_COLORS: Record<string, string> = {
   notes:    '#f59e0b',
   plan:     '#14b8a6',
   task:     '#eab308',
+  benchmark:'#3b82f6',
   diffViewer: '#a855f7',
   devTools:   '#f97316',
   draw:       '#ec4899',
@@ -885,6 +888,83 @@ export default function Canvas() {
       })
     })
 
+    // ── Load persisted benchmark tiles ──
+    window.benchmark.list().then((benchmarks) => {
+      const benchNodes: Node[] = []
+      const wsEntries: Array<[string, string]> = []
+      for (const meta of benchmarks) {
+        if (meta.isSoftDeleted) continue
+        benchNodes.push({
+          id: meta.benchmarkId,
+          type: 'benchmark',
+          position: meta.position,
+          style: { width: meta.width, height: meta.height },
+          data: {
+            sessionId: meta.benchmarkId,
+            benchmarkId: meta.benchmarkId,
+            label: meta.label
+          }
+        })
+        wsEntries.push([meta.benchmarkId, meta.workspaceId])
+      }
+      setAllNodes((nds) => {
+        const existing = new Set(nds.map((n) => n.id))
+        const toAdd = benchNodes.filter((n) => !existing.has(n.id))
+        return toAdd.length > 0 ? [...nds, ...toAdd] : nds
+      })
+      if (wsEntries.length > 0) {
+        setTileWorkspaceMap((prev) => {
+          const next = new Map(prev)
+          for (const [sid, wsId] of wsEntries) next.set(sid, wsId)
+          return next
+        })
+      }
+    }).catch(() => { /* noop */ })
+
+    // ── Subscribe to benchmark events ──
+    const offBenchOpen = window.benchmark.onBenchmarkOpen(({ benchmarkId, meta }) => {
+      setAllNodes((nds) => {
+        if (nds.some((n) => n.id === benchmarkId)) return nds
+        return [
+          ...nds,
+          {
+            id: benchmarkId,
+            type: 'benchmark',
+            position: meta.position,
+            style: { width: meta.width, height: meta.height },
+            data: { sessionId: benchmarkId, benchmarkId, label: meta.label }
+          }
+        ]
+      })
+      setTileWorkspaceMap((prev) => {
+        const next = new Map(prev)
+        next.set(benchmarkId, meta.workspaceId)
+        return next
+      })
+    })
+    const offBenchClose = window.benchmark.onBenchmarkClose(({ benchmarkId }) => {
+      setAllNodes((nds) => nds.filter((n) => n.id !== benchmarkId))
+    })
+    const offBenchDelete = window.benchmark.onBenchmarkDelete(({ benchmarkId }) => {
+      setAllNodes((nds) => nds.filter((n) => n.id !== benchmarkId))
+    })
+    const offBenchUpdate = window.benchmark.onBenchmarkUpdate(({ benchmarkId }) => {
+      // Label may have changed; refresh data field.
+      window.benchmark.load(benchmarkId).then((file) => {
+        if (!file) return
+        setAllNodes((nds) =>
+          nds.map((n) =>
+            n.id === benchmarkId
+              ? {
+                  ...n,
+                  data: { ...(n.data as Record<string, unknown>), label: file.meta.label }
+                }
+              : n
+          )
+        )
+      })
+    })
+
     // ── Subscribe to plan events to add/update/remove tiles live ──
     const offOpen = window.plan.onOpen((info) => {
       const meta = info.meta
@@ -983,6 +1063,10 @@ export default function Canvas() {
       offTaskLink()
       offTaskUpdate()
       offTaskStateChange()
+      offBenchOpen()
+      offBenchClose()
+      offBenchDelete()
+      offBenchUpdate()
     }
   }, [])
 
