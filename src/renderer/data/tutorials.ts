@@ -53,7 +53,7 @@ export const TUTORIALS: Tutorial[] = [
       type: 'video',
       src: '/tutorials/welcome.mp4',
       posterSrc: '/tutorials/welcome.jpg',
-      durationSec: 8
+      durationSec: 12
     },
     tags: ['intro', 'tour', 'onboarding'],
     publishedAt: '2026-04-21',
@@ -160,16 +160,35 @@ export function groupTutorialsByCategory(
   return grouped
 }
 
-export function filterTutorials(query: string): Tutorial[] {
+export function filterTutorials(query: string, activeTags: readonly string[] = []): Tutorial[] {
   const q = query.trim().toLowerCase()
-  if (!q) return TUTORIALS
+  const tagSet = new Set(activeTags.map((t) => t.toLowerCase()))
   return TUTORIALS.filter((t) => {
+    if (tagSet.size > 0) {
+      const tutorialTags = (t.tags ?? []).map((tag) => tag.toLowerCase())
+      const anyMatch = tutorialTags.some((tag) => tagSet.has(tag))
+      if (!anyMatch) return false
+    }
+    if (!q) return true
     if (t.title.toLowerCase().includes(q)) return true
     if (t.description.toLowerCase().includes(q)) return true
     if (t.tags?.some((tag) => tag.toLowerCase().includes(q))) return true
     if (CATEGORY_LABELS[t.category].toLowerCase().includes(q)) return true
     return false
   })
+}
+
+export function getAllTags(): string[] {
+  const counts = new Map<string, number>()
+  for (const t of TUTORIALS) {
+    for (const tag of t.tags ?? []) {
+      const key = tag.toLowerCase()
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([tag]) => tag)
 }
 
 // ── Seen / watched helpers ───────────────────────────────

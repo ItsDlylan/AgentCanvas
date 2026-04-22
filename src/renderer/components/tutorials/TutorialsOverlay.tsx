@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getTutorialById } from '@/data/tutorials'
+import { getAllTags, getTutorialById } from '@/data/tutorials'
 import type { Tutorial } from '@/data/tutorials'
 import { useSettings } from '@/hooks/useSettings'
 import { TutorialsLibrary } from './TutorialsLibrary'
@@ -28,6 +28,16 @@ export function TutorialsOverlay({ initialTutorialId, onClose }: TutorialsOverla
     initialTutorial ? initialTutorial.id : null
   )
   const [query, setQuery] = useState('')
+  const [activeTags, setActiveTags] = useState<string[]>([])
+  const allTags = useMemo(() => getAllTags(), [])
+
+  const toggleTag = useCallback((tag: string) => {
+    const key = tag.toLowerCase()
+    setActiveTags((prev) =>
+      prev.includes(key) ? prev.filter((t) => t !== key) : [...prev, key]
+    )
+  }, [])
+  const clearTags = useCallback(() => setActiveTags([]), [])
 
   const searchRef = useRef<HTMLInputElement | null>(null)
   const libraryScrollRef = useRef<HTMLDivElement | null>(null)
@@ -99,6 +109,9 @@ export function TutorialsOverlay({ initialTutorialId, onClose }: TutorialsOverla
       onMouseDown={onBackdropMouseDown}
       className="tutorials-overlay-enter fixed inset-0 z-[9999] flex flex-col bg-zinc-950/95 backdrop-blur-md"
     >
+      {/* Spacer for macOS traffic-light buttons */}
+      <div className="h-10 shrink-0 bg-zinc-900/70" />
+
       {/* Top bar */}
       <div className="flex h-14 shrink-0 items-center gap-4 border-b border-zinc-800/80 bg-zinc-900/70 px-6">
         <div className="flex min-w-[180px] flex-col">
@@ -143,10 +156,49 @@ export function TutorialsOverlay({ initialTutorialId, onClose }: TutorialsOverla
         </div>
       </div>
 
+      {/* Tag filter bar (library view only) */}
+      {mode === 'library' && allTags.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800/60 bg-zinc-900/40 px-6 py-2 overflow-x-auto">
+          <span className="shrink-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            Tags
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {allTags.map((tag) => {
+              const isActive = activeTags.includes(tag)
+              return (
+                <button
+                  key={tag}
+                  type="button"
+                  onClick={() => toggleTag(tag)}
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] transition-colors ${
+                    isActive
+                      ? 'bg-blue-500/20 text-blue-200 ring-1 ring-blue-500/40'
+                      : 'bg-zinc-800/60 text-zinc-400 ring-1 ring-zinc-800 hover:bg-zinc-800 hover:text-zinc-200'
+                  }`}
+                  aria-pressed={isActive}
+                >
+                  {tag}
+                </button>
+              )
+            })}
+          </div>
+          {activeTags.length > 0 && (
+            <button
+              type="button"
+              onClick={clearTags}
+              className="ml-auto shrink-0 rounded px-2 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+            >
+              Clear ({activeTags.length})
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Content */}
       {mode === 'library' || !active ? (
         <TutorialsLibrary
           query={query}
+          activeTags={activeTags}
           settings={settings}
           onSelect={selectTutorial}
           scrollRef={libraryScrollRef}
