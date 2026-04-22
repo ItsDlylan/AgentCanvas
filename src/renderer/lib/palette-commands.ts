@@ -32,6 +32,7 @@ export type PaletteUiAction =
   | 'zoomToFocused'
   | 'cycleFocusForward'
   | 'cycleFocusBackward'
+  | 'suggestBenchmark'
 
 function dispatchUiAction(action: PaletteUiAction): void {
   window.dispatchEvent(new CustomEvent(PALETTE_ACTION_EVENT, { detail: { action } }))
@@ -114,6 +115,13 @@ function fixedCommands(): PaletteCommand[] {
       section: 'canvas',
       hotkey: hotkeyFor('newTerminal'),
       run: () => useCanvasStore.getState().addTerminalAt()
+    },
+    {
+      id: 'suggest-benchmark',
+      label: '✨ Suggest benchmark',
+      keywords: ['benchmark', 'suggest', 'perf', 'slow', 'measure', 'ai', 'help'],
+      section: 'canvas',
+      run: () => dispatchUiAction('suggestBenchmark')
     },
     {
       id: 'new-browser',

@@ -909,6 +909,12 @@
   50%      { opacity: 0.5; }
 }
 
+/* Generic spinner used by TaskSuggestModal and similar loading states */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 .cache-warning-pulse {
   animation: cache-pulse 2s ease-in-out infinite;
 }

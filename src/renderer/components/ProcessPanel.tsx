@@ -619,6 +619,104 @@ interface DiffViewerEntryProps {
   compact?: boolean
 }
 
+function BenchmarkEntry({
+  sessionId,
+  label,
+  isFocused,
+  jumpHint,
+  onFocus
+}: {
+  sessionId: string
+  label: string
+  isFocused: boolean
+  jumpHint: string | undefined
+  onFocus: (id: string) => void
+}) {
+  const [snap, setSnap] = useState<{
+    status: string
+    bestScore: number | null
+    iterationN: number
+    frozen: boolean
+    heldOutDivergence?: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const refresh = () => {
+      window.benchmark.load(sessionId).then((file) => {
+        if (cancelled || !file) return
+        setSnap({
+          status: file.runtime.status,
+          bestScore: file.runtime.bestScore,
+          iterationN: file.runtime.iterationN,
+          frozen: file.runtime.frozen,
+          heldOutDivergence: file.runtime.heldOutDivergence
+        })
+      })
+    }
+    refresh()
+    const unsub = window.benchmark.onBenchmarkStateChange(({ benchmarkId }) => {
+      if (benchmarkId === sessionId) refresh()
+    })
+    return () => {
+      cancelled = true
+      unsub()
+    }
+  }, [sessionId])
+
+  const danger = snap?.frozen || snap?.heldOutDivergence
+  const accent = danger
+    ? '#ef4444'
+    : snap?.status === 'running'
+    ? '#22c55e'
+    : snap?.status === 'paused'
+    ? '#eab308'
+    : snap?.status === 'done'
+    ? '#14b8a6'
+    : '#3b82f6'
+
+  const closeTile = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      await window.benchmark.close(sessionId)
+    },
+    [sessionId]
+  )
+
+  return (
+    <button
+      onClick={() => onFocus(sessionId)}
+      className={`group flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition-colors ${
+        isFocused ? 'bg-blue-500/10 text-blue-200' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+      }`}
+    >
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: accent }} />
+      <div className="flex flex-1 min-w-0 items-center gap-1.5">
+        <span className="truncate text-xs">{label}</span>
+        <span className="shrink-0 text-[10px]" style={{ color: accent, opacity: 0.85 }}>
+          BENCH
+        </span>
+        {snap && (
+          <span className="shrink-0 text-[10px] text-zinc-500">
+            {snap.status}
+            {snap.iterationN > 0 ? ` · #${snap.iterationN}` : ''}
+            {snap.bestScore !== null ? ` · ${formatBenchScore(snap.bestScore)}` : ''}
+            {danger ? ' · ⚠' : ''}
+          </span>
+        )}
+      </div>
+      <JumpBadge hint={jumpHint} />
+      <CloseButton onClick={closeTile} />
+    </button>
+  )
+}
+
+function formatBenchScore(v: number): string {
+  if (Math.abs(v) >= 1000) return v.toFixed(0)
+  if (Math.abs(v) >= 1) return v.toFixed(2)
+  return v.toFixed(3)
+}
+
 function DiffViewerEntry({ node, focusedId, jumpHints, onFocus, onKill, compact }: DiffViewerEntryProps) {
   const data = node.data as Record<string, unknown>
   const sessionId = data.sessionId as string
@@ -938,6 +1036,7 @@ function ProcessPanelComponent({
   const draws = nodes.filter((n) => n.type === 'draw')
   const images = nodes.filter((n) => n.type === 'image')
   const tasks = nodes.filter((n) => n.type === 'task')
+  const benchmarks = nodes.filter((n) => n.type === 'benchmark')
   const browsers = allBrowsers.filter((n) => {
     const sid = (n.data as Record<string, unknown>).sessionId as string
     return tileWorkspaceMap.get(sid) === activeWorkspaceId
@@ -1082,7 +1181,7 @@ function ProcessPanelComponent({
             Processes
           </span>
           <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-medium text-zinc-400">
-            {terminals.length + allBrowsers.length + notes.length + images.length}
+            {terminals.length + allBrowsers.length + notes.length + images.length + benchmarks.length}
           </span>
         </div>
 
@@ -1196,6 +1295,24 @@ function ProcessPanelComponent({
                     </div>
                     <JumpBadge hint={jumpHints.get(sessionId)} />
                   </button>
+                )
+              })}
+
+              {/* Benchmarks */}
+              {benchmarks.map((node) => {
+                const data = node.data as Record<string, unknown>
+                const sessionId = (data.sessionId as string) ?? node.id
+                const label = (data.label as string) || 'Benchmark'
+                const isFocused = focusedId === sessionId
+                return (
+                  <BenchmarkEntry
+                    key={node.id}
+                    sessionId={sessionId}
+                    label={label}
+                    isFocused={isFocused}
+                    jumpHint={jumpHints.get(sessionId)}
+                    onFocus={onFocus}
+                  />
                 )
               })}
 

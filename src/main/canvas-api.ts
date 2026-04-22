@@ -110,6 +110,45 @@ export class CanvasApi extends EventEmitter {
       return
     }
 
+    if (req.method === 'POST' && url === '/api/task/suggest') {
+      this.readBody(req).then((body) => {
+        const {
+          classification,
+          messages,
+          repoPath,
+          draftFromTaskId,
+          existingLabel,
+          existingIntent,
+          existingAcceptance
+        } = body as {
+          classification?: 'QUICK' | 'NEEDS_RESEARCH' | 'DEEP_FOCUS' | 'BENCHMARK'
+          messages?: Array<{ role: 'user' | 'assistant'; content: string }>
+          repoPath?: string
+          draftFromTaskId?: string
+          existingLabel?: string
+          existingIntent?: string
+          existingAcceptance?: string
+        }
+        if (!classification || !messages || !Array.isArray(messages) || messages.length === 0) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'classification and non-empty messages[] are required' }))
+          return
+        }
+        this.emit(
+          'task-suggest',
+          { classification, messages, repoPath, draftFromTaskId, existingLabel, existingIntent, existingAcceptance },
+          (result: unknown) => {
+            res.writeHead(200)
+            res.end(JSON.stringify(result))
+          }
+        )
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
     if (req.method === 'POST' && url === '/api/browser/navigate') {
       this.readBody(req).then((body) => {
         const { sessionId, url: targetUrl } = body as { sessionId?: string; url?: string }
@@ -1043,6 +1082,167 @@ export class CanvasApi extends EventEmitter {
         }
       }
       this.emit('tasks-list', { filter }, (result: unknown) => {
+        res.writeHead(200)
+        res.end(JSON.stringify(result))
+      })
+      return
+    }
+
+    // ── Benchmark endpoints ──
+
+    if (req.method === 'POST' && url === '/api/benchmark/open') {
+      this.readBody(req).then((body) => {
+        this.emit('benchmark-open', body, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/read') {
+      this.readBody(req).then((body) => {
+        const { benchmarkId } = body as { benchmarkId?: string }
+        if (!benchmarkId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'benchmarkId is required' }))
+          return
+        }
+        this.emit('benchmark-read', { benchmarkId }, (result: unknown) => {
+          const r = result as { ok: boolean }
+          res.writeHead(r.ok ? 200 : 404)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/update') {
+      this.readBody(req).then((body) => {
+        this.emit('benchmark-update', body, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/append-result') {
+      this.readBody(req).then((body) => {
+        this.emit('benchmark-append-result', body, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/hint') {
+      this.readBody(req).then((body) => {
+        this.emit('benchmark-hint', body, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/control') {
+      // Unified control endpoint: body = { benchmarkId, action: 'start'|'pause'|'resume'|'stop'|'unfreeze' }
+      this.readBody(req).then((body) => {
+        this.emit('benchmark-control', body, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/convert-from-task') {
+      this.readBody(req).then((body) => {
+        this.emit('benchmark-convert-from-task', body, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/handoff-plan') {
+      // Terminate run + produce Plan Tile. body = { benchmarkId, stopReason? }
+      this.readBody(req).then((body) => {
+        this.emit('benchmark-handoff-plan', body, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/close') {
+      this.readBody(req).then((body) => {
+        const { benchmarkId } = body as { benchmarkId?: string }
+        if (!benchmarkId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'benchmarkId is required' }))
+          return
+        }
+        this.emit('benchmark-close', { benchmarkId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'POST' && url === '/api/benchmark/delete') {
+      this.readBody(req).then((body) => {
+        const { benchmarkId } = body as { benchmarkId?: string }
+        if (!benchmarkId) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'benchmarkId is required' }))
+          return
+        }
+        this.emit('benchmark-delete', { benchmarkId }, (result: unknown) => {
+          res.writeHead(200)
+          res.end(JSON.stringify(result))
+        })
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
+    if (req.method === 'GET' && url.startsWith('/api/benchmarks')) {
+      this.emit('benchmarks-list', (result: unknown) => {
         res.writeHead(200)
         res.end(JSON.stringify(result))
       })

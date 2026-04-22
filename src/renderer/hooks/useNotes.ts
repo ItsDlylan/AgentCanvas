@@ -66,6 +66,12 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const noteIdRef = useRef(noteId)
   noteIdRef.current = noteId
+  // Guards against empty-doc clobbers during mount/HMR: saves only fire after
+  // initial content has loaded (hasLoadedRef) AND the user has made a real
+  // edit (hasUserEditedRef). Setting content via setContent() does NOT flip
+  // the edit flag.
+  const hasLoadedRef = useRef(false)
+  const hasUserEditedRef = useRef(false)
 
   const editor = useEditor({
     extensions: [
@@ -152,6 +158,7 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
           editor.commands.setContent('')
         }
       }
+      hasLoadedRef.current = true
     })
   }, [editor, noteId])
 
@@ -225,6 +232,12 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
     if (!editor) return
 
     const handler = () => {
+      // Only treat an 'update' as a user edit once the initial load has
+      // settled. TipTap fires 'update' on setContent() too, which we don't
+      // want to count — otherwise HMR / fast remount can clobber content
+      // with an empty doc before load finishes.
+      if (!hasLoadedRef.current) return
+      hasUserEditedRef.current = true
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       saveTimerRef.current = setTimeout(() => {
         saveTimerRef.current = null
@@ -244,10 +257,12 @@ export function useNotes({ noteId }: { noteId: string }): { editor: Editor | nul
         saveTimerRef.current = null
       }
       if (editor.isDestroyed) return
-      const finalSave = pendingSave
-        ? window.note.save(id, {}, editor.getJSON())
-        : Promise.resolve()
-      // GC orphan attachments (images deleted from the note) once the final save lands.
+      // Final-save on unmount only if there's pending debounced work AND the
+      // user actually edited. Prevents HMR / load-race from writing empty docs.
+      const finalSave =
+        pendingSave && hasUserEditedRef.current
+          ? window.note.save(id, {}, editor.getJSON())
+          : Promise.resolve()
       finalSave.then(() => window.attachment.sweepNote(id))
     }
   }, [editor])

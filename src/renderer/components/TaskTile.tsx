@@ -13,6 +13,9 @@ import { TileContextMenu, type TileContextMenuItem } from './TileContextMenu'
 import { DependencyWarningModal } from './DependencyWarningModal'
 import { ReclassifyConfirmModal } from './ReclassifyConfirmModal'
 import { TaskTileAcceptanceEditor } from './TaskTileAcceptanceEditor'
+import { HarnessBenchmarkModal } from './HarnessBenchmarkModal'
+import { DesignHarnessModal } from './DesignHarnessModal'
+import { TaskSuggestModal } from './TaskSuggestModal'
 import {
   unsatisfiedDependencies,
   type UnsatisfiedDep
@@ -76,6 +79,9 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
   } | null>(null)
   const tier = useSemanticZoom()
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [harnessOpen, setHarnessOpen] = useState(false)
+  const [designOpen, setDesignOpen] = useState(false)
+  const [suggestOpen, setSuggestOpen] = useState(false)
 
   const reloadDerivedState = useCallback(async () => {
     const d = await window.task.deriveState(taskId)
@@ -309,6 +315,15 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
         disabled: meta.timelinePressure === t
       })
     }
+    items.push({ label: '✨ AI draft…', onClick: () => setSuggestOpen(true) })
+    if (meta.classification === 'BENCHMARK') {
+      if (!meta.harnessWorktreePath) {
+        items.push({ label: 'Design Harness…', onClick: () => setDesignOpen(true) })
+      } else {
+        items.push({ label: 'Harness as Benchmark…', onClick: () => setHarnessOpen(true) })
+        items.push({ label: 'Re-open harness design…', onClick: () => setDesignOpen(true) })
+      }
+    }
     items.push({ label: '', separator: true, onClick: () => undefined })
     if (meta.manualReviewDone) {
       items.push({ label: 'Unmark reviewed', onClick: unmarkReviewed })
@@ -477,6 +492,19 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
               ▸ Spawn Terminal
             </ActionButton>
           )}
+          <ActionButton accent="#a855f7" onClick={() => setSuggestOpen(true)}>
+            ✨ AI draft
+          </ActionButton>
+          {meta.classification === 'BENCHMARK' && !meta.harnessWorktreePath && (
+            <ActionButton accent="#3b82f6" onClick={() => setDesignOpen(true)}>
+              ▸ Design Harness
+            </ActionButton>
+          )}
+          {meta.classification === 'BENCHMARK' && meta.harnessWorktreePath && (
+            <ActionButton accent="#3b82f6" onClick={() => setHarnessOpen(true)}>
+              ▸ Harness as Benchmark
+            </ActionButton>
+          )}
           {(meta.classification === 'DEEP_FOCUS' || meta.classification === 'NEEDS_RESEARCH') && (
             <ActionButton accent={accent} onClick={spawnLinkedPlan}>
               ▸ Spawn Plan
@@ -530,6 +558,51 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
           unsatisfied={depWarning.unsatisfied}
           onProceed={depWarning.proceed}
           onCancel={() => setDepWarning(null)}
+        />
+      )}
+      {harnessOpen && meta && (
+        <HarnessBenchmarkModal
+          taskId={taskId}
+          taskLabel={meta.label}
+          inheritedAcceptance={acceptanceMarkdown}
+          prefilledWorktreePath={meta.harnessWorktreePath}
+          onClose={() => setHarnessOpen(false)}
+          onCreated={() => {
+            // onCreated: the benchmark tile auto-appears via canvas:benchmark-open.
+            // No further work from this tile; an executing-in edge is drawn.
+            reloadDerivedState()
+          }}
+        />
+      )}
+      {designOpen && meta && (
+        <DesignHarnessModal
+          taskId={taskId}
+          taskLabel={meta.label}
+          inheritedAcceptance={acceptanceMarkdown}
+          onClose={() => setDesignOpen(false)}
+          onSpawned={() => {
+            // Task metadata (harnessWorktreePath) updated server-side; the
+            // task-update event reloads the tile so the action buttons flip.
+            window.task.load(taskId).then((file) => {
+              if (file) setMeta(file.meta)
+            })
+          }}
+        />
+      )}
+      {suggestOpen && meta && (
+        <TaskSuggestModal
+          classification={meta.classification}
+          defaultWorkspaceId={meta.workspaceId}
+          draftFromTaskId={taskId}
+          existingLabel={meta.label}
+          existingIntent={intent}
+          existingAcceptance={acceptanceMarkdown}
+          onClose={() => setSuggestOpen(false)}
+          onCreated={() => {
+            window.task.load(taskId).then((file) => {
+              if (file) setMeta(file.meta)
+            })
+          }}
         />
       )}
       {reclassifyProposal && (

@@ -36,6 +36,10 @@ export interface TaskMeta {
   softDeletedAt?: number
   createdAt: number
   updatedAt: number
+  /** For BENCHMARK tasks: path to the isolated worktree the harness-design agent is working in. */
+  harnessWorktreePath?: string
+  /** For BENCHMARK tasks: branch name of that design worktree. */
+  harnessBranch?: string
 }
 
 export interface TaskFile {
@@ -97,7 +101,9 @@ export async function saveTask(
         isSoftDeleted: meta.isSoftDeleted ?? existing?.meta.isSoftDeleted ?? false,
         softDeletedAt: meta.softDeletedAt ?? existing?.meta.softDeletedAt,
         createdAt: existing?.meta.createdAt ?? now,
-        updatedAt: now
+        updatedAt: now,
+        harnessWorktreePath: meta.harnessWorktreePath ?? existing?.meta.harnessWorktreePath,
+        harnessBranch: meta.harnessBranch ?? existing?.meta.harnessBranch
       },
       intent: intent ?? existing?.intent ?? '',
       acceptanceCriteria: acceptanceCriteria ?? existing?.acceptanceCriteria ?? {}
