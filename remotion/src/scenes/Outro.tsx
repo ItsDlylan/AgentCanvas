@@ -23,12 +23,12 @@ export const Outro: React.FC<OutroProps> = ({ localFrame, durationInFrames }) =>
   const W = 1280
   const H = 720
 
-  const sceneAlpha = interpolate(
-    localFrame,
-    [0, 8, durationInFrames - 14, durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  )
+  // No exit fade — the final frame holds the command at full opacity so
+  // the viewer sees the "Press ⌘⇧? anytime" shortcut as a clean poster.
+  const sceneAlpha = interpolate(localFrame, [0, 8], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
 
   // Starfield with drift
   const stars = Array.from({ length: 140 }, (_, i) => {
