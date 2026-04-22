@@ -1,0 +1,17 @@
+{
+  "iterationN": 3,
+  "tempCycleIdx": 3,
+  "bestScore": null,
+  "stagnationCounter": 3,
+  "frozen": false,
+  "status": "unstarted",
+  "startedAt": 1776866059649,
+  "lastIterationAt": 1776866223801,
+  "keptCount": 0,
+  "revertedCount": 3,
+  "scoreSamples": [
+    null,
+    null,
+    null
+  ]
+}

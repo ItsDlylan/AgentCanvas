@@ -1,0 +1,4 @@
+iter	ts_ms	temp	score	delta	accepted	runtime_ms	heldout_score	commit_sha	rationale	rejection_reason
+1	1776866059649	0.3			0	3		a40ad0cdb791aa7f683017bafdc6ebc6deb3cab6	evaluator error	Candidate score is not a finite number
+2	1776866116181	0.7			0	2		a40ad0cdb791aa7f683017bafdc6ebc6deb3cab6	evaluator error	Candidate score is not a finite number
+3	1776866223801	1			0	2		a40ad0cdb791aa7f683017bafdc6ebc6deb3cab6	evaluator error	Candidate score is not a finite number
