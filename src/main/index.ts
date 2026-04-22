@@ -89,6 +89,7 @@ import {
 import { compareScores, heldOutDiverged, acceptedScoresFromRows } from './benchmark-compare'
 import { distillBrief, sanitizeForBrief } from './benchmark-brief'
 import { buildHarnessDesignPrompt } from './benchmark-harness-prompt'
+import { suggestTask, type SuggestInput as TaskSuggestInput } from './task-suggester'
 import { readFileSync as fsReadFileSync, writeFileSync as fsWriteFileSync, mkdirSync as fsMkdirSync, watch as fsWatch, type FSWatcher } from 'fs'
 import { loadPomodoro, savePomodoro } from './pomodoro-store'
 import {
@@ -861,6 +862,41 @@ ipcMain.handle(
   }
 )
 
+ipcMain.handle(
+  'task:apply-markdown-draft',
+  async (
+    _event,
+    input: {
+      taskId: string
+      label?: string
+      intent?: string
+      acceptanceMarkdown?: string
+      classification?: TaskClassification
+    }
+  ) => {
+    const file = loadTask(input.taskId)
+    if (!file) return { ok: false, error: 'Task not found' }
+    const meta: TaskMeta = {
+      ...file.meta,
+      label: input.label ?? file.meta.label,
+      classification: input.classification ?? file.meta.classification,
+      updatedAt: Date.now()
+    }
+    let acceptanceDoc: Record<string, unknown> | undefined = undefined
+    if (typeof input.acceptanceMarkdown === 'string') {
+      try {
+        acceptanceDoc = markdownToTiptap(input.acceptanceMarkdown)
+      } catch {
+        return { ok: false, error: 'Invalid acceptance markdown' }
+      }
+    }
+    const nextIntent = typeof input.intent === 'string' ? input.intent : file.intent
+    await saveTask(input.taskId, meta, nextIntent, acceptanceDoc ?? file.acceptanceCriteria)
+    mainWindow?.webContents.send('canvas:task-update', { taskId: input.taskId })
+    return { ok: true }
+  }
+)
+
 // ── Benchmark IPC Handlers (renderer → main) ──
 
 ipcMain.handle('benchmark:load', (_event, { benchmarkId }: { benchmarkId: string }) => {
@@ -999,6 +1035,13 @@ ipcMain.handle(
       acceptanceCriteria: string
       noiseClass?: 'low' | 'medium' | 'high'
       higherIsBetter?: boolean
+      templateKind?:
+        | 'web-page-load'
+        | 'api-latency'
+        | 'bundle-size'
+        | 'test-suite-time'
+        | 'pure-function'
+      targetUrl?: string
     }
   ) => {
     const task = loadTask(input.taskId)
@@ -1040,7 +1083,9 @@ ipcMain.handle(
       acceptanceCriteria: input.acceptanceCriteria,
       targetFiles: input.targetFiles ?? [],
       noiseClass: input.noiseClass ?? 'medium',
-      higherIsBetter: input.higherIsBetter ?? true
+      higherIsBetter: input.higherIsBetter ?? true,
+      templateKind: input.templateKind,
+      targetUrl: input.targetUrl
     })
     const promptFile = join(app.getPath('userData'), 'agentcanvas', `harness-prompt-${input.taskId}.md`)
     try {
@@ -1088,6 +1133,14 @@ ipcMain.handle(
     }
   }
 )
+
+ipcMain.handle('task:suggest', async (_event, input: TaskSuggestInput) => {
+  try {
+    return await suggestTask(input)
+  } catch (err) {
+    return { ok: false, error: (err as Error).message || String(err) }
+  }
+})
 
 ipcMain.handle(
   'benchmark:launch-runner',
@@ -1744,6 +1797,15 @@ canvasApi.on('browser-open', async (info: { url: string; terminalId?: string; wi
     height: info.height
   })
   reply({ ok: true, cdpPort, message: `Browser tile opening for ${info.url}` })
+})
+
+canvasApi.on('task-suggest', async (info: TaskSuggestInput, reply: (result: unknown) => void) => {
+  try {
+    const result = await suggestTask(info)
+    reply(result)
+  } catch (err) {
+    reply({ ok: false, error: (err as Error).message || String(err) })
+  }
 })
 
 canvasApi.on('browser-resize', (info: { sessionId: string; width: number; height: number }, reply: (result: unknown) => void) => {

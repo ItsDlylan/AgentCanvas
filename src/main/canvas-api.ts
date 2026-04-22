@@ -110,6 +110,45 @@ export class CanvasApi extends EventEmitter {
       return
     }
 
+    if (req.method === 'POST' && url === '/api/task/suggest') {
+      this.readBody(req).then((body) => {
+        const {
+          classification,
+          messages,
+          repoPath,
+          draftFromTaskId,
+          existingLabel,
+          existingIntent,
+          existingAcceptance
+        } = body as {
+          classification?: 'QUICK' | 'NEEDS_RESEARCH' | 'DEEP_FOCUS' | 'BENCHMARK'
+          messages?: Array<{ role: 'user' | 'assistant'; content: string }>
+          repoPath?: string
+          draftFromTaskId?: string
+          existingLabel?: string
+          existingIntent?: string
+          existingAcceptance?: string
+        }
+        if (!classification || !messages || !Array.isArray(messages) || messages.length === 0) {
+          res.writeHead(400)
+          res.end(JSON.stringify({ error: 'classification and non-empty messages[] are required' }))
+          return
+        }
+        this.emit(
+          'task-suggest',
+          { classification, messages, repoPath, draftFromTaskId, existingLabel, existingIntent, existingAcceptance },
+          (result: unknown) => {
+            res.writeHead(200)
+            res.end(JSON.stringify(result))
+          }
+        )
+      }).catch(() => {
+        res.writeHead(400)
+        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+      })
+      return
+    }
+
     if (req.method === 'POST' && url === '/api/browser/navigate') {
       this.readBody(req).then((body) => {
         const { sessionId, url: targetUrl } = body as { sessionId?: string; url?: string }

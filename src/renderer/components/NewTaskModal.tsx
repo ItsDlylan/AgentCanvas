@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { TaskClassification, TaskTimeline } from '../../preload/index'
 import { useCanvasStore } from '@/store/canvas-store'
+import { TaskSuggestModal, type Proposal } from './TaskSuggestModal'
 
 const CLASSIFICATION_OPTIONS: Array<{ value: TaskClassification; label: string }> = [
   { value: 'QUICK', label: 'Quick' },
@@ -23,7 +24,22 @@ export function NewTaskModal({ onClose, onCreated }: Props): JSX.Element {
   const [classification, setClassification] = useState<TaskClassification | null>(null)
   const [timeline, setTimeline] = useState<TaskTimeline>('whenever')
   const [submitting, setSubmitting] = useState(false)
+  const [aiDraftOpen, setAiDraftOpen] = useState(false)
   const activeWorkspaceId = useCanvasStore((s) => s.activeWorkspaceId)
+
+  const effectiveClassification: TaskClassification = classification ?? 'QUICK'
+
+  const handleProposal = (p: Proposal): void => {
+    setLabel(p.label)
+    setIntent(p.intent)
+    setAcceptance(p.acceptanceCriteria)
+    if (p.kind === 'benchmark') {
+      setClassification('BENCHMARK')
+    } else {
+      setClassification(p.classification)
+      setTimeline(p.timelinePressure)
+    }
+  }
 
   const submit = async (): Promise<void> => {
     if (!label.trim()) return
@@ -71,7 +87,32 @@ export function NewTaskModal({ onClose, onCreated }: Props): JSX.Element {
           fontFamily: 'system-ui, -apple-system, sans-serif'
         }}
       >
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>New task</div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12
+          }}
+        >
+          <div style={{ fontSize: 16, fontWeight: 600 }}>New task</div>
+          <button
+            type="button"
+            onClick={() => setAiDraftOpen(true)}
+            style={{
+              padding: '5px 10px',
+              borderRadius: 4,
+              background: '#a855f722',
+              border: '1px solid #a855f7',
+              color: '#c4a3ff',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer'
+            }}
+          >
+            ✨ AI draft
+          </button>
+        </div>
 
         <Label>LABEL</Label>
         <input
@@ -145,6 +186,17 @@ export function NewTaskModal({ onClose, onCreated }: Props): JSX.Element {
           </button>
         </div>
       </div>
+      {aiDraftOpen && (
+        <TaskSuggestModal
+          classification={effectiveClassification}
+          defaultWorkspaceId={activeWorkspaceId}
+          existingLabel={label || undefined}
+          existingIntent={intent || undefined}
+          existingAcceptance={acceptance || undefined}
+          onClose={() => setAiDraftOpen(false)}
+          onProposal={handleProposal}
+        />
+      )}
     </div>
   )
 }

@@ -1,7 +1,13 @@
-// Prompt builder for the harness-design agent session. The agent is spawned
-// inside an isolated git worktree and its single job is to produce a working
-// benchmark/evaluator.sh + bench runner + corpus + golden snapshot for the
-// task's acceptance criterion.
+import { existsSync, readFileSync } from 'fs'
+import { join } from 'path'
+import { app } from 'electron'
+
+export type BenchmarkTemplateKind =
+  | 'web-page-load'
+  | 'api-latency'
+  | 'bundle-size'
+  | 'test-suite-time'
+  | 'pure-function'
 
 export interface HarnessDesignInput {
   taskLabel: string
@@ -9,6 +15,25 @@ export interface HarnessDesignInput {
   targetFiles: string[]
   noiseClass: 'low' | 'medium' | 'high'
   higherIsBetter: boolean
+  templateKind?: BenchmarkTemplateKind
+  targetUrl?: string
+}
+
+function loadTemplate(kind: BenchmarkTemplateKind): string | null {
+  const candidates = [
+    join(app.getAppPath(), 'resources', 'benchmark', 'templates', `${kind}.md`),
+    join(process.cwd(), 'resources', 'benchmark', 'templates', `${kind}.md`)
+  ]
+  for (const path of candidates) {
+    if (existsSync(path)) {
+      try {
+        return readFileSync(path, 'utf-8')
+      } catch {
+        // fall through
+      }
+    }
+  }
+  return null
 }
 
 export function buildHarnessDesignPrompt(input: HarnessDesignInput): string {
@@ -16,6 +41,26 @@ export function buildHarnessDesignPrompt(input: HarnessDesignInput): string {
   const targets = input.targetFiles.length > 0
     ? input.targetFiles.map((f) => `  - \`${f}\``).join('\n')
     : '  (none declared — pick the single file most directly responsible for the measured behavior)'
+
+  const templateBlock = (() => {
+    if (!input.templateKind) return ''
+    const body = loadTemplate(input.templateKind)
+    if (!body) return ''
+    const urlLine =
+      input.templateKind === 'web-page-load' && input.targetUrl
+        ? `\n\n**Target URL:** \`${input.targetUrl}\``
+        : ''
+    return [
+      '',
+      '## Template-specific requirements',
+      '',
+      `The user selected the **\`${input.templateKind}\`** template. Follow its evaluator shape exactly:${urlLine}`,
+      '',
+      body.trim(),
+      ''
+    ].join('\n')
+  })()
+
   return [
     `# You are designing a benchmark harness.`,
     ``,
@@ -29,7 +74,7 @@ export function buildHarnessDesignPrompt(input: HarnessDesignInput): string {
     ``,
     `## Noise class: \`${input.noiseClass}\``,
     `## Direction: \`${direction}\``,
-    ``,
+    templateBlock,
     `## Deliverables`,
     `Produce these files, then commit everything on the current branch with message \`harness: initial design\`:`,
     ``,

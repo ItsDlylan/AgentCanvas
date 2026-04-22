@@ -7,10 +7,28 @@ import { useCallback, useState } from 'react'
  * agent finishes, the human clicks "Harness as Benchmark" to start the
  * optimization loop in the same worktree.
  */
+export type HarnessTemplateKind =
+  | 'web-page-load'
+  | 'api-latency'
+  | 'bundle-size'
+  | 'test-suite-time'
+  | 'pure-function'
+
+const TEMPLATE_OPTIONS: { value: HarnessTemplateKind | ''; label: string }[] = [
+  { value: '', label: '(none — freeform)' },
+  { value: 'pure-function', label: 'pure-function (ns/op)' },
+  { value: 'web-page-load', label: 'web-page-load (LCP/TTI/FCP)' },
+  { value: 'api-latency', label: 'api-latency (p50/p95 ms)' },
+  { value: 'bundle-size', label: 'bundle-size (gzip bytes)' },
+  { value: 'test-suite-time', label: 'test-suite-time (seconds)' }
+]
+
 export interface DesignHarnessModalProps {
   taskId: string
   taskLabel: string
   inheritedAcceptance: string
+  defaultTemplateKind?: HarnessTemplateKind
+  defaultTargetUrl?: string
   onClose: () => void
   onSpawned: (info: { worktreePath: string; branchName: string; terminalId: string }) => void
 }
@@ -19,6 +37,8 @@ export function DesignHarnessModal({
   taskId,
   taskLabel,
   inheritedAcceptance,
+  defaultTemplateKind,
+  defaultTargetUrl,
   onClose,
   onSpawned
 }: DesignHarnessModalProps): JSX.Element {
@@ -27,6 +47,10 @@ export function DesignHarnessModal({
   const [acceptance, setAcceptance] = useState(inheritedAcceptance || '')
   const [noiseClass, setNoiseClass] = useState<'low' | 'medium' | 'high'>('medium')
   const [higherIsBetter, setHigherIsBetter] = useState(false)
+  const [templateKind, setTemplateKind] = useState<HarnessTemplateKind | ''>(
+    defaultTemplateKind || ''
+  )
+  const [targetUrl, setTargetUrl] = useState(defaultTargetUrl || '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -58,7 +82,9 @@ export function DesignHarnessModal({
         targetFiles,
         acceptanceCriteria: acceptance.trim(),
         noiseClass,
-        higherIsBetter
+        higherIsBetter,
+        templateKind: templateKind || undefined,
+        targetUrl: templateKind === 'web-page-load' ? targetUrl.trim() || undefined : undefined
       })
       if (!res.ok) {
         setError(res.error || 'Could not spawn harness-design terminal.')
@@ -75,7 +101,7 @@ export function DesignHarnessModal({
       setError((e as Error).message || String(e))
       setBusy(false)
     }
-  }, [sourceRepoPath, targetFilesCsv, acceptance, noiseClass, higherIsBetter, taskId, onClose, onSpawned])
+  }, [sourceRepoPath, targetFilesCsv, acceptance, noiseClass, higherIsBetter, templateKind, targetUrl, taskId, onClose, onSpawned])
 
   return (
     <div onClick={onClose} style={backdropStyle}>
@@ -123,6 +149,29 @@ export function DesignHarnessModal({
               placeholder='e.g. "Reduce markdown-to-tiptap parse cost by 20% measured in ns/char on a diverse corpus"'
             />
           </Field>
+
+          <Field label="Template" hint="Narrows what the harness-design agent produces. '(none)' lets it choose freely.">
+            <select
+              style={inputStyle}
+              value={templateKind}
+              onChange={(e) => setTemplateKind(e.target.value as HarnessTemplateKind | '')}
+            >
+              {TEMPLATE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </Field>
+
+          {templateKind === 'web-page-load' && (
+            <Field label="Target URL" hint="The page whose load performance the benchmark should measure.">
+              <input
+                style={inputStyle}
+                value={targetUrl}
+                onChange={(e) => setTargetUrl(e.target.value)}
+                placeholder="https://example.com"
+              />
+            </Field>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <Field label="Noise class" hint="Deterministic score? 'low'. Flaky wall-clock / network? 'medium' or 'high'.">

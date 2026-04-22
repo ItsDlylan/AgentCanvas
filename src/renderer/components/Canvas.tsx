@@ -25,6 +25,7 @@ import { NotesTile } from './NotesTile'
 import { PlanTile } from './PlanTile'
 import { TaskTile } from './TaskTile'
 import { BenchmarkTile } from './BenchmarkTile'
+import { TaskSuggestModal } from './TaskSuggestModal'
 import { DiffViewerTile } from './DiffViewerTile'
 import { DevToolsTile } from './DevToolsTile'
 import { DrawTile } from './draw/DrawTile'
@@ -195,6 +196,7 @@ export default function Canvas() {
   const { settings, updateSettings } = useSettings()
   const { resolvedTemplates } = useResolvedTemplates(settings.templates)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [suggestBenchmarkOpen, setSuggestBenchmarkOpen] = useState(false)
   const [taskLensOpen, setTaskLensOpen] = useState(false)
   const [tutorialsOpen, setTutorialsOpen] = useState(false)
   const [tutorialsInitialId, setTutorialsInitialId] = useState<string | null>(null)
@@ -1896,7 +1898,11 @@ export default function Canvas() {
     const handler = (e: Event) => {
       const action = (e as CustomEvent<{ action: PaletteUiAction }>).detail?.action
       if (!action) return
-      const fn = hotkeyActions[action]
+      if (action === 'suggestBenchmark') {
+        setSuggestBenchmarkOpen(true)
+        return
+      }
+      const fn = (hotkeyActions as Record<string, (() => void) | undefined>)[action]
       if (fn) fn()
     }
     window.addEventListener(PALETTE_ACTION_EVENT, handler)
@@ -2373,6 +2379,14 @@ export default function Canvas() {
 
           {/* Settings overlay */}
           {settingsOpen && <SettingsPage onClose={() => setSettingsOpen(false)} />}
+
+          {/* Suggest-benchmark modal (palette entry point) */}
+          {suggestBenchmarkOpen && (
+            <TaskSuggestModal
+              classification="BENCHMARK"
+              onClose={() => setSuggestBenchmarkOpen(false)}
+            />
+          )}
 
           {/* Command palette */}
           <CommandPalette />

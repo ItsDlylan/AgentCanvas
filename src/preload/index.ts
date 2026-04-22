@@ -405,6 +405,58 @@ export interface TaskAPI {
   create: (
     input: TaskCreateInput
   ) => Promise<{ ok: boolean; taskId?: string; classification?: TaskClassification; error?: string }>
+  applyMarkdownDraft: (input: {
+    taskId: string
+    label?: string
+    intent?: string
+    acceptanceMarkdown?: string
+    classification?: TaskClassification
+  }) => Promise<{ ok: boolean; error?: string }>
+  suggest: (input: {
+    classification: TaskClassification
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>
+    repoPath?: string
+    draftFromTaskId?: string
+    existingLabel?: string
+    existingIntent?: string
+    existingAcceptance?: string
+  }) => Promise<{
+    ok: boolean
+    reply?:
+      | { kind: 'message'; content: string }
+      | {
+          kind: 'proposal'
+          proposal:
+            | {
+                kind: 'benchmark'
+                label: string
+                intent: string
+                acceptanceCriteria: string
+                templateKind:
+                  | 'web-page-load'
+                  | 'api-latency'
+                  | 'bundle-size'
+                  | 'test-suite-time'
+                  | 'pure-function'
+                targetFiles?: string[]
+                targetUrl?: string
+                noiseClass: 'low' | 'medium' | 'high'
+                higherIsBetter: boolean
+                rationale: string
+              }
+            | {
+                kind: 'generic'
+                label: string
+                intent: string
+                acceptanceCriteria: string
+                classification: TaskClassification
+                timelinePressure: TaskTimeline
+                rationale: string
+              }
+        }
+    error?: string
+    rawOutput?: string
+  }>
   onTaskOpen: (cb: (info: TaskOpenInfo) => void) => () => void
   onTaskUpdate: (cb: (info: { taskId: string }) => void) => () => void
   onTaskClose: (cb: (info: { taskId: string }) => void) => () => void
@@ -427,6 +479,8 @@ const taskAPI: TaskAPI = {
     ipcRenderer.invoke('task:convert-from-note', { noteId, classification, timelinePressure }),
   reviewAll: () => ipcRenderer.invoke('task:review-all'),
   create: (input) => ipcRenderer.invoke('task:create', input),
+  applyMarkdownDraft: (input) => ipcRenderer.invoke('task:apply-markdown-draft', input),
+  suggest: (input) => ipcRenderer.invoke('task:suggest', input),
   onTaskOpen: (callback) => {
     const handler = (_e: Electron.IpcRendererEvent, info: TaskOpenInfo): void => callback(info)
     ipcRenderer.on('canvas:task-open', handler)
@@ -596,6 +650,13 @@ export interface BenchmarkAPI {
     acceptanceCriteria: string
     noiseClass?: NoiseClass
     higherIsBetter?: boolean
+    templateKind?:
+      | 'web-page-load'
+      | 'api-latency'
+      | 'bundle-size'
+      | 'test-suite-time'
+      | 'pure-function'
+    targetUrl?: string
   }) => Promise<{
     ok: boolean
     terminalId?: string
