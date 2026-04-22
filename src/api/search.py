@@ -24,22 +24,23 @@ def score(query: str, doc: str) -> float:
         return 0.0
     tf = Counter(d_tokens)
     length_norm = 1.0 / math.sqrt(len(d_tokens))
-    q_unique = set(q_terms)
+    q_counter = Counter(q_terms)
     matched = 0
     tf_sum = 0.0
     # BM25-style TF saturation: repeats help but saturate, so keyword-spammed
-    # docs can't dominate genuinely topical short docs.
+    # docs can't dominate genuinely topical short docs. Query-TF weighting
+    # lets a user emphasize a term by repeating it in the query.
     k1 = 1.5
-    for term in q_unique:
+    for term, q_count in q_counter.items():
         count = tf.get(term, 0)
         if count:
             matched += 1
-            tf_sum += (k1 + 1.0) * count / (k1 + count)
+            tf_sum += q_count * (k1 + 1.0) * count / (k1 + count)
     if matched == 0:
         return 0.0
     # Super-linear coverage: partial-match docs lose more ground to
     # all-terms-match docs, which dominate relevance judgments.
-    coverage = matched / len(q_unique)
+    coverage = matched / len(q_counter)
     return tf_sum * length_norm * coverage * coverage
 
 
