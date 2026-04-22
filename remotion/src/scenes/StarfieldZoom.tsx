@@ -1,4 +1,5 @@
 import { AbsoluteFill, interpolate, useVideoConfig } from 'remotion'
+import { useCurrentFrame } from 'remotion'
 import { fontStack, monoStack, theme } from '../theme'
 import { easeInOut, easeOutExpo, seeded } from '../math'
 
@@ -8,339 +9,406 @@ interface StarfieldZoomProps {
 }
 
 /**
- * Four-phase flight:
+ * Six-phase flight:
  *
- *   A. HYPERSPACE  (0 → ~30f)  — 400 stars streak past on radial vectors.
- *   B. DECEL       (~30 → ~55f) — streaks shorten into point-stars; four
- *                                 workspace folders materialise in 3D depth,
- *                                 labels coming in with per-character springs.
- *   C. APPROACH    (~55 → ~90f) — camera pans to the primary folder; the
- *                                 folder grows, others recede / blur.
- *   D. OPEN        (~90 → end)  — folder "opens" (top flap lifts, fold
- *                                 crease widens) and the workspace tiles
- *                                 inside fly out on a fan layout.
+ *   A. HYPERSPACE      (0 → 30f)   — 380 star streaks decelerating.
+ *   B. REVEAL          (30 → 58f)  — four labelled workspace folders
+ *                                    materialise in 3D space around the
+ *                                    viewer: Frontend (left-near),
+ *                                    Backend (right-near), Mobile App
+ *                                    (left-far), Laravel New (right-far).
+ *   C. ORBIT GLIDE     (58 → 140f) — camera pans through 3D space like a
+ *                                    user panning the AgentCanvas itself,
+ *                                    sweeping past each folder. No scale-
+ *                                    and-fade — real parallax.
+ *   D. COMMIT          (140 → 160f) — camera settles centred on Frontend.
+ *   E. FOLDER OPENS    (160 → 185f) — tab lifts (rotateX), body expands,
+ *                                     tile previews scale up into full
+ *                                     inline tiles (terminal typing,
+ *                                     browser URL, note, task).
+ *   F. DIVE            (185 → end)  — camera passes through the folder
+ *                                     face; interior fills the frame and
+ *                                     hands off to CanvasDive.
  *
- * No text uses a basic translate-only slide: folder labels use per-char
- * scramble → lock; the lead-in caption uses a draw-on underline + typewriter.
+ * The Frontend folder's tiles are the *exact* same four tiles that
+ * appear in CanvasDive, so scene 4 reads as "we entered this workspace."
  */
+
+// ── World coordinates (in px, with a perspective of 1600) ──
+// Positive Z = farther away from camera. Camera lives at origin looking
+// down -Z. World transform is inverse of camera position.
+interface CameraPose {
+  x: number
+  y: number
+  z: number
+  rotY: number
+  rotX: number
+}
+
+// Camera keyframes (frames relative to scene start)
+const CAM_FRAMES = [0, 30, 58, 85, 112, 140, 160, 185, 200] as const
+const CAM_POSES: CameraPose[] = [
+  { x: 0, y: 0, z: -1200, rotY: 0, rotX: 0 }, // hyperspace pull-back
+  { x: 0, y: 0, z: -900, rotY: 0, rotX: 0 }, // settle at wide establishing
+  { x: 0, y: 0, z: -750, rotY: 0, rotX: 2 }, // folders visible
+  { x: 260, y: -60, z: -650, rotY: -12, rotX: 4 }, // glide right, parallax reveal
+  { x: -220, y: 40, z: -700, rotY: 9, rotX: -2 }, // glide left
+  { x: -60, y: 0, z: -600, rotY: 3, rotX: 0 }, // returning
+  { x: -380, y: -80, z: -380, rotY: 2, rotX: 0 }, // centring on Frontend (at -400, -100, -300)
+  { x: -400, y: -100, z: -220, rotY: 0, rotX: 0 }, // very close to Frontend face
+  { x: -400, y: -100, z: 120, rotY: 0, rotX: 0 } // INSIDE Frontend — past its Z
+]
+
+function camAt(localFrame: number): CameraPose {
+  // Find the two keyframes bracketing localFrame
+  for (let i = 0; i < CAM_FRAMES.length - 1; i++) {
+    if (localFrame >= CAM_FRAMES[i] && localFrame <= CAM_FRAMES[i + 1]) {
+      const t = interpolate(
+        localFrame,
+        [CAM_FRAMES[i], CAM_FRAMES[i + 1]],
+        [0, 1]
+      )
+      const eased = easeInOut(t)
+      const a = CAM_POSES[i]
+      const b = CAM_POSES[i + 1]
+      return {
+        x: a.x + (b.x - a.x) * eased,
+        y: a.y + (b.y - a.y) * eased,
+        z: a.z + (b.z - a.z) * eased,
+        rotY: a.rotY + (b.rotY - a.rotY) * eased,
+        rotX: a.rotX + (b.rotX - a.rotX) * eased
+      }
+    }
+  }
+  return CAM_POSES[CAM_POSES.length - 1]
+}
+
+// ── Folder positions in world space ──
+interface WorldFolder {
+  id: string
+  name: string
+  color: string
+  worldX: number
+  worldY: number
+  worldZ: number
+  rotY: number
+  isChosen: boolean
+  tiles: MiniTile[]
+}
+
+interface MiniTile {
+  kind: 'terminal' | 'browser' | 'note' | 'task'
+  accent: string
+}
+
+// Tiles for the chosen "Frontend" folder — match CanvasDive exactly.
+const FRONTEND_TILES: MiniTile[] = [
+  { kind: 'terminal', accent: theme.green },
+  { kind: 'browser', accent: theme.blue },
+  { kind: 'note', accent: theme.orange },
+  { kind: 'task', accent: theme.purple }
+]
+
+const FOLDERS: WorldFolder[] = [
+  {
+    id: 'frontend',
+    name: 'Frontend',
+    color: theme.blue,
+    worldX: -400,
+    worldY: -100,
+    worldZ: -300,
+    rotY: 8,
+    isChosen: true,
+    tiles: FRONTEND_TILES
+  },
+  {
+    id: 'backend',
+    name: 'Backend',
+    color: theme.green,
+    worldX: 380,
+    worldY: -120,
+    worldZ: -220,
+    rotY: -10,
+    isChosen: false,
+    tiles: [
+      { kind: 'terminal', accent: theme.green },
+      { kind: 'terminal', accent: theme.green },
+      { kind: 'browser', accent: theme.blue }
+    ]
+  },
+  {
+    id: 'mobile',
+    name: 'Mobile App',
+    color: theme.pink,
+    worldX: -340,
+    worldY: 180,
+    worldZ: -80,
+    rotY: 6,
+    isChosen: false,
+    tiles: [
+      { kind: 'terminal', accent: theme.green },
+      { kind: 'browser', accent: theme.pink },
+      { kind: 'note', accent: theme.orange }
+    ]
+  },
+  {
+    id: 'laravel',
+    name: 'Laravel New',
+    color: theme.orange,
+    worldX: 420,
+    worldY: 160,
+    worldZ: -120,
+    rotY: -8,
+    isChosen: false,
+    tiles: [
+      { kind: 'terminal', accent: theme.green },
+      { kind: 'browser', accent: theme.blue },
+      { kind: 'note', accent: theme.orange },
+      { kind: 'task', accent: theme.purple }
+    ]
+  }
+]
+
 export const StarfieldZoom: React.FC<StarfieldZoomProps> = ({
   localFrame,
   durationInFrames
 }) => {
-  const { fps } = useVideoConfig()
   const W = 1280
   const H = 720
-  const cx = W / 2
-  const cy = H / 2
 
-  // Phase markers
-  const PHASE_A_END = 30
-  const PHASE_B_END = 55
-  const PHASE_C_END = 92
-  // Phase D runs until durationInFrames - exit
-
-  // Scene envelope
   const sceneAlpha = interpolate(
     localFrame,
-    [0, 6, durationInFrames - 10, durationInFrames],
+    [0, 6, durationInFrames - 8, durationInFrames],
     [0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   )
 
-  // Hyperspace streak length → 0 as we decelerate
-  const streakLenT = interpolate(localFrame, [0, PHASE_A_END, PHASE_B_END], [1, 1, 0], {
+  // Camera pose
+  const cam = camAt(localFrame)
+
+  // Hyperspace streak length decays → 0 after frame 30
+  const streakLenT = interpolate(localFrame, [0, 28, 42], [1, 1, 0], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp'
   })
-  const decelEased = easeOutExpo(streakLenT)
+  const streak = easeOutExpo(streakLenT)
 
-  // Generate stars with seeded angle + base distance
-  const stars = Array.from({ length: 380 }, (_, i) => {
+  // Nebula fades in as we decelerate
+  const nebulaAlpha = interpolate(localFrame, [22, 55], [0, 0.9], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+
+  // Frontend "opens" interpolation
+  const openT = interpolate(localFrame, [158, 186], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+  // Chosen folder's preview transitions to full tiles 180→195
+  const expandT = interpolate(localFrame, [178, 196], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+
+  return (
+    <AbsoluteFill
+      style={{
+        background: theme.bg,
+        opacity: sceneAlpha,
+        overflow: 'hidden',
+        perspective: '1600px'
+      }}
+    >
+      {/* Starfield (screen-space — stars don't inherit the camera transform) */}
+      <Hyperspace streak={streak} width={W} height={H} localFrame={localFrame} />
+
+      {/* Nebula gradient */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background:
+            'radial-gradient(circle at 40% 55%, rgba(99,102,241,0.22), transparent 55%), radial-gradient(circle at 70% 30%, rgba(236,72,153,0.12), transparent 55%)',
+          opacity: nebulaAlpha
+        }}
+      />
+
+      {/* 3D world */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          transformStyle: 'preserve-3d',
+          transform: `translate3d(${-cam.x}px, ${-cam.y}px, ${-cam.z}px) rotateY(${-cam.rotY}deg) rotateX(${-cam.rotX}deg)`,
+          willChange: 'transform'
+        }}
+      >
+        {/* World floor dots — infinite canvas feel */}
+        <WorldGrid />
+
+        {/* Folders */}
+        {FOLDERS.map((f, i) => (
+          <Folder3D
+            key={f.id}
+            folder={f}
+            appearAt={34 + i * 3}
+            openT={f.isChosen ? openT : 0}
+            expandT={f.isChosen ? expandT : 0}
+            localFrame={localFrame}
+          />
+        ))}
+      </div>
+
+      {/* Light vignette */}
+      <div
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background:
+            'radial-gradient(circle at center, transparent 55%, rgba(9,9,11,0.7) 100%)',
+          pointerEvents: 'none'
+        }}
+      />
+
+      {/* HUD caption — "entering: Frontend" once we commit */}
+      <HUD localFrame={localFrame} />
+    </AbsoluteFill>
+  )
+}
+
+// ── Hyperspace ──
+const Hyperspace: React.FC<{
+  streak: number
+  width: number
+  height: number
+  localFrame: number
+}> = ({ streak, width, height, localFrame }) => {
+  const cx = width / 2
+  const cy = height / 2
+  const stars = Array.from({ length: 360 }, (_, i) => {
     const angle = seeded(i + 1) * Math.PI * 2
-    const distPhase = ((seeded(i + 7) + localFrame / 110) % 1)
-    // Distance near camera near 0, far at 1
+    const distPhase = (seeded(i + 7) + localFrame / 95) % 1
     const d = 1 - distPhase
-    // Projected: radius on screen grows as star gets closer
-    const r = Math.pow(d, 2.3) * 620
+    const r = Math.pow(d, 2.3) * 680
     const x = cx + Math.cos(angle) * r
     const y = cy + Math.sin(angle) * r
-    // Streak length — long during hyperspace, zero after decel
-    const streakLen = decelEased * Math.pow(d, 1.6) * 90
+    const streakLen = streak * Math.pow(d, 1.6) * 95
     const tx = cx + Math.cos(angle) * (r - streakLen)
     const ty = cy + Math.sin(angle) * (r - streakLen)
     const brightness = 0.3 + Math.pow(d, 3) * 0.7
     const hueSeed = seeded(i + 23)
     const color =
       hueSeed < 0.7 ? '#ffffff' : hueSeed < 0.9 ? '#93c5fd' : '#a78bfa'
-    return { i, x, y, tx, ty, r: 1 + Math.pow(d, 3) * 2.2, color, brightness, d }
+    return { i, x, y, tx, ty, r: 0.9 + Math.pow(d, 3) * 2.1, color, brightness }
   })
-
   return (
-    <AbsoluteFill style={{ background: theme.bg, opacity: sceneAlpha, overflow: 'hidden' }}>
-      {/* Stars */}
-      <svg width={W} height={H} style={{ position: 'absolute', inset: 0 }}>
-        {stars.map((s) =>
-          decelEased > 0.05 ? (
-            <line
-              key={s.i}
-              x1={s.tx}
-              y1={s.ty}
-              x2={s.x}
-              y2={s.y}
-              stroke={s.color}
-              strokeWidth={s.r * 0.6}
-              strokeLinecap="round"
-              opacity={s.brightness}
-            />
-          ) : (
-            <circle
-              key={s.i}
-              cx={s.x}
-              cy={s.y}
-              r={s.r}
-              fill={s.color}
-              opacity={s.brightness}
-            />
-          )
-        )}
-      </svg>
-
-      {/* Distant nebula gradient (fades in during decel) */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background:
-            'radial-gradient(circle at 40% 55%, rgba(99,102,241,0.18), transparent 55%), radial-gradient(circle at 70% 30%, rgba(236,72,153,0.1), transparent 55%)',
-          opacity: interpolate(localFrame, [20, 55], [0, 1], {
-            extrapolateLeft: 'clamp',
-            extrapolateRight: 'clamp'
-          })
-        }}
-      />
-
-      {/* Folders (phase B onward) */}
-      <Folders localFrame={localFrame} phaseCEnd={PHASE_C_END} duration={durationInFrames} />
-
-      {/* Mid-phase caption */}
-      <Caption localFrame={localFrame} phaseBEnd={PHASE_B_END} />
-
-      {/* Vignette */}
-      <div
-        style={{
-          position: 'absolute',
-          inset: 0,
-          background:
-            'radial-gradient(circle at center, transparent 45%, rgba(9,9,11,0.8) 100%)',
-          pointerEvents: 'none'
-        }}
-      />
-    </AbsoluteFill>
-  )
-}
-
-// ── Folders: 4 workspace cards in 3D depth ──
-
-interface FolderSpec {
-  id: string
-  label: string
-  color: string
-  tiles: Array<{ kind: 'terminal' | 'browser' | 'note'; label: string }>
-}
-
-const FOLDERS: FolderSpec[] = [
-  {
-    id: 'ship',
-    label: 'Ship',
-    color: theme.blue,
-    tiles: [
-      { kind: 'terminal', label: 'deploy.sh' },
-      { kind: 'browser', label: 'vercel.com' },
-      { kind: 'note', label: 'release notes' }
-    ]
-  },
-  {
-    id: 'research',
-    label: 'Research',
-    color: theme.purple,
-    tiles: [
-      { kind: 'browser', label: 'arxiv.org' },
-      { kind: 'note', label: 'lit review' }
-    ]
-  },
-  {
-    id: 'backend',
-    label: 'Backend',
-    color: theme.green,
-    tiles: [
-      { kind: 'terminal', label: 'claude' },
-      { kind: 'terminal', label: 'pnpm dev' },
-      { kind: 'browser', label: 'localhost' }
-    ]
-  },
-  {
-    id: 'design',
-    label: 'Design',
-    color: theme.orange,
-    tiles: [
-      { kind: 'browser', label: 'figma.com' },
-      { kind: 'note', label: 'mood board' }
-    ]
-  }
-]
-
-const PRIMARY_INDEX = 0 // Ship
-
-const Folders: React.FC<{ localFrame: number; phaseCEnd: number; duration: number }> = ({
-  localFrame,
-  phaseCEnd,
-  duration
-}) => {
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        perspective: '1400px',
-        transformStyle: 'preserve-3d',
-        pointerEvents: 'none'
-      }}
-    >
-      {FOLDERS.map((folder, i) => (
-        <Folder
-          key={folder.id}
-          folder={folder}
-          index={i}
-          isPrimary={i === PRIMARY_INDEX}
-          localFrame={localFrame}
-          phaseCEnd={phaseCEnd}
-          totalDuration={duration}
-        />
-      ))}
-    </div>
-  )
-}
-
-const Folder: React.FC<{
-  folder: FolderSpec
-  index: number
-  isPrimary: boolean
-  localFrame: number
-  phaseCEnd: number
-  totalDuration: number
-}> = ({ folder, index, isPrimary, localFrame, phaseCEnd, totalDuration }) => {
-  // Appearance timing: stagger appearance in phase B
-  const appearAt = 34 + index * 4
-  const t = interpolate(localFrame, [appearAt, appearAt + 16], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp'
-  })
-  if (t <= 0) return null
-
-  // Folder positions in the world (radial arrangement around center)
-  // Non-primary folders drift off-screen in phase C
-  const radial = [
-    { x: 0, y: 0, z: 0 }, // primary — center
-    { x: 340, y: -180, z: -200 },
-    { x: -360, y: -140, z: -260 },
-    { x: 260, y: 200, z: -300 }
-  ]
-  const slot = radial[index] ?? { x: 0, y: 0, z: 0 }
-
-  // Phase C: primary approaches (z moves forward), others recede
-  const approachT = interpolate(localFrame, [phaseCEnd - 38, phaseCEnd], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp'
-  })
-  const approachEased = easeInOut(approachT)
-
-  // Approach transforms
-  let tx = slot.x
-  let ty = slot.y
-  let tz = slot.z
-  let scale = 1
-
-  if (isPrimary) {
-    // Pull forward, grow
-    tz = slot.z + approachEased * 420
-    scale = 1 + approachEased * 0.55
-    // Drift toward center slightly
-    tx = slot.x * (1 - approachEased)
-    ty = slot.y * (1 - approachEased)
-  } else {
-    // Fly past the camera
-    tz = slot.z - approachEased * 800
-    tx = slot.x * (1 + approachEased * 1.5)
-    ty = slot.y * (1 + approachEased * 1.5)
-    scale = 1 - approachEased * 0.5
-  }
-
-  // Phase D: primary folder opens and contents fly out
-  const openT = interpolate(localFrame, [phaseCEnd, phaseCEnd + 18], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp'
-  })
-  const isOpening = isPrimary && openT > 0
-
-  // Phase D: zoom camera all the way in — primary grows to fill, then fades
-  const diveT = interpolate(
-    localFrame,
-    [phaseCEnd + 10, totalDuration - 10],
-    [0, 1],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  )
-  const diveEased = easeInOut(diveT)
-  const diveScale = isPrimary ? 1 + diveEased * 3.2 : 1
-  const diveOpacity = isPrimary ? 1 - Math.pow(diveEased, 2) : 1
-
-  const opacity = t * (isPrimary ? diveOpacity : 1 - approachEased * 0.9)
-
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: `translate3d(${tx - 170}px, ${ty - 120}px, ${tz}px) scale(${scale * diveScale})`,
-        transformStyle: 'preserve-3d',
-        opacity,
-        filter: isPrimary ? 'none' : `blur(${approachEased * 4}px)`,
-        willChange: 'transform, opacity'
-      }}
-    >
-      <FolderCard folder={folder} localFrame={localFrame} openT={openT} isPrimary={isPrimary} />
-      {isOpening && (
-        <WorkspaceTiles
-          folder={folder}
-          localFrame={localFrame}
-          openT={openT}
-          phaseCEnd={phaseCEnd}
-        />
+    <svg width={width} height={height} style={{ position: 'absolute', inset: 0 }}>
+      {stars.map((s) =>
+        streak > 0.04 ? (
+          <line
+            key={s.i}
+            x1={s.tx}
+            y1={s.ty}
+            x2={s.x}
+            y2={s.y}
+            stroke={s.color}
+            strokeWidth={s.r * 0.6}
+            strokeLinecap="round"
+            opacity={s.brightness}
+          />
+        ) : (
+          <circle key={s.i} cx={s.x} cy={s.y} r={s.r} fill={s.color} opacity={s.brightness} />
+        )
       )}
-    </div>
+    </svg>
   )
 }
 
-// ── Folder card visual ──
-const FolderCard: React.FC<{
-  folder: FolderSpec
-  localFrame: number
-  openT: number
-  isPrimary: boolean
-}> = ({ folder, localFrame, openT, isPrimary }) => {
-  // The folder is a 340x240 stylised folder with a tab and body.
-  // On open: tab lifts (rotateX), body crease brightens.
-  const tabLift = openT * -60 // rotateX degrees
-  const tabShift = openT * -24 // translateY
+// ── World grid (dot plane below folders) ──
+const WorldGrid: React.FC = () => {
+  const dots: React.ReactNode[] = []
+  for (let ix = -10; ix <= 10; ix++) {
+    for (let iz = -6; iz <= 6; iz++) {
+      const wx = ix * 120
+      const wz = iz * 120 - 300
+      dots.push(
+        <div
+          key={`${ix}-${iz}`}
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            width: 2,
+            height: 2,
+            borderRadius: 999,
+            background: '#2a2a35',
+            transform: `translate3d(${wx - 1}px, 280px, ${wz}px)`
+          }}
+        />
+      )
+    }
+  }
+  return <>{dots}</>
+}
 
-  // Folder count badge (shows tile count)
-  const count = folder.tiles.length
+// ── 3D folder in world space ──
+const Folder3D: React.FC<{
+  folder: WorldFolder
+  appearAt: number
+  openT: number
+  expandT: number
+  localFrame: number
+}> = ({ folder, appearAt, openT, expandT, localFrame }) => {
+  const appear = interpolate(localFrame, [appearAt, appearAt + 22], [0, 1], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+  if (appear <= 0) return null
+
+  // Folder "grows" its native size as it opens (chosen only)
+  const openScale = 1 + openT * 0.45
+  // Chosen folder fades when we're inside it
+  const insideFade = expandT > 0.9 ? 1 - (expandT - 0.9) / 0.1 : 1
+
+  const W_FOLDER = 420
+  const H_FOLDER = 300
 
   return (
     <div
       style={{
-        width: 340,
-        height: 240,
+        position: 'absolute',
+        left: '50%',
+        top: '50%',
+        width: W_FOLDER,
+        height: H_FOLDER,
+        marginLeft: -W_FOLDER / 2,
+        marginTop: -H_FOLDER / 2,
+        transformStyle: 'preserve-3d',
+        transform: `translate3d(${folder.worldX}px, ${folder.worldY}px, ${folder.worldZ}px) rotateY(${folder.rotY}deg) scale(${openScale})`,
+        opacity: appear * insideFade,
+        willChange: 'transform'
+      }}
+    >
+      <FolderFace folder={folder} openT={openT} expandT={expandT} localFrame={localFrame} />
+    </div>
+  )
+}
+
+// ── Folder face: tab + body + tiles ──
+const FolderFace: React.FC<{
+  folder: WorldFolder
+  openT: number
+  expandT: number
+  localFrame: number
+}> = ({ folder, openT, expandT, localFrame }) => {
+  const tabTilt = openT * -72 // tab lifts away
+  const tabShift = openT * -18
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
         position: 'relative',
         transformStyle: 'preserve-3d',
         fontFamily: fontStack
@@ -354,172 +422,305 @@ const FolderCard: React.FC<{
           borderRadius: 14,
           background: `linear-gradient(160deg, ${folder.color}22 0%, ${theme.panel} 60%, ${theme.bg} 100%)`,
           border: `1px solid ${folder.color}66`,
-          boxShadow: isPrimary
+          boxShadow: folder.isChosen
             ? `0 30px 80px ${folder.color}33, 0 0 0 1px ${folder.color}22`
             : `0 12px 30px rgba(0,0,0,0.5)`,
           overflow: 'hidden'
         }}
       >
-        {/* Dot grid inside the folder body */}
-        <DotGridInside color={folder.color} />
+        {/* Dot grid canvas background */}
+        <DotGridInside color={folder.color} w={420} h={300} />
 
-        {/* Mini preview of tiles inside (faded) */}
+        {/* Tile preview grid (folded inside) */}
         <div
           style={{
             position: 'absolute',
-            inset: 24,
-            top: 44,
+            inset: 16,
+            top: 40,
+            bottom: 16,
             display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
+            gridTemplateColumns: folder.tiles.length >= 4 ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+            gridTemplateRows: folder.tiles.length >= 4 ? 'repeat(2, 1fr)' : 'auto',
             gap: 8,
-            opacity: 0.45
+            opacity: 1 - expandT * 0.3
           }}
         >
-          {folder.tiles.map((t, i) => (
-            <div
-              key={i}
-              style={{
-                height: 54,
-                borderRadius: 6,
-                background: t.kind === 'terminal' ? '#0d0e12' : t.kind === 'browser' ? '#10131a' : '#1a1410',
-                border: `1px solid ${folder.color}44`,
-                padding: 6,
-                display: 'flex',
-                alignItems: 'center',
-                fontFamily: monoStack,
-                fontSize: 9,
-                color: theme.textMuted,
-                gap: 4
-              }}
-            >
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 999,
-                  background: folder.color,
-                  flexShrink: 0
-                }}
-              />
-              {t.label}
-            </div>
+          {folder.tiles.slice(0, 4).map((tile, i) => (
+            <MiniTileBody key={i} tile={tile} folder={folder} index={i} localFrame={localFrame} />
           ))}
         </div>
 
-        {/* Label (bottom bar) + count pill */}
+        {/* Count pill */}
         <div
           style={{
             position: 'absolute',
             bottom: 12,
-            left: 14,
-            right: 14,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            color: theme.text
+            right: 12,
+            fontFamily: monoStack,
+            fontSize: 11,
+            color: folder.color,
+            padding: '3px 8px',
+            borderRadius: 999,
+            border: `1px solid ${folder.color}55`,
+            background: 'rgba(0,0,0,0.5)'
           }}
         >
-          <FolderLabel text={folder.label} color={folder.color} localFrame={localFrame} />
-          <span
-            style={{
-              fontFamily: monoStack,
-              fontSize: 12,
-              color: folder.color,
-              padding: '3px 8px',
-              borderRadius: 999,
-              border: `1px solid ${folder.color}55`
-            }}
-          >
-            {count} tiles
-          </span>
+          {folder.tiles.length} tiles
         </div>
       </div>
 
-      {/* Folder tab (top-left) — lifts on open */}
+      {/* Folder tab — shows workspace name */}
       <div
         style={{
           position: 'absolute',
-          top: -14,
-          left: 20,
-          width: 130,
-          height: 28,
-          borderRadius: '8px 16px 0 0',
+          top: -18,
+          left: 24,
+          height: 32,
+          padding: '0 16px',
+          borderRadius: '10px 18px 0 0',
           background: folder.color,
-          transformOrigin: 'center bottom',
-          transform: `translateY(${tabShift}px) rotateX(${tabLift}deg)`,
+          color: '#0a0a0a',
           display: 'flex',
           alignItems: 'center',
-          padding: '0 14px',
-          fontFamily: monoStack,
-          fontSize: 11,
-          fontWeight: 600,
-          color: '#000',
-          letterSpacing: 0.5,
-          textTransform: 'uppercase'
+          gap: 8,
+          fontFamily: fontStack,
+          fontSize: 14,
+          fontWeight: 700,
+          letterSpacing: 0.2,
+          transformOrigin: 'center bottom',
+          transform: `translateY(${tabShift}px) rotateX(${tabTilt}deg)`,
+          boxShadow: `0 0 20px ${folder.color}44`
         }}
       >
-        workspace
+        <svg viewBox="0 0 24 24" width={12} height={12} fill="currentColor" aria-hidden>
+          <path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" />
+        </svg>
+        {folder.name}
       </div>
     </div>
   )
 }
 
-// Folder label: character-scramble into final text
-const FolderLabel: React.FC<{
-  text: string
-  color: string
+// ── A mini-tile inside a folder — renders like a real AgentCanvas tile ──
+const MiniTileBody: React.FC<{
+  tile: MiniTile
+  folder: WorldFolder
+  index: number
   localFrame: number
-}> = ({ text, color, localFrame }) => {
-  // Scramble pool local so we don't import
-  const chars = text.split('')
+}> = ({ tile, folder, index, localFrame }) => {
+  // Stagger the "alive" animation for tiles inside the chosen folder.
+  const aliveAt = folder.isChosen ? 60 + index * 4 : 70 + index * 6
+  const alive = Math.max(0, localFrame - aliveAt)
+
   return (
-    <span style={{ fontSize: 24, fontWeight: 700, letterSpacing: -0.5 }}>
-      {chars.map((ch, i) => {
-        const startF = 36 + i * 1.5
-        const endF = startF + 10
-        if (localFrame < startF) return null
-        if (localFrame >= endF) {
-          return (
-            <span key={i} style={{ color: theme.text }}>
-              {ch}
-            </span>
-          )
-        }
-        const pool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#$@%&*!'
-        const idx = Math.floor(
-          ((localFrame * 9973) ^ (i * 51)) % pool.length
-        )
-        return (
-          <span key={i} style={{ color }}>
-            {pool[Math.abs(idx) % pool.length]}
-          </span>
-        )
-      })}
-    </span>
+    <div
+      style={{
+        position: 'relative',
+        borderRadius: 6,
+        background: '#0c0d12',
+        border: `1px solid ${folder.color}44`,
+        padding: 6,
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        fontFamily: monoStack,
+        fontSize: 8
+      }}
+    >
+      {/* Mini tile header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          fontSize: 7,
+          color: theme.textMuted
+        }}
+      >
+        <span
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: 999,
+            background: tile.accent
+          }}
+        />
+        {tile.kind}
+      </div>
+      {/* Mini tile content based on kind */}
+      <div style={{ flex: 1, overflow: 'hidden', color: theme.text }}>
+        {tile.kind === 'terminal' && <MiniTerminal alive={alive} />}
+        {tile.kind === 'browser' && <MiniBrowser alive={alive} />}
+        {tile.kind === 'note' && <MiniNote alive={alive} accent={tile.accent} />}
+        {tile.kind === 'task' && <MiniTask alive={alive} accent={tile.accent} />}
+      </div>
+    </div>
   )
 }
 
-// Dot grid inside folder body (canvas-like)
-const DotGridInside: React.FC<{ color: string }> = ({ color }) => {
+const MiniTerminal: React.FC<{ alive: number }> = ({ alive }) => {
+  const lines = [
+    { at: 0, text: '$ claude', color: '#fff' },
+    { at: 14, text: '● spawning…', color: '#fbbf24' },
+    { at: 26, text: '├ reviewer', color: '#71717a' },
+    { at: 32, text: '├ tester', color: '#71717a' },
+    { at: 40, text: '✓ ready', color: '#22c55e' }
+  ]
+  return (
+    <div style={{ fontSize: 7, lineHeight: 1.4 }}>
+      {lines.map((l, i) => {
+        if (alive < l.at) return null
+        const chars = Math.min(l.text.length, Math.floor((alive - l.at) * 2))
+        return (
+          <div key={i} style={{ color: l.color }}>
+            {l.text.slice(0, chars)}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const MiniBrowser: React.FC<{ alive: number }> = ({ alive }) => {
+  const url = 'claude.ai/agentcanvas'
+  const typed = Math.min(url.length, Math.floor(alive * 1.2))
+  const load = Math.min(1, Math.max(0, (alive - 20) / 18))
+  return (
+    <div style={{ fontSize: 7, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <div
+        style={{
+          padding: '2px 4px',
+          background: '#06070a',
+          border: '1px solid #1a1b22',
+          borderRadius: 3,
+          color: '#a1a1aa'
+        }}
+      >
+        {url.slice(0, typed)}
+      </div>
+      <div
+        style={{
+          height: 1,
+          background: '#1a1b22',
+          borderRadius: 1,
+          overflow: 'hidden'
+        }}
+      >
+        <div
+          style={{
+            width: `${load * 100}%`,
+            height: '100%',
+            background: theme.blue,
+            boxShadow: `0 0 3px ${theme.blue}`
+          }}
+        />
+      </div>
+      {/* skeleton */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, opacity: Math.max(0, (alive - 30) / 10) }}>
+        <div style={{ height: 3, width: '70%', background: '#202128' }} />
+        <div style={{ height: 8, background: '#1b1c22' }} />
+        <div style={{ height: 3, width: '90%', background: '#1a1b21' }} />
+      </div>
+    </div>
+  )
+}
+
+const MiniNote: React.FC<{ alive: number; accent: string }> = ({ alive, accent }) => {
+  const title = '# Tutorials plan'
+  const lines = [
+    { at: 10, text: '- Ship welcome' },
+    { at: 22, text: '- Record term' },
+    { at: 34, text: '- Record brwsr' }
+  ]
+  const titleChars = Math.min(title.length, Math.floor(alive * 1.2))
+  return (
+    <div style={{ fontSize: 7, lineHeight: 1.4 }}>
+      <div style={{ color: accent }}>{title.slice(0, titleChars)}</div>
+      {lines.map((l, i) => {
+        if (alive < l.at) return null
+        const c = Math.min(l.text.length, Math.floor((alive - l.at) * 1.4))
+        return (
+          <div key={i} style={{ color: theme.textMuted }}>
+            {l.text.slice(0, c)}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const MiniTask: React.FC<{ alive: number; accent: string }> = ({ alive, accent }) => {
+  const tasks = [
+    { label: 'Classify', at: 12 },
+    { label: 'Link plan', at: 26 },
+    { label: 'Review', at: 40 }
+  ]
+  return (
+    <div style={{ fontSize: 7, display: 'flex', flexDirection: 'column', gap: 3 }}>
+      {tasks.map((t, i) => {
+        const checked = alive >= t.at
+        return (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <div
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 2,
+                border: `1px solid ${checked ? accent : '#3f3f46'}`,
+                background: checked ? accent : 'transparent',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#fff',
+                fontSize: 5,
+                lineHeight: 1
+              }}
+            >
+              {checked ? '✓' : ''}
+            </div>
+            <span
+              style={{
+                color: checked ? '#52525b' : theme.text,
+                textDecoration: checked ? 'line-through' : 'none'
+              }}
+            >
+              {t.label}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+const DotGridInside: React.FC<{ color: string; w: number; h: number }> = ({
+  color,
+  w,
+  h
+}) => {
   const dots: React.ReactNode[] = []
-  for (let y = 0; y < 10; y++) {
-    for (let x = 0; x < 14; x++) {
+  const spacing = 24
+  const cols = Math.floor(w / spacing)
+  const rows = Math.floor(h / spacing)
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
       dots.push(
         <circle
           key={`${x}-${y}`}
-          cx={16 + x * 24}
-          cy={40 + y * 20}
+          cx={16 + x * spacing}
+          cy={40 + y * spacing}
           r={1}
           fill={color}
-          opacity={0.18}
+          opacity={0.15}
         />
       )
     }
   }
   return (
     <svg
-      width={340}
-      height={240}
+      width={w}
+      height={h}
       style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
     >
       {dots}
@@ -527,122 +728,69 @@ const DotGridInside: React.FC<{ color: string }> = ({ color }) => {
   )
 }
 
-// ── Workspace tiles that fly out when the folder opens ──
-const WorkspaceTiles: React.FC<{
-  folder: FolderSpec
-  localFrame: number
-  openT: number
-  phaseCEnd: number
-}> = ({ folder, localFrame, phaseCEnd }) => {
-  // 3 tiles fan out above the folder
-  const positions: Array<{ x: number; y: number; rot: number }> = [
-    { x: -220, y: -220, rot: -8 },
-    { x: 0, y: -300, rot: 2 },
-    { x: 220, y: -220, rot: 8 }
-  ]
+// ── HUD caption: "entering Frontend" once we commit ──
+const HUD: React.FC<{ localFrame: number }> = ({ localFrame }) => {
+  const glideOpacity = interpolate(localFrame, [60, 75, 132, 142], [0, 1, 1, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+  const enteringOpacity = interpolate(
+    localFrame,
+    [142, 152, 190, 200],
+    [0, 1, 1, 0],
+    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
+  )
+
   return (
     <>
-      {folder.tiles.slice(0, 3).map((tile, i) => {
-        const startF = phaseCEnd + 4 + i * 3
-        const t = interpolate(localFrame, [startF, startF + 20], [0, 1], {
-          extrapolateLeft: 'clamp',
-          extrapolateRight: 'clamp'
-        })
-        const eased = easeOutExpo(t)
-        const pos = positions[i] ?? positions[0]
-        return (
+      {glideOpacity > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 60,
+            left: 0,
+            right: 0,
+            textAlign: 'center',
+            fontFamily: monoStack,
+            color: theme.textMuted,
+            opacity: glideOpacity,
+            pointerEvents: 'none'
+          }}
+        >
           <div
-            key={i}
             style={{
-              position: 'absolute',
-              left: 170,
-              top: 120,
-              width: 130,
-              height: 90,
-              transform: `translate(${-65 + pos.x * eased}px, ${-45 + pos.y * eased}px) rotate(${pos.rot * eased}deg) scale(${0.6 + eased * 0.5})`,
-              borderRadius: 10,
-              background: theme.panel,
-              border: `1px solid ${folder.color}88`,
-              boxShadow: `0 12px 30px ${folder.color}44`,
-              opacity: t,
-              padding: 8,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              fontFamily: monoStack
+              fontSize: 11,
+              textTransform: 'uppercase',
+              letterSpacing: 5,
+              color: theme.textDim
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 10,
-                color: theme.textMuted
-              }}
-            >
-              <span
-                style={{
-                  width: 7,
-                  height: 7,
-                  borderRadius: 999,
-                  background: folder.color
-                }}
-              />
-              {tile.kind}
-            </div>
-            <div
-              style={{
-                fontSize: 12,
-                color: theme.text,
-                fontWeight: 600
-              }}
-            >
-              {tile.label}
-            </div>
-            <div
-              style={{
-                flex: 1,
-                borderRadius: 4,
-                background: '#0c0d12',
-                marginTop: 2
-              }}
-            />
+            [ your workspaces ]
           </div>
-        )
-      })}
+        </div>
+      )}
+      {enteringOpacity > 0 && (
+        <EnteringHud opacity={enteringOpacity} localFrame={localFrame} />
+      )}
     </>
   )
 }
 
-// ── Mid-phase caption (below stars, above folders) ──
-const Caption: React.FC<{ localFrame: number; phaseBEnd: number }> = ({
-  localFrame,
-  phaseBEnd
+const EnteringHud: React.FC<{ opacity: number; localFrame: number }> = ({
+  opacity,
+  localFrame
 }) => {
-  const textStart = phaseBEnd - 14
-  const textEnd = phaseBEnd + 20
-  const opacity = interpolate(
-    localFrame,
-    [textStart, textStart + 10, textEnd, textEnd + 10],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  )
-  if (opacity <= 0) return null
-
-  const line = 'entering workspace…'
-  const charsShown = Math.max(
-    0,
-    Math.min(line.length, Math.floor((localFrame - textStart) * 1.4))
-  )
+  const line = 'entering'
+  const folder = 'Frontend'
+  const typedLine = Math.max(0, Math.min(line.length, Math.floor((localFrame - 144) * 1.4)))
+  const typedFolder = Math.max(0, Math.min(folder.length, Math.floor((localFrame - 156) * 1.4)))
   const cursorVisible = Math.floor(localFrame / 6) % 2 === 0
   const underlineDraw = interpolate(
     localFrame,
-    [textStart + 6, textStart + 18],
+    [150, 172],
     [0, 1],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   )
-
   return (
     <div
       style={{
@@ -652,29 +800,34 @@ const Caption: React.FC<{ localFrame: number; phaseBEnd: number }> = ({
         right: 0,
         textAlign: 'center',
         fontFamily: monoStack,
-        color: theme.textMuted,
+        color: theme.text,
         opacity,
         pointerEvents: 'none'
       }}
     >
       <div
         style={{
-          fontSize: 12,
+          fontSize: 11,
           textTransform: 'uppercase',
           letterSpacing: 5,
           color: theme.textDim,
           marginBottom: 4
         }}
       >
-        [ canvas ]
+        [ workspace ]
       </div>
-      <div style={{ fontSize: 18, display: 'inline-block' }}>
-        {line.slice(0, charsShown)}
-        {charsShown < line.length && cursorVisible ? '▎' : ''}
+      <div style={{ fontSize: 20, display: 'inline-block' }}>
+        <span style={{ color: theme.textMuted }}>{line.slice(0, typedLine)} </span>
+        <span style={{ color: theme.blue, fontWeight: 700 }}>
+          {folder.slice(0, typedFolder)}
+        </span>
+        {typedFolder < folder.length && cursorVisible ? (
+          <span style={{ color: theme.blue }}>▎</span>
+        ) : null}
       </div>
       <div
         style={{
-          width: `${underlineDraw * 220}px`,
+          width: `${underlineDraw * 240}px`,
           height: 1,
           background: theme.blue,
           margin: '8px auto 0',

@@ -31,11 +31,24 @@ export const Wordmark: React.FC<WordmarkProps> = ({ localFrame, durationInFrames
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   )
 
+  // Cold-open: everything starts at 1.4x scale as if the camera is too close,
+  // pulls back to 1.0x over the first 20 frames so the scramble is revealed
+  // as the camera rack-focuses rather than the letters themselves sliding.
+  const coldOpenScale = interpolate(localFrame, [0, 20], [1.4, 1.0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+  const coldOpenBlur = interpolate(localFrame, [0, 18], [10, 0], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp'
+  })
+
   // Exit: entire block gets pulled backwards + blurred so the next scene's
   // starfield feels like a continuation (we're receding into space).
+  // Held +30f longer (hang time) before exit.
   const exitProgress = interpolate(
     localFrame,
-    [durationInFrames - 18, durationInFrames],
+    [durationInFrames - 22, durationInFrames],
     [0, 1],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   )
@@ -96,8 +109,8 @@ export const Wordmark: React.FC<WordmarkProps> = ({ localFrame, durationInFrames
           display: 'flex',
           perspective: '1400px',
           transformStyle: 'preserve-3d',
-          transform: `scale(${breathe * exitScale}) translateZ(${exitTranslateZ}px)`,
-          filter: `blur(${exitBlur}px)`
+          transform: `scale(${breathe * exitScale * coldOpenScale}) translateZ(${exitTranslateZ}px)`,
+          filter: `blur(${exitBlur + coldOpenBlur}px)`
         }}
       >
         {letters.map((ch, i) => {
