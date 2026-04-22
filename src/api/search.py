@@ -24,16 +24,20 @@ def score(query: str, doc: str) -> float:
         return 0.0
     tf = Counter(d_tokens)
     length_norm = 1.0 / math.sqrt(len(d_tokens))
+    q_unique = set(q_terms)
     matched = 0
     tf_sum = 0.0
-    for term in set(q_terms):
+    # BM25-style TF saturation: repeats help but saturate, so keyword-spammed
+    # docs can't dominate genuinely topical short docs.
+    k1 = 1.5
+    for term in q_unique:
         count = tf.get(term, 0)
         if count:
             matched += 1
-            tf_sum += math.log1p(count)
+            tf_sum += (k1 + 1.0) * count / (k1 + count)
     if matched == 0:
         return 0.0
-    coverage = matched / len(set(q_terms))
+    coverage = matched / len(q_unique)
     return tf_sum * length_norm * coverage
 
 
