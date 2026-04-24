@@ -206,6 +206,15 @@ export interface CanvasStore {
   addDrawAt: (position?: { x: number; y: number }, linkedTerminalId?: string) => string
   addBrowserForTerminal: (terminalId: string, url: string, reservationId?: string, tileWidth?: number, tileHeight?: number) => void
   addTerminalForTerminal: (info: TerminalSpawnInfo) => void
+  addRunnerTile: (info: {
+    runnerTileId: string
+    benchmarkId: string
+    label: string
+    worktreePath: string
+    pid: number
+    width?: number
+    height?: number
+  }) => void
   addNoteForApi: (info: { noteId: string; label?: string; linkedTerminalId?: string; linkedNoteId?: string; position?: { x: number; y: number }; width?: number; height?: number }) => void
   focusTile: (sessionId: string) => void
   zoomToFocused: () => void
@@ -717,6 +726,32 @@ export const useCanvasStore = create<CanvasStore>((set, get) => {
           focusedId: sessionId
         }
       })
+    },
+
+    addRunnerTile: (info) => {
+      const width = info.width ?? 720
+      const height = info.height ?? 420
+      const visible = get().getVisibleNodes()
+      const pos = findOpenPosition(visible, width, height, 4, get().tileGap)
+      const newNode: Node = {
+        id: info.runnerTileId,
+        type: 'benchmarkRunner',
+        position: pos,
+        style: { width, height },
+        data: {
+          runnerTileId: info.runnerTileId,
+          benchmarkId: info.benchmarkId,
+          label: info.label,
+          worktreePath: info.worktreePath,
+          pid: info.pid
+        },
+        dragHandle: '.runner-tile-header'
+      }
+      set((s) => ({
+        allNodes: [...s.allNodes, newNode],
+        tileWorkspaceMap: new Map(s.tileWorkspaceMap).set(info.runnerTileId, s.activeWorkspaceId),
+        focusedId: info.runnerTileId
+      }))
     },
 
     addNoteForApi: (info) => {

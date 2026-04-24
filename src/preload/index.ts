@@ -318,6 +318,13 @@ export type DerivedTaskState =
   | 'review'
   | 'done'
 
+export type HarnessTemplateKind =
+  | 'web-page-load'
+  | 'api-latency'
+  | 'bundle-size'
+  | 'test-suite-time'
+  | 'pure-function'
+
 export interface TaskMeta {
   taskId: string
   label: string
@@ -334,6 +341,8 @@ export interface TaskMeta {
   updatedAt: number
   harnessWorktreePath?: string
   harnessBranch?: string
+  suggestedTemplateKind?: HarnessTemplateKind
+  suggestedTargetUrl?: string
 }
 
 export interface TaskFile {
@@ -374,6 +383,8 @@ export interface TaskCreateInput {
   timelinePressure?: TaskTimeline
   workspaceId?: string
   position?: { x: number; y: number }
+  suggestedTemplateKind?: HarnessTemplateKind
+  suggestedTargetUrl?: string
 }
 
 export interface TaskAPI {
@@ -411,6 +422,8 @@ export interface TaskAPI {
     intent?: string
     acceptanceMarkdown?: string
     classification?: TaskClassification
+    suggestedTemplateKind?: HarnessTemplateKind
+    suggestedTargetUrl?: string
   }) => Promise<{ ok: boolean; error?: string }>
   suggest: (input: {
     classification: TaskClassification
@@ -650,12 +663,7 @@ export interface BenchmarkAPI {
     acceptanceCriteria: string
     noiseClass?: NoiseClass
     higherIsBetter?: boolean
-    templateKind?:
-      | 'web-page-load'
-      | 'api-latency'
-      | 'bundle-size'
-      | 'test-suite-time'
-      | 'pure-function'
+    templateKind?: HarnessTemplateKind
     targetUrl?: string
   }) => Promise<{
     ok: boolean
@@ -687,6 +695,21 @@ export interface BenchmarkAPI {
   onBenchmarkStateChange: (cb: (info: { benchmarkId: string }) => void) => () => void
   onBenchmarkClose: (cb: (info: { benchmarkId: string }) => void) => () => void
   onBenchmarkDelete: (cb: (info: { benchmarkId: string }) => void) => () => void
+  /** Main process wants to spawn a runner-status tile for a live benchmark runner. */
+  onRunnerTileSpawn: (
+    cb: (info: {
+      runnerTileId: string
+      benchmarkId: string
+      label: string
+      worktreePath: string
+      pid: number
+      width: number
+      height: number
+    }) => void
+  ) => () => void
+  onRunnerStderr: (cb: (info: { benchmarkId: string; chunk: string }) => void) => () => void
+  onRunnerStdout: (cb: (info: { benchmarkId: string; chunk: string }) => void) => () => void
+  onRunnerExit: (cb: (info: { benchmarkId: string; code: number | null }) => void) => () => void
 }
 
 const benchmarkAPI: BenchmarkAPI = {
@@ -743,6 +766,46 @@ const benchmarkAPI: BenchmarkAPI = {
     ): void => callback(info)
     ipcRenderer.on('canvas:benchmark-delete', handler)
     return () => ipcRenderer.removeListener('canvas:benchmark-delete', handler)
+  },
+  onRunnerTileSpawn: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: {
+        runnerTileId: string
+        benchmarkId: string
+        label: string
+        worktreePath: string
+        pid: number
+        width: number
+        height: number
+      }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:runner-tile-spawn', handler)
+    return () => ipcRenderer.removeListener('canvas:runner-tile-spawn', handler)
+  },
+  onRunnerStderr: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { benchmarkId: string; chunk: string }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:runner-stderr', handler)
+    return () => ipcRenderer.removeListener('canvas:runner-stderr', handler)
+  },
+  onRunnerStdout: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { benchmarkId: string; chunk: string }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:runner-stdout', handler)
+    return () => ipcRenderer.removeListener('canvas:runner-stdout', handler)
+  },
+  onRunnerExit: (callback) => {
+    const handler = (
+      _e: Electron.IpcRendererEvent,
+      info: { benchmarkId: string; code: number | null }
+    ): void => callback(info)
+    ipcRenderer.on('canvas:runner-exit', handler)
+    return () => ipcRenderer.removeListener('canvas:runner-exit', handler)
   }
 }
 

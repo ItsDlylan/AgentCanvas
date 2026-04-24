@@ -8,6 +8,7 @@ import {
   existsSync,
   promises as fsp
 } from 'fs'
+import type { HarnessTemplateKind } from '../preload/index'
 
 const TASK_DIR = join(homedir(), 'AgentCanvas', 'tmp')
 const saveQueues = new Map<string, Promise<void>>()
@@ -40,6 +41,10 @@ export interface TaskMeta {
   harnessWorktreePath?: string
   /** For BENCHMARK tasks: branch name of that design worktree. */
   harnessBranch?: string
+  /** Template kind proposed by the suggester, used as default when opening DesignHarnessModal. */
+  suggestedTemplateKind?: HarnessTemplateKind
+  /** Target URL proposed by the suggester (only meaningful for web-page-load template). */
+  suggestedTargetUrl?: string
 }
 
 export interface TaskFile {
@@ -103,7 +108,10 @@ export async function saveTask(
         createdAt: existing?.meta.createdAt ?? now,
         updatedAt: now,
         harnessWorktreePath: meta.harnessWorktreePath ?? existing?.meta.harnessWorktreePath,
-        harnessBranch: meta.harnessBranch ?? existing?.meta.harnessBranch
+        harnessBranch: meta.harnessBranch ?? existing?.meta.harnessBranch,
+        suggestedTemplateKind:
+          meta.suggestedTemplateKind ?? existing?.meta.suggestedTemplateKind,
+        suggestedTargetUrl: meta.suggestedTargetUrl ?? existing?.meta.suggestedTargetUrl
       },
       intent: intent ?? existing?.intent ?? '',
       acceptanceCriteria: acceptanceCriteria ?? existing?.acceptanceCriteria ?? {}

@@ -62,6 +62,7 @@ import {
   type TaskTimeline,
   type TaskFile
 } from './task-store'
+import type { HarnessTemplateKind } from '../preload/index'
 import { classify as classifyTask } from './task-classifier'
 import { deriveTaskState } from './task-state-derive'
 import {
@@ -89,6 +90,7 @@ import {
 import { compareScores, heldOutDiverged, acceptedScoresFromRows } from './benchmark-compare'
 import { distillBrief, sanitizeForBrief } from './benchmark-brief'
 import { buildHarnessDesignPrompt } from './benchmark-harness-prompt'
+import { benchmarkRunnerManager } from './benchmark-runner-manager'
 import { suggestTask, type SuggestInput as TaskSuggestInput } from './task-suggester'
 import { readFileSync as fsReadFileSync, writeFileSync as fsWriteFileSync, mkdirSync as fsMkdirSync, watch as fsWatch, type FSWatcher } from 'fs'
 import { loadPomodoro, savePomodoro } from './pomodoro-store'
@@ -812,6 +814,8 @@ ipcMain.handle(
       timelinePressure?: TaskTimeline
       workspaceId?: string
       position?: { x: number; y: number }
+      suggestedTemplateKind?: HarnessTemplateKind
+      suggestedTargetUrl?: string
     }
   ) => {
     const taskId = randomUUID()
@@ -854,7 +858,9 @@ ipcMain.handle(
       height: 440,
       isSoftDeleted: false,
       createdAt: Date.now(),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      suggestedTemplateKind: input.suggestedTemplateKind,
+      suggestedTargetUrl: input.suggestedTargetUrl
     }
     await saveTask(taskId, meta, intent, acceptanceDoc)
     mainWindow?.webContents.send('canvas:task-open', { taskId, meta })
@@ -872,6 +878,8 @@ ipcMain.handle(
       intent?: string
       acceptanceMarkdown?: string
       classification?: TaskClassification
+      suggestedTemplateKind?: HarnessTemplateKind
+      suggestedTargetUrl?: string
     }
   ) => {
     const file = loadTask(input.taskId)
@@ -880,6 +888,8 @@ ipcMain.handle(
       ...file.meta,
       label: input.label ?? file.meta.label,
       classification: input.classification ?? file.meta.classification,
+      suggestedTemplateKind: input.suggestedTemplateKind ?? file.meta.suggestedTemplateKind,
+      suggestedTargetUrl: input.suggestedTargetUrl ?? file.meta.suggestedTargetUrl,
       updatedAt: Date.now()
     }
     let acceptanceDoc: Record<string, unknown> | undefined = undefined
@@ -962,21 +972,27 @@ ipcMain.handle(
       case 'pause':
         state.status = 'paused'
         await saveBenchmark(benchmarkId, { status: 'paused' })
+        benchmarkRunnerManager.signal(benchmarkId, 'pause')
         break
       case 'resume':
         state.status = 'running'
         await saveBenchmark(benchmarkId, { status: 'running' })
+        benchmarkRunnerManager.signal(benchmarkId, 'resume')
         break
       case 'stop':
         state.status = 'stopped'
         state.stopReason = 'user'
         await saveBenchmark(benchmarkId, { status: 'stopped', stopReason: 'user' })
+        benchmarkRunnerManager.signal(benchmarkId, 'stop')
         break
       case 'unfreeze':
         state.frozen = false
         state.frozenReason = undefined
         state.status = 'paused'
         await saveBenchmark(benchmarkId, { status: 'paused' })
+        // Frozen runners have already exited (exit code 2); the user must
+        // re-launch. `signal('unfreeze')` is a no-op when no child is alive.
+        benchmarkRunnerManager.signal(benchmarkId, 'unfreeze')
         break
       default:
         return { ok: false, error: `Unknown action: ${action}` }
@@ -1147,52 +1163,65 @@ ipcMain.handle(
   async (_event, { benchmarkId }: { benchmarkId: string }) => {
     const b = loadBenchmark(benchmarkId)
     if (!b) return { ok: false, error: 'Benchmark not found' }
-    // Arm the run (status → running) before spawning so the runner sees a live tile.
+    if (benchmarkRunnerManager.has(benchmarkId)) {
+      return { ok: false, error: 'Runner is already active for this benchmark' }
+    }
+
+    // Arm the run (status → running) before forking so any early reads see
+    // consistent state.
     const state = loadRuntimeState(b.meta)
     state.status = 'running'
     state.startedAt = state.startedAt ?? Date.now()
     saveRuntimeState(b.meta, state)
     await saveBenchmark(benchmarkId, { status: 'running' })
 
-    // Prefer the app's shipped runner script (works in dev AND packaged build).
-    // Fall back to <worktree>/scripts/benchmark-runner.mjs if the AgentCanvas
-    // checkout happens to be the same repo.
-    const shippedRunner = join(app.getAppPath(), 'scripts', 'benchmark-runner.mjs')
-    const fallbackRunner = join(b.meta.worktreePath, 'scripts', 'benchmark-runner.mjs')
-    const runnerPath = existsSync(shippedRunner) ? shippedRunner : fallbackRunner
-    const command = `node ${quoteShell(runnerPath)} --benchmark-id ${benchmarkId}\n`
+    let launchInfo: { pid: number; runnerPath: string }
+    try {
+      launchInfo = benchmarkRunnerManager.launch(benchmarkId)
+    } catch (err) {
+      // Roll back the armed status so the tile doesn't get stuck "running".
+      const rollback = loadRuntimeState(b.meta)
+      rollback.status = 'unstarted'
+      saveRuntimeState(b.meta, rollback)
+      await saveBenchmark(benchmarkId, { status: 'unstarted' })
+      return { ok: false, error: (err as Error).message || String(err) }
+    }
 
-    const terminalId = randomUUID()
-    mainWindow?.webContents.send('canvas:terminal-spawn', {
-      terminalId,
+    // Spawn a status-only "runner" tile so the canvas still shows where the
+    // runner is running and the user can watch stderr live. The tile is
+    // driven by the renderer-side BenchmarkRunnerTile, which pulls the
+    // rolling stderr buffer from canvas:runner-stderr events instead of
+    // hosting a PTY.
+    const runnerTileId = randomUUID()
+    mainWindow?.webContents.send('canvas:runner-tile-spawn', {
+      runnerTileId,
+      benchmarkId,
       label: `Runner: ${b.meta.label}`,
-      cwd: b.meta.worktreePath,
-      command,
-      linkedTerminalId: undefined,
+      worktreePath: b.meta.worktreePath,
+      pid: launchInfo.pid,
       width: 720,
-      height: 420,
-      metadata: { benchmarkId, role: 'benchmark-runner' }
+      height: 420
     })
 
-    // Link benchmark → runner-terminal via executing-in edge.
+    // Link benchmark → runner-tile via executing-in edge.
     const edges = loadEdges()
     const benchTermEdge: PersistedEdge = {
       id: `e-${randomUUID()}`,
       source: benchmarkId,
-      target: terminalId,
+      target: runnerTileId,
       kind: 'executing-in'
     }
     edges.edges.push(benchTermEdge)
     saveEdges(edges)
 
     // Defer the edge broadcast slightly so the renderer has time to mount the
-    // spawned terminal tile before ReactFlow tries to resolve handles.
+    // spawned runner tile before ReactFlow tries to resolve handles.
     setTimeout(() => {
       mainWindow?.webContents.send('canvas:task-link', benchTermEdge)
     }, 700)
 
     mainWindow?.webContents.send('canvas:benchmark-state-change', { benchmarkId })
-    return { ok: true, terminalId, command }
+    return { ok: true, terminalId: runnerTileId, command: `fork ${launchInfo.runnerPath}` }
   }
 )
 
@@ -2718,6 +2747,21 @@ canvasApi.on(
   }
 )
 
+function composeRationale(base: string, stderrTail: string): string {
+  const trimmedBase = base.trim()
+  const trimmedStderr = stderrTail.trim()
+  if (!trimmedStderr) return trimmedBase
+  // Take the last ~8 non-empty lines so brief.md stays readable.
+  const tail = trimmedStderr
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(-8)
+    .join(' · ')
+  if (!trimmedBase) return `stderr: ${tail}`
+  return `${trimmedBase} — stderr: ${tail}`
+}
+
 canvasApi.on(
   'benchmark-append-result',
   (
@@ -2765,6 +2809,12 @@ canvasApi.on(
     const now = Date.now()
     const nextIter = state.iterationN + 1
 
+    // Tack on the runner's stderr tail for this iteration so the brief can
+    // show WHY an iteration was rejected or scored poorly. The ring buffer
+    // is cleared here so the next iteration starts with a fresh tail.
+    const stderrTail = benchmarkRunnerManager.takeIterationStderr(info.benchmarkId)
+    const combinedRationale = composeRationale(info.rationale ?? '', stderrTail)
+
     const row: ResultsRow = {
       iter: nextIter,
       tsMs: now,
@@ -2776,7 +2826,7 @@ canvasApi.on(
       runtimeMs: info.runtimeMs,
       heldOutScore: info.heldOutScore ?? null,
       commitSha: info.commitSha ?? null,
-      rationale: sanitizeForBrief(info.rationale ?? ''),
+      rationale: sanitizeForBrief(combinedRationale),
       rejectionReason: cmp.accepted && !heldOutFlag ? '' : heldOutFlag ? 'held-out regressed' : cmp.reason
     }
     appendResult(b.meta, row)
@@ -3938,6 +3988,9 @@ app.whenReady().then(async () => {
 
 app.on('window-all-closed', () => {
   globalShortcut.unregisterAll()
+  // Kill benchmark runner children BEFORE terminalManager so they get a
+  // chance to save state cleanly (SIGTERM with a short grace, then SIGKILL).
+  void benchmarkRunnerManager.killAll()
   terminalManager.destroyAll()
   browserManager.destroyAll()
   cdpProxy.destroyAll()
@@ -3945,4 +3998,17 @@ app.on('window-all-closed', () => {
   teamWatcher.stop()
   claudeUsageService.stop()
   if (process.platform !== 'darwin') app.quit()
+})
+
+// Forward runner stderr and exit events to the renderer so the runner-status
+// tile can render live output.
+benchmarkRunnerManager.on('stderr', (benchmarkId, chunk) => {
+  mainWindow?.webContents.send('canvas:runner-stderr', { benchmarkId, chunk })
+})
+benchmarkRunnerManager.on('stdout', (benchmarkId, chunk) => {
+  mainWindow?.webContents.send('canvas:runner-stdout', { benchmarkId, chunk })
+})
+benchmarkRunnerManager.on('exit', (benchmarkId, code) => {
+  mainWindow?.webContents.send('canvas:runner-exit', { benchmarkId, code })
+  mainWindow?.webContents.send('canvas:benchmark-state-change', { benchmarkId })
 })

@@ -25,6 +25,7 @@ import { NotesTile } from './NotesTile'
 import { PlanTile } from './PlanTile'
 import { TaskTile } from './TaskTile'
 import { BenchmarkTile } from './BenchmarkTile'
+import { BenchmarkRunnerTile } from './BenchmarkRunnerTile'
 import { TaskSuggestModal } from './TaskSuggestModal'
 import { DiffViewerTile } from './DiffViewerTile'
 import { DevToolsTile } from './DevToolsTile'
@@ -73,6 +74,7 @@ const nodeTypes: NodeTypes = {
   plan: PlanTile as unknown as NodeTypes['plan'],
   task: TaskTile as unknown as NodeTypes['task'],
   benchmark: BenchmarkTile as unknown as NodeTypes['benchmark'],
+  benchmarkRunner: BenchmarkRunnerTile as unknown as NodeTypes['benchmarkRunner'],
   diffViewer: DiffViewerTile as unknown as NodeTypes['diffViewer'],
   devTools: DevToolsTile as unknown as NodeTypes['devTools'],
   draw: DrawTile as unknown as NodeTypes['draw'],
@@ -1444,6 +1446,14 @@ export default function Canvas() {
   useEffect(() => {
     const unsub = window.terminal.onTerminalSpawn((info) => {
       useCanvasStore.getState().addTerminalForTerminal(info)
+    })
+    return unsub
+  }, [])
+
+  // ── Spawn a runner-status tile for a live benchmark runner child process ──
+  useEffect(() => {
+    const unsub = window.benchmark.onRunnerTileSpawn((info) => {
+      useCanvasStore.getState().addRunnerTile(info)
     })
     return unsub
   }, [])

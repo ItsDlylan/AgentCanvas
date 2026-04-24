@@ -1,13 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { TaskClassification, TaskTimeline } from '../../preload/index'
+import type { HarnessTemplateKind, TaskClassification, TaskTimeline } from '../../preload/index'
 import { useCanvasStore } from '@/store/canvas-store'
 
-type TemplateKind =
-  | 'web-page-load'
-  | 'api-latency'
-  | 'bundle-size'
-  | 'test-suite-time'
-  | 'pure-function'
+type TemplateKind = HarnessTemplateKind
 
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
@@ -164,7 +159,15 @@ export function TaskSuggestModal(props: TaskSuggestModalProps): JSX.Element {
           label: proposal.label,
           intent: proposal.intent,
           acceptanceMarkdown: proposal.acceptanceCriteria,
-          classification: proposal.kind === 'benchmark' ? 'BENCHMARK' : proposal.classification
+          classification: proposal.kind === 'benchmark' ? 'BENCHMARK' : proposal.classification,
+          // Carry the suggester's benchmark shape forward so DesignHarnessModal
+          // can open pre-filled instead of forcing the user to re-pick.
+          suggestedTemplateKind:
+            proposal.kind === 'benchmark' ? proposal.templateKind : undefined,
+          suggestedTargetUrl:
+            proposal.kind === 'benchmark' && proposal.templateKind === 'web-page-load'
+              ? proposal.targetUrl
+              : undefined
         })
         if (!res.ok) {
           setError(res.error || 'Could not apply draft.')
@@ -188,7 +191,13 @@ export function TaskSuggestModal(props: TaskSuggestModalProps): JSX.Element {
         acceptanceCriteria: proposal.acceptanceCriteria,
         classification: proposal.kind === 'benchmark' ? 'BENCHMARK' : proposal.classification,
         timelinePressure: proposal.kind === 'generic' ? proposal.timelinePressure : undefined,
-        workspaceId
+        workspaceId,
+        suggestedTemplateKind:
+          proposal.kind === 'benchmark' ? proposal.templateKind : undefined,
+        suggestedTargetUrl:
+          proposal.kind === 'benchmark' && proposal.templateKind === 'web-page-load'
+            ? proposal.targetUrl
+            : undefined
       })
       if (!res.ok || !res.taskId) {
         setError(res.error || 'Could not create task.')

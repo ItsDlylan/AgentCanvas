@@ -1,13 +1,9 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { app } from 'electron'
+import type { HarnessTemplateKind } from '../preload/index'
 
-export type BenchmarkTemplateKind =
-  | 'web-page-load'
-  | 'api-latency'
-  | 'bundle-size'
-  | 'test-suite-time'
-  | 'pure-function'
+export type BenchmarkTemplateKind = HarnessTemplateKind
 
 export interface HarnessDesignInput {
   taskLabel: string

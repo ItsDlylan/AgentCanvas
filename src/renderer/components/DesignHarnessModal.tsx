@@ -1,18 +1,7 @@
 import { useCallback, useState } from 'react'
+import type { HarnessTemplateKind } from '../../preload/index'
 
-/**
- * Modal for Stage 2 of the benchmark pipeline: spawning a harness-design
- * agent in an isolated worktree. The agent's only job is to draft the
- * evaluator + bench + corpus + golden files and commit them. When the
- * agent finishes, the human clicks "Harness as Benchmark" to start the
- * optimization loop in the same worktree.
- */
-export type HarnessTemplateKind =
-  | 'web-page-load'
-  | 'api-latency'
-  | 'bundle-size'
-  | 'test-suite-time'
-  | 'pure-function'
+export type { HarnessTemplateKind }
 
 const TEMPLATE_OPTIONS: { value: HarnessTemplateKind | ''; label: string }[] = [
   { value: '', label: '(none — freeform)' },

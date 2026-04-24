@@ -579,6 +579,8 @@ export function TaskTile({ data, selected }: NodeProps): JSX.Element {
           taskId={taskId}
           taskLabel={meta.label}
           inheritedAcceptance={acceptanceMarkdown}
+          defaultTemplateKind={meta.suggestedTemplateKind}
+          defaultTargetUrl={meta.suggestedTargetUrl}
           onClose={() => setDesignOpen(false)}
           onSpawned={() => {
             // Task metadata (harnessWorktreePath) updated server-side; the

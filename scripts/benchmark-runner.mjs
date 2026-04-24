@@ -73,6 +73,32 @@ if (!existsSync(evalAbs)) {
 const TEMP_CYCLE = [0.3, 0.7, 1.0]
 const wallStart = Date.now()
 
+// ── IPC control channel (optional) ──
+// When launched by BenchmarkRunnerManager via child_process.fork the parent
+// owns our lifecycle and sends {type: 'pause' | 'resume' | 'stop'} messages.
+// When launched standalone (`node scripts/benchmark-runner.mjs ...`) there is
+// no parent channel; control falls back to polling state.json. Both paths
+// coexist so --dry-run and ad-hoc CLI use keep working.
+const ipcControl = { signal: null /* 'pause' | 'resume' | 'stop' | null */ }
+if (typeof process.send === 'function') {
+  process.on('message', (msg) => {
+    if (!msg || typeof msg !== 'object') return
+    if (msg.type === 'pause' || msg.type === 'resume' || msg.type === 'stop') {
+      ipcControl.signal = msg.type
+      console.log(`[runner] IPC: ${msg.type}`)
+    }
+  })
+  // Ack so the parent knows the IPC handler is installed.
+  try { process.send({ type: 'ready', pid: process.pid }) } catch { /* noop */ }
+}
+
+// Graceful shutdown on SIGTERM — let any in-flight iteration finish via the
+// top-of-loop check, but don't hang forever if the process is mid-evaluator.
+process.on('SIGTERM', () => {
+  console.log('[runner] SIGTERM received — will exit at next iteration boundary')
+  ipcControl.signal = 'stop'
+})
+
 // ── Baseline re-measurement ──
 // Before the first iteration, run the evaluator against the current HEAD (no
 // agent work) to establish the real baseline. This overrides whatever the user
@@ -131,17 +157,20 @@ const wallStart = Date.now()
 
 while (true) {
   const state = readJson(statePath, { status: 'running', tempCycleIdx: 0 })
-  if (state.status === 'stopped' || state.status === 'done') {
-    console.log(`[runner] status=${state.status} — exiting`)
+  // IPC signal takes precedence when we have a parent; state.json is the
+  // fallback (also the source of truth for frozen/done which the parent owns).
+  if (ipcControl.signal === 'stop' || state.status === 'stopped' || state.status === 'done') {
+    console.log(`[runner] status=${ipcControl.signal === 'stop' ? 'stopped (ipc)' : state.status} — exiting`)
     process.exit(0)
   }
   if (state.frozen || state.status === 'frozen') {
     console.log(`[runner] FROZEN: ${state.frozenReason ?? 'anomaly'} — exiting. Re-launch after human sign-off.`)
     process.exit(2)
   }
-  if (state.status === 'paused') {
-    console.log('[runner] paused — sleeping 10s then rechecking')
-    await sleep(10_000)
+  if (ipcControl.signal === 'pause' || state.status === 'paused') {
+    // With IPC we can wake the moment a resume message arrives; without it,
+    // the 10s poll stays as the fallback signal.
+    await waitForResume()
     continue
   }
 
@@ -379,6 +408,24 @@ function quoteForShell(s) {
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+// Block until either an IPC resume/stop message arrives or the state.json
+// `status` flips off `paused`. Polls every 500ms when parented (fast wake on
+// ipcControl flip) and every 10s otherwise (matches the legacy cadence).
+async function waitForResume() {
+  const parented = typeof process.send === 'function'
+  const pollMs = parented ? 500 : 10_000
+  while (true) {
+    if (ipcControl.signal === 'resume') {
+      ipcControl.signal = null
+      return
+    }
+    if (ipcControl.signal === 'stop') return
+    const s = readJson(statePath, { status: 'running' })
+    if (s.status !== 'paused') return
+    await sleep(pollMs)
+  }
 }
 
 function lastCommitSubject(cwd) {
