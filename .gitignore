@@ -4,5 +4,9 @@ dist/
 .DS_Store
 *.log
 
+# Python bytecode caches (e.g. src/api/__pycache__/ from evaluator scripts)
+__pycache__/
+*.pyc
+
 # VAD/ONNX runtime assets (copied from node_modules at install time)
 src/renderer/public/vad/
