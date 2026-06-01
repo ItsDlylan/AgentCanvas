@@ -12,8 +12,13 @@
 
 **AgentCanvas** is a desktop app that turns your screen into an infinite, spatial workspace for working with AI coding agents. Spawn terminal tiles, live browser tiles, notes, PDFs, and task cards on a single zoomable canvas — and let your agents orchestrate *each other* across them.
 
-> _Screenshots and demo coming soon._
-<!-- ![AgentCanvas screenshot](docs/screenshot.png) -->
+<div align="center">
+
+<video src="https://github.com/ItsDlylan/AgentCanvas/releases/download/landing-assets/worktree-isolation.mp4" controls muted loop width="100%"></video>
+
+_Two Claude Code agents, two git worktrees, one repo — each rendering its own change, live._
+
+</div>
 
 ## Why AgentCanvas
 
