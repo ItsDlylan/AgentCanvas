@@ -14,7 +14,7 @@
 
 <div align="center">
 
-https://github.com/user-attachments/assets/3ab1f9c8-7db7-4675-8105-18fd8fc60f1e
+https://github.com/user-attachments/assets/d9448dd8-c02b-45ff-9716-9555c4029016
 
 _Two Claude Code agents, two git worktrees, one repo — each rendering its own change, live._
 
