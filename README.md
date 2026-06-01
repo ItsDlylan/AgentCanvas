@@ -14,9 +14,9 @@
 
 <div align="center">
 
-<video src="https://github.com/ItsDlylan/AgentCanvas/releases/download/landing-assets/worktree-isolation.mp4" controls muted loop width="100%"></video>
+[![Urðr — two Claude Code agents working in parallel git worktrees](media/worktree-isolation-poster.jpg)](https://github.com/ItsDlylan/AgentCanvas/releases/download/landing-assets/worktree-isolation.mp4)
 
-_Two Claude Code agents, two git worktrees, one repo — each rendering its own change, live._
+▶ _Two Claude Code agents, two git worktrees, one repo — each rendering its own change. **Click to watch.**_
 
 </div>
 
